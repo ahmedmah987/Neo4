@@ -600,6 +600,11 @@ class Dynamics:
         passed, n = self._rate(self.cell[color], "passed")
         return n >= MIN_SUPPORT and passed >= PASS_RATE
 
+    def blocks(self, color: int) -> bool:
+        """The avatar has been stopped by this colour nearly every time it tried."""
+        blocked, n = self._rate(self.cell[color], "blocked")
+        return n >= MIN_SUPPORT and blocked >= BLOCK_RATE
+
     def passable(self, color: int) -> bool:
         """The avatar crossed this colour reliably and never died entering it."""
         visits = self.hazard[color] + sum(self.cell[color].values())

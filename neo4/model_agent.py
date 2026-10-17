@@ -290,13 +290,21 @@ class ModelAgent(GraphAgent):
                 near = [o for o in self.cur_objs() if o.sig in near_sigs]
                 if near and not any(self._touching(me, o) for o in near):
                     target = self._halo(near, me)
+            tests = []
             if target.any():
-                is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
-            else:
-                goals = self.dyn.goal_colors()
-                if not goals:
-                    return None
-                is_goal = lambda cols, coords: bool(cols & goals)
+                tests.append(lambda cols, coords: any(target[y, x] for y, x in coords))
+                # When no route reaches the goal sprite, aim for whatever encloses it:
+                # ls20's exit pattern sits inside a box that admits the avatar only in
+                # the right state, and bumping the box is how the state gets tested.
+                box = self._containers(goal_sigs)
+                if box.any():
+                    tests.append(lambda cols, coords: any(box[y, x] for y, x in coords))
+            # Colour goals last, leaving out colours that are walls elsewhere.
+            goals = {c for c in self.dyn.goal_colors() if not self.dyn.blocks(c)}
+            if goals:
+                tests.append(lambda cols, coords: bool(cols & goals))
+            if not tests:
+                return None
         else:
             if self.explore_plans_this_level >= MAX_EXPLORE_PLANS_PER_LEVEL:
                 return None
@@ -306,12 +314,16 @@ class ModelAgent(GraphAgent):
                     target[o.pixels[:, 0], o.pixels[:, 1]] = True
             if not target.any():
                 return None
-            is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
-        found = plan_path(
-            self.cur_grid, me, dirs, self.dyn.passable, is_goal,
-            avoid=self.dyn.hazard_zone(self.cur_objs(), self.cur_grid.shape),
-            forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
-        )
+            tests = [lambda cols, coords: any(target[y, x] for y, x in coords)]
+        found = None
+        for is_goal in tests:
+            found = plan_path(
+                self.cur_grid, me, dirs, self.dyn.passable, is_goal,
+                avoid=self.dyn.hazard_zone(self.cur_objs(), self.cur_grid.shape),
+                forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
+            )
+            if found is not None:
+                break
         if found is None:
             # No route through cells known to be passable yet; try again after a
             # cooldown, and do not spend the per-level allowance on the search.
@@ -363,6 +375,21 @@ class ModelAgent(GraphAgent):
         self.switch_from = (state, hit)
         self.stats["switch_plans"] += 1
         return self._plan_step(node)
+
+    def _containers(self, goal_sigs: set[tuple]) -> np.ndarray:
+        """Pixels of the sprites whose bounding box encloses a goal sprite."""
+        assert self.cur_grid is not None
+        objs = self.cur_objs()
+        box = np.zeros(self.cur_grid.shape, dtype=bool)
+        for g in objs:
+            if g.sig not in goal_sigs:
+                continue
+            for o in objs:
+                if o is g or o.scenery or o.sig in goal_sigs:
+                    continue
+                if o.x1 <= g.x1 and o.y1 <= g.y1 and o.x2 >= g.x2 and o.y2 >= g.y2:
+                    box[o.pixels[:, 0], o.pixels[:, 1]] = True
+        return box
 
     @staticmethod
     def _touching(me: Obj, o: Obj) -> bool:

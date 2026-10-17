@@ -94,13 +94,18 @@ class ModelAgent(GraphAgent):
         # towards frames where M is nearest to T.
         self.level_start_objs: list[Obj] | None = None
         self.relations: list[tuple[tuple, tuple]] = []
+        # Which click-target kinds have closed the gap of the goal relation: the sum of
+        # the gap changes their clicks produced, and how many were tried.
+        self.kind_gain: dict[tuple, float] = {}
+        self.kind_tries: dict[tuple, int] = {}
+        self.last_h: float | None = None
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
              "switch_plans": 0, "locked_goals": 0, "budget_resets": 0, "refill_plans": 0,
-             "descents": 0, "near_clicks": 0}
+             "descents": 0, "near_clicks": 0, "gain_clicks": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -264,6 +269,13 @@ class ModelAgent(GraphAgent):
             )
             if outcome == LEVEL_UP:
                 self._learn_relations(self.level_start_objs, self.last_objs)
+            elif outcome == OK and self.relations and data is not None and after is not None:
+                # Credit the clicked kind with the change in the goal gap it produced.
+                h_now = self._heuristic(after)
+                target = at(self.last_objs, data["x"], data["y"])
+                if h_now is not None and self.last_h is not None and target is not None:
+                    self.kind_gain[target.sig] = self.kind_gain.get(target.sig, 0.0) + (h_now - self.last_h)
+                    self.kind_tries[target.sig] = self.kind_tries.get(target.sig, 0) + 1
             self.last_cand = None
             if outcome == GAME_OVER:
                 if self.dyn.last_death_budget:
@@ -303,6 +315,7 @@ class ModelAgent(GraphAgent):
             node.summary = self._summary(objs)
         if node.h is None and self.relations:
             node.h = self._heuristic(objs)
+        self.last_h = node.h
         idx = self._replay_step(node)
         if idx is not None:
             return idx
@@ -690,6 +703,29 @@ class ModelAgent(GraphAgent):
             return self.rng.choice(winners)
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
         pool = unknown or local
+        if self.relations and self.kind_tries:
+            # Clicks on kinds that have closed the goal gap before go first; kinds that
+            # have been tried enough and never closed it go last.
+            objs = self.cur_objs()
+
+            def mean_gain(i: int) -> float | None:
+                c = node.cands[i]
+                if c.data is None:
+                    return None
+                t = at(objs, c.data["x"], c.data["y"])
+                if t is None or t.sig not in self.kind_tries:
+                    return None
+                return self.kind_gain[t.sig] / self.kind_tries[t.sig]
+
+            gains = {i: mean_gain(i) for i in pool}
+            helpful = [i for i, g in gains.items() if g is not None and g < 0]
+            if helpful:
+                best = min(gains[i] for i in helpful)
+                self.stats["gain_clicks"] += 1
+                return self.rng.choice([i for i in helpful if gains[i] <= best])
+            fresh = [i for i, g in gains.items() if g is None or self.kind_tries.get(0, 0) == 0 and g == 0]
+            if fresh and len(fresh) < len(pool):
+                pool = fresh
         if self.relations and self.near_clicks:
             near = self._near_moving(node, pool, self.cur_objs())
             if near:
@@ -697,9 +733,9 @@ class ModelAgent(GraphAgent):
                 return self.rng.choice(near)
         if unknown:
             self.stats["ran_unknown"] += 1
-            return self.rng.choice(unknown)
+            return self.rng.choice(pool if set(pool) <= set(unknown) else unknown)
         self.stats["ran_predicted"] += 1
-        return self.rng.choice(local)
+        return self.rng.choice(pool)
 
 
 class ModelNoPlanAgent(ModelAgent):

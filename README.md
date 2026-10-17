@@ -19,8 +19,21 @@ solve all of them; frontier language models used directly solve almost none.
 | 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | done — no gain, kept as `model-cur` |
 | 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | done |
 | 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | done — faster first levels, no extra levels; kept as `model-explore` |
-| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next (not started) |
+| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | proposed next step (not started) |
 | 9 | (optional) a local language model that proposes hypotheses | — |
+
+**Where this stands.** The default `model` agent beats the exploration baseline at every
+budget tried, and the gap widens with the budget (levels per run, all 25 public games):
+
+| step budget | graph exploration | model (this repo) | gain |
+|---|---|---|---|
+| 4,000 (5 seeds) | 0.60 | 0.74 | +24 % |
+| 12,000 (3 seeds) | 0.69 | 0.89 | +29 % |
+| 24,000 (2 seeds) | 0.78 | 1.18 | **+51 %** |
+
+At 24,000 steps the sum of per-game median levels is 29.5 against 19.5; the model is
+ahead on `lp85` (5 vs 2), `dc22` (3 vs 1), `tu93` (3 vs 1), `vc33` (3.5 vs 2), `ka59`,
+`ls20`, `r11l`, and behind only on `lf52` (1.5 vs 2). Full tables: `results/summary.md`.
 
 ## Setup and usage
 
@@ -282,6 +295,26 @@ Two other things the diagnostics settled: `tn36` and `cn04` always lose at exact
 run but on only 20 % of its uses, with nothing in the avatar's surroundings separating
 the fatal uses from the safe ones; an action-level danger rule (an action that loses the
 game on half its uses) is in place but does not fire there.
+
+## Conclusion and next step
+
+What moved the needle was Phase 2: rules induced from the agent's own transitions —
+which object the keyboard moves and how far, which colours block it, which clicks never
+do anything, which actions or cells lose the game — used to prune and order the
+exploration. Everything after that (planning towards past goals, state abstraction,
+curiosity, instance-level rules, object-targeted exploration) was measured and found
+neutral or negative at 4,000 steps, and is kept only as an opt-in variant. The gain from
+the rules grows with the budget: +24 % levels per run at 4,000 steps, +51 % at 24,000.
+
+The remaining losses are of one kind. What completes a level, and what loses the game,
+is relational — *which* instance of an object, *where*, in *what* state, *pushed* against
+what — and a model over colours and signatures cannot express it. The proposed next step
+(Phase 8b) is to induce preconditions over object relations at the level-completing
+transitions, which `neo4 explain` already exposes.
+
+The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
+the agent runs at about 60–250 engine steps per second on one CPU core depending on the
+game, with no GPU and no network.
 
 ## Attribution and licence
 

@@ -220,9 +220,13 @@ fewer levels there too (2 → 1), and `su15` dropped (5 → 3 over all runs), wh
 that did nothing three times may be exactly the cell that matters once the state has
 changed. The default agent now keeps instance-level *danger* rules only.
 
-## Attribution
+## Attribution and licence
 
 Phase 1 is an independent reimplementation of *Graph-Based Exploration for ARC-AGI-3
 Interactive Reasoning Tasks* (AAAI 2026 workshop) and its open-source code
 [`arc-agi-3-just-explore`](https://github.com/dolphin-in-a-coma/arc-agi-3-just-explore) (MIT).
 Game environments are provided by the ARC Prize Foundation through the `arc-agi` toolkit.
+
+This repository is public and MIT-licensed (see `LICENSE`). ARC Prize requires every
+eligible entry to be open source, and nothing here is secret: API keys, downloaded game
+files and raw run logs are git-ignored.

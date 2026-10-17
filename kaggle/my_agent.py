@@ -1,7 +1,7 @@
 """Neo4 — ARC-AGI-3 agent for the ARC Prize 2026 Kaggle track (generated file).
 
 Built by scripts/bundle.py from https://github.com/ahmedmah987/Neo4 at commit
-d1442b4 on 2026-10-17. Do not edit by hand: edit the package and rebuild.
+30eff94 on 2026-10-17. Do not edit by hand: edit the package and rebuild.
 
 Drop this file into agent/my_agent.py of the official ARC-AGI-3-Kaggle-Starter
 kit; `make play-local` and `make submit` work unchanged.

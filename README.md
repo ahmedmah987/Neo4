@@ -208,6 +208,18 @@ status bar in `ls20` removes the inconsistent transitions but explodes the state
 (140 → 2,400 nodes), because the bar is a step counter — masking it is the right trade;
 `g50t` is inconsistent with or without the mask, i.e. it has genuine hidden state.
 
+## Results — Phase 5 (instance-level click rules): mixed, kept in part
+
+Lost games in the click games are spread over the *instances* of one signature (`r11l`:
+78 of 704 clicks on colour-15 pixels lose, i.e. some cells kill and most do not), so
+signature-level rules never fire. Keeping click outcomes per object instance (signature +
+position) as well, and skipping instance-level no-ops and dangers, gave 18 median levels /
+91 over all runs (`model-inst`) against 20 / 94: fewer lost games on `r11l` (112 → 79) but
+fewer levels there too (2 → 1), and `su15` dropped (5 → 3 over all runs), while `ft09`
+(4 → 6), `lf52` and `ka59` gained. The instance-level *no-op* rule is the culprit: a cell
+that did nothing three times may be exactly the cell that matters once the state has
+changed. The default agent now keeps instance-level *danger* rules only.
+
 ## Attribution
 
 Phase 1 is an independent reimplementation of *Graph-Based Exploration for ARC-AGI-3

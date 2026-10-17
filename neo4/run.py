@@ -23,13 +23,14 @@ from typing import Any
 from arcengine import GameState
 
 from .graph_agent import AGENTS as _GRAPH_AGENTS
-from .model_agent import ModelAbstractAgent, ModelAgent, ModelNoPlanAgent
+from .model_agent import ModelAbstractAgent, ModelAgent, ModelNoCuriosityAgent, ModelNoPlanAgent
 
 AGENTS = {
     **_GRAPH_AGENTS,
     ModelAgent.name: ModelAgent,
     ModelNoPlanAgent.name: ModelNoPlanAgent,
     ModelAbstractAgent.name: ModelAbstractAgent,
+    ModelNoCuriosityAgent.name: ModelNoCuriosityAgent,
 }
 
 ROOT = Path(__file__).resolve().parent.parent

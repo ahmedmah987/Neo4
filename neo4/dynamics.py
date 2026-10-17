@@ -288,6 +288,9 @@ class Dynamics:
             if target is None:
                 return Prediction("unknown")
             inst = (target.sig, target.x1, target.y1)
+            # Danger generalises per instance (this cell kills) and per kind; a no-op
+            # rule only per kind: a cell that did nothing so far may matter later, and
+            # skipping it per instance cost levels on r11l and su15.
             for deaths, counter, where in (
                 (self.click_death_at[inst], self.click_at[inst], f"{target.label()} at {target.x1},{target.y1}"),
                 (self.click_death[target.sig], self.click[target.sig], target.label()),
@@ -295,10 +298,10 @@ class Dynamics:
                 n = sum(counter.values())
                 if deaths >= DEATH_SUPPORT and deaths / n >= DANGER_RATE:
                     return Prediction("danger", n, f"clicking {where} lost the game {deaths}/{n}x")
-                rate, n = self._rate(counter, "none")
-                if n >= MIN_SUPPORT and rate >= NOOP_RATE:
-                    return Prediction("noop_click", n, f"clicking {where} changed nothing {n}x")
-            return Prediction("unknown", sum(self.click[target.sig].values()))
+            rate, n = self._rate(self.click[target.sig], "none")
+            if n >= MIN_SUPPORT and rate >= NOOP_RATE:
+                return Prediction("noop_click", n, f"clicking {target.label()} changed nothing {n}x")
+            return Prediction("unknown", n)
 
         avatar = self.avatar()
         direction = self.direction(action.value)

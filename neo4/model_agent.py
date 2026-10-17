@@ -240,3 +240,12 @@ class ModelAbstractAgent(ModelAgent):
 
     def __init__(self, seed: int = 0) -> None:
         super().__init__(seed, skip=True, plan=True, abstract=True)
+
+
+class ModelNoCuriosityAgent(ModelAgent):
+    """Ablation: the default model agent without the curiosity-directed frontier."""
+
+    name = "model-nocur"
+
+    def __init__(self, seed: int = 0) -> None:
+        super().__init__(seed, curious=False)

@@ -89,7 +89,8 @@ def test_click_rules_distinguish_instances_of_one_signature():
     for _ in range(6):
         dyn.observe(GameAction.ACTION6, {"x": 59, "y": 51}, objs, g, extract(g), OK)
     assert dyn.predict(GameAction.ACTION6, {"x": 52, "y": 52}, objs, g).verdict == "danger"
-    assert dyn.predict(GameAction.ACTION6, {"x": 60, "y": 52}, objs, g).verdict == "noop_click"
+    # The twin is not dangerous, and a no-op is only ever concluded per kind, not per cell.
+    assert dyn.predict(GameAction.ACTION6, {"x": 60, "y": 52}, objs, g).verdict == "unknown"
 
 
 def objs_sig(objs, color):

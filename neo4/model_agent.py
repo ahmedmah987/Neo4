@@ -140,7 +140,7 @@ class ModelAgent(GraphAgent):
             after = extract(grid, self.mask) if grid is not None and outcome != LEVEL_UP else None
             action, data = self.last_cand
             avatar = self.dyn.avatar()
-            me = find(self.last_objs, avatar) if avatar is not None else None
+            me = self.dyn.body(find(self.last_objs, avatar), self.last_objs) if avatar is not None else None
             self.dyn.observe(action, data, self.last_objs, self.last_grid, after, outcome)
             self.last_cand = None
             if outcome == GAME_OVER:
@@ -176,7 +176,7 @@ class ModelAgent(GraphAgent):
             return super()._choose(node)
         objs = self.cur_objs()
         avatar = self.dyn.avatar()
-        me = find(objs, avatar) if avatar is not None else None
+        me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
         if self.planning:
             idx = self._follow_plan(node, me)
             if idx is None and not self.plan:
@@ -352,7 +352,7 @@ class ModelAgent(GraphAgent):
         goal_sigs = self.dyn.goal_sigs()
         goal_colors = self.dyn.goal_colors()
         avatar = self.dyn.avatar()
-        me = find(objs, avatar) if avatar is not None else None
+        me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
         out = []
         for i in local:
             c = node.cands[i]

@@ -3,7 +3,7 @@ from arcengine import GameAction
 
 from neo4 import frame as fp
 from neo4.dynamics import GAME_OVER, OK, Dynamics
-from neo4.objects import extract
+from neo4.objects import extract, find
 
 
 def world(ax: int, ay: int = 20) -> np.ndarray:
@@ -221,3 +221,36 @@ def test_contact_loss_names_the_kind_that_kills():
     assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "move"
     zone = dyn.hazard_zone(extract(grid), grid.shape)
     assert zone is not None and zone[20, 28] and not zone[20, 4]
+
+
+def test_body_includes_sprites_that_move_in_lockstep_with_the_avatar():
+    """A bar riding on top of the avatar is part of its body: what the bar would hit
+    stops the avatar, and the body's footprint is what the planner moves."""
+    dyn = Dynamics()
+
+    def scene(ax):
+        g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+        g[20:22, ax : ax + 2] = 9  # avatar 2x2
+        g[19, ax : ax + 2] = 6  # a bar riding just above it
+        g[19, 38:40] = 3  # a low wall: only the bar's row
+        g[50:52, 50:52] = 6  # an unrelated twin colour that never moves
+        return g
+
+    x = 4
+    for _ in range(8):
+        before, after = scene(x), scene(x + 2)
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+        x += 2
+    bar = next(o.sig for o in extract(scene(4)) if o.color == 6 and o.w == 2)
+    assert dyn.avatar()[0] == 9 and dyn.companions() == {bar}
+    grid = scene(20)
+    objs = extract(grid)
+    me = dyn.body(find(objs, dyn.avatar()), objs)
+    assert me is not None and (me.x1, me.y1, me.w, me.h) == (20, 19, 2, 3) and len(me.pixels) == 6
+    for _ in range(3):  # the bar hits the low wall: the whole body stops
+        before = scene(36)
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(before), OK)
+    assert dyn.cell[3]["blocked"] == 3
+    grid = scene(36)
+    assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "blocked"
+    assert "moves with it as one body: colour-6 2x1" in "\n".join(dyn.describe())

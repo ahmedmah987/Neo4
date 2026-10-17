@@ -84,6 +84,8 @@ class Dynamics:
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
+        # sig -> {"with": moved by the avatar's vector while touching it, "without": did not}
+        self.companion: dict[tuple, Counter] = defaultdict(Counter)
         self.killer: Counter = Counter()  # sig -> losses with it touching the avatar's place
         self.near_count: Counter = Counter()  # sig -> keyboard steps it ended beside the avatar
         self.contact_deaths = 0  # keyboard losses with a frame to look at, budget losses aside
@@ -210,6 +212,11 @@ class Dynamics:
         me = find(before, avatar)
         if me is None:
             return
+        if d is not None:
+            self._observe_companions(me, before, d)
+        # A sprite made of several colours (dc22's eye inside its body, ls20's bar
+        # over its block) is handled as one body from here on.
+        me = self.body(me, before)
         # Adjacency is recorded for every keyboard action, including ones that do
         # not move the avatar ("interact"): the thing beside the avatar may be what
         # the action acts on.
@@ -258,15 +265,57 @@ class Dynamics:
             for c in suspects or colors:
                 self.cell[c]["blocked"] += 1
 
+    def _observe_companions(self, me: Obj, before, d: Diff) -> None:
+        """Which sprites touching the avatar moved by its vector on this step."""
+        vec = next(((dx, dy) for b, _, dx, dy in d.moved if b.sig == me.sig), None)
+        if vec is None or vec == (0, 0):
+            return
+        with_me = {id(b) for b, _, dx, dy in d.moved if (dx, dy) == vec}
+        for o in before:
+            if o is me or o.scenery or o.sig == me.sig or not self._touching(me, o):
+                continue
+            self.companion[o.sig]["with" if id(o) in with_me else "without"] += 1
+
+    def companions(self) -> set[tuple]:
+        """Sprite kinds that move with the avatar whenever they touch it: its body."""
+        out = set()
+        for sig, c in self.companion.items():
+            n = c["with"] + c["without"]
+            if n >= MIN_SUPPORT and c["with"] / n >= PASS_RATE:
+                out.add(sig)
+        return out
+
+    def body(self, me: Obj | None, objs) -> Obj | None:
+        """The avatar together with the companion sprites touching it, as one object
+        (the avatar's colour and signature, the union of the pixels)."""
+        if me is None:
+            return None
+        comp = self.companions()
+        if not comp:
+            return me
+        parts = [o for o in objs if o.sig in comp and o is not me and self._touching(me, o)]
+        if not parts:
+            return me
+        pixels = np.concatenate([me.pixels] + [o.pixels for o in parts])
+        y1, x1 = pixels.min(axis=0)
+        y2, x2 = pixels.max(axis=0)
+        return Obj(
+            me.color, int(x1), int(y1), int(x2 - x1 + 1), int(y2 - y1 + 1), len(pixels),
+            me.sig, me.esig, pixels,
+        )
+
     def _observe_contact(self, me: Obj, direction, before, after, outcome: str) -> None:
         """Who was touching the avatar's place after the move: on an ordinary step
         the base rate, on a loss the suspects (the frame of a lost game usually
         still shows the scene, with the patrol standing where the avatar went)."""
+        comp = self.companions()
         if outcome == OK:
-            me2 = find(after, me.sig)
+            me2 = self.body(find(after, me.sig), after)
             if me2 is not None:
                 for o in after:
-                    if o is not me2 and not o.scenery and o.sig != me.sig and self._touching(me2, o):
+                    if o.scenery or o.sig == me.sig or o.sig in comp:
+                        continue
+                    if self._touching(me2, o):
                         self.near_count[o.sig] += 1
             return
         if outcome != GAME_OVER:
@@ -277,7 +326,7 @@ class Dynamics:
         x2, y2 = max(me.x2, me.x2 + dx), max(me.y2, me.y2 + dy)
         was_there = {(o.sig, o.x1, o.y1) for o in before}
         for o in after:
-            if o.scenery or o.sig == me.sig or self._crosses(o.color):
+            if o.scenery or o.sig == me.sig or o.sig in comp or self._crosses(o.color):
                 continue  # the floor the avatar uncovered by vanishing is not a killer
             if (o.sig, o.x1, o.y1) in was_there:
                 continue  # it stood there before the move: it did not come for the avatar
@@ -356,12 +405,12 @@ class Dynamics:
                 out.add(o.sig)
         return out
 
-    @staticmethod
-    def _adjacent_sigs(me: Obj, objs) -> set[tuple]:
+    def _adjacent_sigs(self, me: Obj, objs) -> set[tuple]:
         """Signatures of non-scenery objects whose bounding box touches the avatar's."""
         out = set()
+        comp = self.companions()
         for o in objs:
-            if o is me or o.scenery or o.sig == me.sig:
+            if o is me or o.scenery or o.sig == me.sig or o.sig in comp:
                 continue
             if o.x1 <= me.x2 + 1 and o.x2 >= me.x1 - 1 and o.y1 <= me.y2 + 1 and o.y2 >= me.y1 - 1:
                 out.add(o.sig)
@@ -571,7 +620,7 @@ class Dynamics:
         direction = self.direction(action.value)
         if avatar is None or direction is None:
             return Prediction("unknown")
-        me = find(objs, avatar)
+        me = self.body(find(objs, avatar), objs)
         if me is None:
             return Prediction("unknown")
         zone = self.hazard_zone(objs, grid.shape)
@@ -624,6 +673,9 @@ class Dynamics:
             lines.append("no avatar found (nothing moves consistently under the keyboard)")
         else:
             lines.append(f"avatar: colour-{avatar[0]} {avatar[2]}x{avatar[1]} sprite")
+            for sig in sorted(self.companions(), key=repr):
+                c = self.companion[sig]
+                lines.append(f"  moves with it as one body: colour-{sig[0]} {sig[2]}x{sig[1]} ({c['with']}/{c['with'] + c['without']})")
             for aid in sorted({a for a, s in self.move if s == avatar}):
                 c = self.move[(aid, avatar)]
                 d = self.direction(aid)

@@ -69,7 +69,7 @@ def test_erase_paints_over_with_surrounding_colour():
 
 
 def test_particles_are_classed_as_noise_and_states_collapse():
-    model = ModelAgent(seed=1)
+    model = ModelAgent(seed=1, abstract=True)
     steps_model = play(model, Snowfield(seed=1), 600)
     noise = model.dyn.noise()
     assert any(sig[0] == 7 for sig in noise), model.dyn.describe()

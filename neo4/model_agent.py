@@ -44,7 +44,7 @@ class ModelAgent(GraphAgent):
     name = "model"
 
     def __init__(
-        self, seed: int = 0, skip: bool = True, plan: bool = True, abstract: bool = True
+        self, seed: int = 0, skip: bool = True, plan: bool = True, abstract: bool = False
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
@@ -224,3 +224,12 @@ class ModelNoPlanAgent(ModelAgent):
 
     def __init__(self, seed: int = 0) -> None:
         super().__init__(seed, skip=True, plan=False)
+
+
+class ModelAbstractAgent(ModelAgent):
+    """Ablation: the model agent with state abstraction over noise objects turned on."""
+
+    name = "model-abs"
+
+    def __init__(self, seed: int = 0) -> None:
+        super().__init__(seed, skip=True, plan=True, abstract=True)

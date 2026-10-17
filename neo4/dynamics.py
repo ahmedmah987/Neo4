@@ -30,6 +30,7 @@ MIN_SUPPORT = 3  # observations before a rule may be used for a prediction
 BLOCK_RATE = 0.9  # a colour that stopped the avatar at least this often blocks
 PASS_RATE = 0.9  # a colour the avatar crossed at least this often is passable
 DANGER_RATE = 0.5  # share of visits that ended the game
+DEATH_SUPPORT = 2  # lost games on a click target before its clicks count as dangerous
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
 GOAL_RATE = 0.3  # share of a colour's (or click target's) visits that ended a level
@@ -53,6 +54,11 @@ class Dynamics:
         self.hazard: Counter = Counter()
         self.goal_ahead: Counter = Counter()  # colours ahead of the avatar when a level ended
         self.goal_click: Counter = Counter()  # signatures clicked when a level ended
+        self.click_death: Counter = Counter()  # signatures clicked when the game was lost
+        # The same, per object instance (signature + position): outcomes often depend on
+        # *which* of several identical objects is clicked, not on their kind.
+        self.click_at: dict[tuple, Counter] = defaultdict(Counter)
+        self.click_death_at: Counter = Counter()
         self.churn: dict[tuple, Counter] = defaultdict(Counter)  # sig -> action class -> events
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
@@ -102,9 +108,14 @@ class Dynamics:
         if target is None:
             return
         changed = outcome != OK or (d is not None and d.changed)
-        self.click[target.sig]["change" if changed else "none"] += 1
+        key = "change" if changed else "none"
+        self.click[target.sig][key] += 1
+        self.click_at[(target.sig, target.x1, target.y1)][key] += 1
         if outcome == LEVEL_UP:
             self.goal_click[target.sig] += 1
+        elif outcome == GAME_OVER:
+            self.click_death[target.sig] += 1
+            self.click_death_at[(target.sig, target.x1, target.y1)] += 1
 
     def _observe_key(self, action, before, before_grid, d: Diff | None, outcome: str) -> None:
         aid = action.value
@@ -276,10 +287,18 @@ class Dynamics:
             target = at(objs, data["x"], data["y"])
             if target is None:
                 return Prediction("unknown")
-            rate, n = self._rate(self.click[target.sig], "none")
-            if n >= MIN_SUPPORT and rate >= NOOP_RATE:
-                return Prediction("noop_click", n, f"clicking {target.label()} changed nothing {n}x")
-            return Prediction("unknown", n)
+            inst = (target.sig, target.x1, target.y1)
+            for deaths, counter, where in (
+                (self.click_death_at[inst], self.click_at[inst], f"{target.label()} at {target.x1},{target.y1}"),
+                (self.click_death[target.sig], self.click[target.sig], target.label()),
+            ):
+                n = sum(counter.values())
+                if deaths >= DEATH_SUPPORT and deaths / n >= DANGER_RATE:
+                    return Prediction("danger", n, f"clicking {where} lost the game {deaths}/{n}x")
+                rate, n = self._rate(counter, "none")
+                if n >= MIN_SUPPORT and rate >= NOOP_RATE:
+                    return Prediction("noop_click", n, f"clicking {where} changed nothing {n}x")
+            return Prediction("unknown", sum(self.click[target.sig].values()))
 
         avatar = self.avatar()
         direction = self.direction(action.value)
@@ -361,6 +380,9 @@ class Dynamics:
             lines.append(
                 f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} completed a level ({self.goal_click[sig]}x)"
             )
+        for sig, n in self.click_death.most_common(6):
+            total = sum(self.click[sig].values())
+            lines.append(f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} lost the game {n}/{total} times")
         other = [
             (aid, sig, c)
             for (aid, sig), c in self.move.items()

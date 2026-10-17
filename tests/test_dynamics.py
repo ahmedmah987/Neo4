@@ -66,5 +66,31 @@ def test_click_noop_rule():
     assert dyn.click[objs_sig(objs, 6)]["change"] == 1
 
 
+def test_click_death_rule():
+    dyn = Dynamics()
+    g = world(10)
+    g[50:54, 50:54] = 6  # a trap
+    objs = extract(g)
+    dyn.observe(GameAction.ACTION6, {"x": 51, "y": 51}, objs, g, None, GAME_OVER)
+    assert dyn.predict(GameAction.ACTION6, {"x": 52, "y": 52}, objs, g).verdict == "unknown"
+    dyn.observe(GameAction.ACTION6, {"x": 51, "y": 51}, objs, g, None, GAME_OVER)
+    p = dyn.predict(GameAction.ACTION6, {"x": 52, "y": 52}, objs, g)
+    assert p.verdict == "danger" and "lost the game 2/2" in p.why
+
+
+def test_click_rules_distinguish_instances_of_one_signature():
+    dyn = Dynamics()
+    g = world(10)
+    g[50:54, 50:54] = 6  # a trap ...
+    g[50:54, 58:62] = 6  # ... and a harmless twin with the same signature
+    objs = extract(g)
+    for _ in range(2):
+        dyn.observe(GameAction.ACTION6, {"x": 51, "y": 51}, objs, g, None, GAME_OVER)
+    for _ in range(6):
+        dyn.observe(GameAction.ACTION6, {"x": 59, "y": 51}, objs, g, extract(g), OK)
+    assert dyn.predict(GameAction.ACTION6, {"x": 52, "y": 52}, objs, g).verdict == "danger"
+    assert dyn.predict(GameAction.ACTION6, {"x": 60, "y": 52}, objs, g).verdict == "noop_click"
+
+
 def objs_sig(objs, color):
     return next(o.sig for o in objs if o.color == color)

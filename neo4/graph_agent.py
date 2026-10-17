@@ -48,11 +48,13 @@ class Node:
     result: list[int] = field(default_factory=list)
     target: list[str | None] = field(default_factory=list)
     tested_epoch: list[int] = field(default_factory=list)
+    interest: int = 0  # untested candidates whose outcome is unknown; set by model agents
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)
         self.target = [None] * len(self.cands)
         self.tested_epoch = [-1] * len(self.cands)
+        self.interest = len(self.cands)
 
     def untested(self, max_group: int, epoch: int = 0) -> list[int]:
         return [
@@ -76,7 +78,7 @@ class LevelGraph:
     def __init__(self) -> None:
         self.nodes: dict[str, Node] = {}
         self.reverse: dict[str, set[str]] = {}
-        self._dist_cache: dict[int, tuple[dict[str, int], dict[str, str]]] = {}
+        self._dist_cache: dict[tuple[int, bool], tuple[dict[str, int], dict[str, str]]] = {}
         self.inconsistent = 0  # same (node, action) led to different targets
         self.epoch = 0
         self._max_group = 0
@@ -116,22 +118,30 @@ class LevelGraph:
         node.result[idx] = NO_CHANGE
         self._dist_cache.clear()
 
-    def frontier(self, max_group: int) -> list[str]:
-        return [k for k, n in self.nodes.items() if n.untested(max_group, self.epoch)]
+    def frontier(self, max_group: int, interesting: bool = False) -> list[str]:
+        return [
+            k
+            for k, n in self.nodes.items()
+            if n.untested(max_group, self.epoch) and (not interesting or n.interest > 0)
+        ]
 
-    def distances(self, max_group: int) -> tuple[dict[str, int], dict[str, str]]:
+    def distances(
+        self, max_group: int, interesting: bool = False
+    ) -> tuple[dict[str, int], dict[str, str]]:
         """Multi-source BFS from the frontier over reversed edges.
 
         Returns distance-to-frontier and the next hop for every node that
-        can reach the frontier.
+        can reach the frontier. With ``interesting`` only frontier nodes that
+        still hold candidates of unknown outcome count.
         """
-        cached = self._dist_cache.get(max_group)
+        cache_key = (max_group, interesting)
+        cached = self._dist_cache.get(cache_key)
         if cached is not None:
             return cached
         dist: dict[str, int] = {}
         nxt: dict[str, str] = {}
         queue: deque[str] = deque()
-        for k in self.frontier(max_group):
+        for k in self.frontier(max_group, interesting):
             dist[k] = 0
             queue.append(k)
         while queue:
@@ -141,7 +151,7 @@ class LevelGraph:
                     dist[u] = dist[v] + 1
                     nxt[u] = v
                     queue.append(u)
-        self._dist_cache[max_group] = (dist, nxt)
+        self._dist_cache[cache_key] = (dist, nxt)
         return dist, nxt
 
     def edge_to(self, src: str, dst: str) -> int | None:
@@ -262,12 +272,21 @@ class GraphAgent:
         """Which of the node's untested candidates to run; subclasses reorder."""
         return self.rng.choice(local)
 
+    curious = False  # walk towards frontier nodes with unknown-outcome candidates first
+
     def _choose(self, node: Node) -> int | None:
         top = self.graph.max_group()
         while True:
             local = node.untested(self.priority, self.graph.epoch)
             if local:
                 return self._pick_local(node, local)
+            if self.curious:
+                dist, nxt = self.graph.distances(self.priority, interesting=True)
+                if node.key in nxt:
+                    idx = self.graph.edge_to(node.key, nxt[node.key])
+                    if idx is not None:
+                        self.stats["curious_steps"] = self.stats.get("curious_steps", 0) + 1
+                        return idx
             dist, nxt = self.graph.distances(self.priority)
             if node.key in nxt:
                 idx = self.graph.edge_to(node.key, nxt[node.key])

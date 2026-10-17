@@ -44,13 +44,19 @@ class ModelAgent(GraphAgent):
     name = "model"
 
     def __init__(
-        self, seed: int = 0, skip: bool = True, plan: bool = True, abstract: bool = False
+        self,
+        seed: int = 0,
+        skip: bool = True,
+        plan: bool = True,
+        abstract: bool = False,
+        curious: bool = True,
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
         self.skip = skip
         self.planning = plan
         self.abstract = abstract
+        self.curious = curious
         self.noise: frozenset = frozenset()
         self.rebuilt_this_level = False
         self.last_cand: tuple[GameAction, dict[str, int] | None] | None = None
@@ -150,6 +156,7 @@ class ModelAgent(GraphAgent):
                 self.stats["skipped"] += 1
             else:
                 self._verdicts[i] = verdict
+        node.interest = sum(1 for v in self._verdicts.values() if v == "unknown")
         return super()._choose(node)
 
     # -- planning -------------------------------------------------------------

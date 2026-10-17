@@ -14,8 +14,10 @@ solve all of them; frontier language models used directly solve almost none.
 | 1 | Reimplement the training-free **graph-exploration** baseline (Rudakov, Shock & Cowley, [arXiv:2512.24156](https://arxiv.org/abs/2512.24156)) and measure it on the public games | done |
 | 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | done |
 | 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | done — no gain, see below |
-| 4 | **State abstraction**: learn which objects change independently of the agent's actions and leave them out of the state identity | in progress |
-| 5 | (optional) a local language model that proposes hypotheses | — |
+| 4 | **State abstraction**: learn which objects change independently of the agent's actions and leave them out of the state identity | done — net loss, kept as the `model-abs` ablation |
+| 5 | **Instance-level click rules**: outcomes per object instance (signature + position), not per kind | in progress |
+| 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | next |
+| 7 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
 
@@ -182,6 +184,29 @@ exercised on a toy room in the tests, where the second level is solved in a quar
 the steps of the first), but on the public games it has nothing useful to plan towards
 yet. Goal induction needs a richer representation; that is left for later, and the next
 phase targets the larger measured loss, the state explosion.
+
+## Results — Phase 4 (state abstraction): net loss, now opt-in
+
+Idea: objects that move, appear or vanish whatever the agent does (drifting particles, an
+in-scene timer, an animation) multiply the number of states without carrying information,
+so learn which signatures are such *noise* and paint them out before hashing the frame.
+
+| agent | sum of per-game median levels | levels over all runs |
+|---|---|---|
+| model-plan (Phase 3, no abstraction) | 20 | 94 |
+| model-abs-lax: noise = churns on ≥ 30 % of steps under every action class | 13 | 65 |
+| model-abs: clicks on different targets are different classes, ≥ 50 %, ≥ 2 classes | 16 | 83 |
+
+The lax criterion treated every click as one action, so in click games any object that
+reacts to clicks on many targets — the game's actual mechanics — was erased, and whole
+levels collapsed into a single state (`lp85`: one node, 0 levels). The strict criterion
+repairs most of that but still loses `tu93` (3 → 0) and `r11l` (2 → 1), and where it does
+collapse a state space (`re86`: 2,590 → 25 nodes; `ka59`: 1,039 → 78) no level follows:
+the "noise" there is an animation whose phase the game cares about. Abstraction stays
+available as `model-abs` but is off in the default agent. Two further checks: unmasking the
+status bar in `ls20` removes the inconsistent transitions but explodes the state space
+(140 → 2,400 nodes), because the bar is a step counter — masking it is the right trade;
+`g50t` is inconsistent with or without the mask, i.e. it has genuine hidden state.
 
 ## Attribution
 

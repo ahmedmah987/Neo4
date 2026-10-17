@@ -162,3 +162,19 @@ def test_agent_resets_on_game_over_and_marks_edge_dead():
     assert a is GameAction.RESET
     node = next(iter(agent.graph.nodes.values()))
     assert node.result[0] == NO_CHANGE
+
+
+def test_interesting_frontier_is_preferred_when_curious():
+    g = LevelGraph()
+    c = lambda: [Candidate(GameAction.ACTION1, None, 0), Candidate(GameAction.ACTION2, None, 0)]
+    for k in "abcd":
+        g.add_node(k, c())
+    # a -> b (ACTION1), a -> c (ACTION2); b and c are both frontier nodes.
+    g.record("a", 0, "b")
+    g.record("a", 1, "c")
+    g.nodes["b"].interest = 0  # everything untested at b is predictable
+    g.nodes["c"].interest = 1
+    dist, nxt = g.distances(0)
+    assert dist["a"] == 1  # nearest frontier node is either b or c
+    dist_i, nxt_i = g.distances(0, interesting=True)
+    assert nxt_i["a"] == "c" and "b" not in dist_i

@@ -4,7 +4,9 @@
 
 * how far each object signature moves under each keyboard action,
 * which object is the *avatar* (the one the keyboard moves),
-* for each colour, how often it blocked the avatar versus let it pass,
+* for each colour, how often it blocked the avatar versus let it pass (the
+  avatar's move is a *sweep*: every cell between its position and its
+  destination counts as crossed, and the nearest band counts as blocking),
 * which colours were in front of the avatar when the game was lost,
 * how often clicking a given object signature changed anything.
 
@@ -23,6 +25,7 @@ import numpy as np
 from arcengine import GameAction
 
 from .objects import Diff, Obj, at, diff, find
+from .planner import swept
 
 OK, GAME_OVER, LEVEL_UP = "ok", "game_over", "level_up"
 
@@ -169,7 +172,9 @@ class Dynamics:
         direction = self.direction(aid)
         if direction is None:
             return
-        colors, coords = self._ahead_cells(me, direction, before_grid)
+        bands = self._swept(me, direction, before_grid)
+        colors = set().union(*(c for c, _ in bands))
+        coords = [cell for _, cells in bands for cell in cells]
         ahead_sigs = set()
         for y, x in coords:
             o = at(before, x, y)
@@ -189,26 +194,40 @@ class Dynamics:
                 self.goal_ahead_sig[sig] += 1
             return
         moved = d is not None and any(b.sig == avatar for b, _, _, _ in d.moved)
-        key = "passed" if moved else "blocked"
-        for c in colors:
-            self.cell[c][key] += 1
+        if moved:
+            for c in colors:
+                self.cell[c]["passed"] += 1
+        else:
+            # Whatever stopped the avatar is somewhere in the sweep. Colours it is
+            # known to cross are not to blame; the rest share the credit (early on
+            # the floor too, until its passes establish it).
+            suspects = [c for c in colors if not self._crosses(c)]
+            for c in suspects or colors:
+                self.cell[c]["blocked"] += 1
 
     @staticmethod
-    def _ahead_cells(
+    def _swept(
         me: Obj, direction: tuple[int, int], grid: np.ndarray
-    ) -> tuple[set[int], list[tuple[int, int]]]:
-        """Colours and (y, x) cells the avatar would occupy after the move, minus its own.
+    ) -> list[tuple[set[int], list[tuple[int, int]]]]:
+        """Bands of cells the avatar passes through on the move, nearest first
+        (see ``planner.swept``). A move off the grid is one band with the
+        pseudo-colour -1 and no cells."""
+        rel = me.pixels - np.array([me.y1, me.x1])
+        bands = swept(grid, rel, (me.x1, me.y1), direction)
+        if bands is None:
+            return [({-1}, [])]
+        return bands
 
-        A move off the grid reports the pseudo-colour -1 and no cells."""
-        dx, dy = direction
-        ys = me.pixels[:, 0] + dy
-        xs = me.pixels[:, 1] + dx
-        inside = (ys >= 0) & (ys < grid.shape[0]) & (xs >= 0) & (xs < grid.shape[1])
-        if not inside.all():
-            return {-1}, []
-        own = set(zip(me.pixels[:, 0].tolist(), me.pixels[:, 1].tolist()))
-        coords = [(y, x) for y, x in zip(ys.tolist(), xs.tolist()) if (y, x) not in own]
-        return {int(grid[y, x]) for y, x in coords}, coords
+    def _ahead_cells(
+        self, me: Obj, direction: tuple[int, int], grid: np.ndarray
+    ) -> tuple[set[int], list[tuple[int, int]]]:
+        """Colours and (y, x) cells the avatar passes through on the move, minus its own."""
+        colors: set[int] = set()
+        coords: list[tuple[int, int]] = []
+        for c, cells in self._swept(me, direction, grid):
+            colors |= c
+            coords.extend(cells)
+        return colors, coords
 
     def _ahead(self, me: Obj, direction: tuple[int, int], grid: np.ndarray) -> set[int]:
         return self._ahead_cells(me, direction, grid)[0]
@@ -331,13 +350,17 @@ class Dynamics:
                 out[aid] = d
         return out
 
+    def _crosses(self, color: int) -> bool:
+        """The avatar has crossed this colour often enough to call it passable."""
+        passed, n = self._rate(self.cell[color], "passed")
+        return n >= MIN_SUPPORT and passed >= PASS_RATE
+
     def passable(self, color: int) -> bool:
         """The avatar crossed this colour reliably and never died entering it."""
         visits = self.hazard[color] + sum(self.cell[color].values())
         if visits >= MIN_SUPPORT and self.hazard[color] / visits >= DANGER_RATE:
             return False
-        passed, n = self._rate(self.cell[color], "passed")
-        return n >= MIN_SUPPORT and passed >= PASS_RATE
+        return self._crosses(color)
 
     def _lifted(self, goals: Counter, visits) -> set:
         """Features under which a level ended far more often than the base rate.

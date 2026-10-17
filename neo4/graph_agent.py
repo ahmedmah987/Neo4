@@ -48,12 +48,16 @@ class Node:
     result: list[int] = field(default_factory=list)
     target: list[str | None] = field(default_factory=list)
     tested_epoch: list[int] = field(default_factory=list)
+    passes: list[int] = field(default_factory=list)  # times the edge led somewhere
+    deaths: list[int] = field(default_factory=list)  # times the edge ended the game
     interest: int = 0  # untested candidates whose outcome is unknown; set by model agents
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)
         self.target = [None] * len(self.cands)
         self.tested_epoch = [-1] * len(self.cands)
+        self.passes = [0] * len(self.cands)
+        self.deaths = [0] * len(self.cands)
         self.interest = len(self.cands)
 
     def untested(self, max_group: int, epoch: int = 0) -> list[int]:
@@ -96,18 +100,46 @@ class LevelGraph:
         return node
 
     def record(self, src: str, idx: int, dst: str | None) -> None:
+        """``dst`` is the node the edge led to, the source itself when nothing
+        changed, or None when the game was lost."""
         node = self.nodes[src]
         node.tested_epoch[idx] = self.epoch
-        if dst is None or dst == src:
-            node.result[idx] = NO_CHANGE
-        else:
-            old = node.target[idx]
-            if node.result[idx] == TRANSITION and old is not None and old != dst:
-                self.inconsistent += 1
-            node.result[idx] = TRANSITION
-            node.target[idx] = dst
-            self.reverse.setdefault(dst, {})[src] = None
         self._dist_cache.clear()
+        if dst is None:
+            node.deaths[idx] += 1
+            if node.result[idx] == TRANSITION and node.passes[idx] > node.deaths[idx]:
+                # An edge that led somewhere more often than it killed: the loss
+                # came from a move budget or a wandering hazard (tu93 ends every
+                # attempt after fifty moves), not from the edge. Keep it for
+                # path finding, or the node becomes a dead end that forces a
+                # reset on every visit.
+                return
+            self._downgrade(node, idx)
+            return
+        if dst == src:
+            self._downgrade(node, idx)
+            return
+        old = node.target[idx]
+        if node.result[idx] == TRANSITION and old is not None and old != dst:
+            self.inconsistent += 1
+            self._unlink(src, old)
+        node.passes[idx] += 1
+        node.result[idx] = TRANSITION
+        node.target[idx] = dst
+        self.reverse.setdefault(dst, {})[src] = None
+
+    def _downgrade(self, node: Node, idx: int) -> None:
+        old = node.target[idx]
+        node.result[idx] = NO_CHANGE
+        node.target[idx] = None
+        if old is not None:
+            self._unlink(node.key, old)
+
+    def _unlink(self, src: str, dst: str) -> None:
+        """Drop the reverse link unless another edge of ``src`` still leads to ``dst``."""
+        node = self.nodes[src]
+        if not any(r == TRANSITION and t == dst for r, t in zip(node.result, node.target)):
+            self.reverse.get(dst, {}).pop(src, None)
 
     def reopen(self) -> None:
         self.epoch += 1
@@ -117,7 +149,7 @@ class LevelGraph:
         """Count a candidate as tested in this epoch without executing it."""
         node = self.nodes[key]
         node.tested_epoch[idx] = self.epoch
-        node.result[idx] = NO_CHANGE
+        self._downgrade(node, idx)
         self._dist_cache.clear()
 
     def frontier(self, max_group: int, interesting: bool = False) -> list[str]:

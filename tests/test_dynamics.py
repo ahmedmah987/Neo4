@@ -126,3 +126,32 @@ def test_avatar_prefers_the_unique_sprite_over_a_floor_of_identical_tiles():
         dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
         x += 6
     assert dyn.avatar() is not None and dyn.avatar()[0] == 9
+
+
+def jump_world(ax: int, ay: int = 20) -> np.ndarray:
+    """A 3x3 avatar that jumps six cells at a time; a wall two cells thick sits
+    between two landing spots, with floor on both sides of it."""
+    g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    g[:, 44:46] = 3  # the wall: never a landing cell, always in the way
+    g[ay : ay + 3, ax : ax + 3] = 9
+    return g
+
+
+def test_jumping_avatar_blames_the_wall_between_not_the_landing_cell():
+    dyn = Dynamics()
+    x = 2
+    for _ in range(6):  # 2 -> 8 -> ... -> 38: clear jumps over the floor
+        before, after = jump_world(x), jump_world(x + 6)
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+        x += 6
+    assert dyn.direction(GameAction.ACTION1.value) == (6, 0)
+    for _ in range(3):  # from 38 the jump would cross the wall: the avatar stays put
+        before = jump_world(38)
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(before), OK)
+    assert dyn.cell[3]["blocked"] == 3
+    assert dyn.cell[0]["blocked"] == 0 and dyn.cell[0]["passed"] >= 3
+    assert dyn.passable(0) and not dyn.passable(3)
+    grid = jump_world(38)
+    assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "blocked"
+    grid = jump_world(8)
+    assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "move"

@@ -56,3 +56,24 @@ def test_model_agent_transfers_goal_to_next_level():
     assert GOAL in agent.dyn.goal_colors()
     assert agent.stats["plans"] >= 1 and agent.stats["plan_steps"] >= 10
     assert second < first / 4, (first, second)
+
+
+def test_plan_path_sweeps_the_cells_between_jumps():
+    """An avatar that jumps six cells must not plan through a thin wall that
+    lies between two landing spots."""
+    g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    g[0:40, 20:22] = 3  # wall from the top, open at the bottom; never a landing cell
+    g[10:13, 2:5] = 9  # avatar 3x3 on a 6-cell lattice
+    g[10:13, 44:47] = 12  # goal, straight ahead across the wall
+    me = next(o for o in extract(g) if o.color == 9)
+    dirs = {1: (6, 0), 2: (-6, 0), 3: (0, -6), 4: (0, 6)}
+    found = plan_path(g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols)
+    assert found is not None
+    actions, positions = found
+    rel = me.pixels - np.array([me.y1, me.x1])
+    pos = (me.x1, me.y1)
+    for aid, nxt in zip(actions[:-1], positions[:-1]):
+        assert cells_ahead(g, rel, pos, dirs[aid]) == {0}  # no jump crosses the wall
+        pos = nxt
+    assert any(p[1] >= 40 for p in positions)  # the route went under the wall
+    assert cells_ahead(g, rel, (14, 10), (6, 0)) == {0, 3}  # a jump over the wall sees it

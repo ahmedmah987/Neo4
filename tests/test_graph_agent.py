@@ -178,3 +178,24 @@ def test_interesting_frontier_is_preferred_when_curious():
     assert dist["a"] == 1  # nearest frontier node is either b or c
     dist_i, nxt_i = g.distances(0, interesting=True)
     assert nxt_i["a"] == "c" and "b" not in dist_i
+
+
+def test_well_trodden_edge_survives_a_budget_death():
+    """A loss on an edge that led somewhere before (a move budget ran out) must
+    not turn the edge into a dead end; a first-time loss still does."""
+    g = LevelGraph()
+    c = lambda: [Candidate(GameAction.ACTION1, None, 0), Candidate(GameAction.ACTION2, None, 0)]
+    g.add_node("a", c())
+    g.add_node("b", c())
+    g.record("a", 0, "b")
+    g.record("a", 0, "b")
+    g.record("a", 0, None)
+    assert g.nodes["a"].result[0] == TRANSITION and g.edge_to("a", "b") == 0
+    assert "a" in g.reverse["b"]
+    g.record("a", 1, None)  # never led anywhere: dead
+    assert g.nodes["a"].result[1] == NO_CHANGE
+    # Two losses on an edge that passed twice: now it is the edge, and the
+    # reverse link goes with it so path finding does not route through it.
+    g.record("a", 0, None)
+    assert g.nodes["a"].result[0] == NO_CHANGE
+    assert "a" not in g.reverse.get("b", {})

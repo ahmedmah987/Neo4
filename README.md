@@ -36,6 +36,7 @@ The project has two strands that share one codebase:
 | 9 | **Competition packaging**: the agent as the single file the Kaggle notebook embeds, tested against the framework contract | done — `kaggle/my_agent.py` |
 | 10 | **Robust avatar identification**: orientation-free sprite signatures, the avatar is usually unique; exact signatures kept for click rules | done — neutral in levels (20 / 95), kept: the avatar is now right |
 | 11 | **Swept-cell world model**: an avatar that jumps several cells is stopped by what lies *between* its position and its destination; a stopped move blames the swept colours not yet known to be crossable; a graph edge that led somewhere more often than it killed survives a loss (move budgets) | done — 21 / 98, official-style score 0.42 (from 0.39), new default |
+| 12 | **Death attribution**: a level's move budget is detected and its losses blame nothing; the frame of a lost game names the kind that moved into the avatar (kills on contact → predicted danger, planned around); a move that lost the game is not repeated in the level; a graph with its frontier out of reach is reopened instead of wandered | done — 23 / 110, official-style score 0.44 (from 0.42), new default |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -43,7 +44,7 @@ budget tried, and the gap widens with the budget (levels per run, all 25 public 
 
 | step budget | graph exploration | model (this repo) | gain |
 |---|---|---|---|
-| 4,000 (5 seeds) | 0.60 | 0.78 | +31 % |
+| 4,000 (5 seeds) | 0.60 | 0.88 | +47 % |
 | 12,000 (3 seeds) | 0.69 | 0.89 | +29 % |
 | 24,000 (2 seeds) | 0.78 | 1.18 | **+51 %** |
 
@@ -448,6 +449,47 @@ point at the next phase: deaths explained by what *moved into* the avatar, a lev
 memory of fatal moves for the planner, and a budget rule that stops counting the
 fifty-move deaths as hazards.
 
+## Results — Phase 12 (death attribution): +12 levels, official-style 0.44
+
+A loss is now explained before it is blamed. Four changes, all general:
+
+* **Move budgets.** When at least two losses in a level fell at the longest attempt
+  length seen in that level, *from different places*, the level has a move budget. A
+  loss at that length credits no hazard colour, no dangerous action, no dead graph edge:
+  the edge it fell on is left untested. (The "different places" clause matters: one
+  fatal move repeated at the same point of every attempt looked like a budget at first,
+  and the agent then walked into it eighty times.) `tu93` reads 50 on its first levels
+  and 35 and 45 later; `sp80` reads 45; `cd82` — a click game — turns out to have one too.
+* **Kinds that kill on contact.** The frame of a lost game is no longer thrown away: it
+  usually still shows the scene, with whatever killed the avatar standing where the
+  avatar went. An object kind that *moved into* the avatar's place at a loss (not the
+  floor it uncovered by vanishing, not something that already stood there), far more
+  often than it is beside the avatar otherwise, kills on contact. A move into its reach
+  — one avatar step around it — is predicted dangerous, and the planner routes around
+  that reach. On `tu93` this names the colour-8 patrol and nothing else.
+* **Fatal-move memory.** The (position, action) of a move that lost the game is kept for
+  the level: the planner never takes it and the chooser skips it in the first epoch.
+  The second plan on `tu93`'s third level differs from the first; the first used to be
+  repeated five times.
+* **Reopen when stuck.** Eight random walks in a row (the frontier is known but out of
+  reach: a one-way door, a patrol that kept killing on the way) reopen the graph instead
+  of wandering for the rest of the budget. One `tu93` seed had spent 3,900 of its 4,000
+  steps wandering.
+
+Over the 25 games (4,000 steps, 5 seeds): **23 / 110** levels against 21 / 98, and the
+official-style score **0.44** against 0.42. `tu93` completes four levels on every seed
+(12 → 20 levels over the seeds; its third level, the one whose patrol killed every plan,
+now falls in 500–900 actions instead of never); `sp80` gains three levels over the seeds
+and `cd82` one; no game loses a level, and no game's score moves by more than 0.03
+except `tu93`'s (1.55 → 1.88).
+
+What the per-seed numbers say about the remaining cost: on `tu93` a run still loses the
+game about 115 times, 80 of them to the budget. The patrol's reach is a coarse model of
+a patrol that only charges when the avatar is in its line; the agent gets past it by
+re-testing after the graph reopens, not by understanding the trigger. A relational
+rule ("that kind charges along its row or column") is the kind of thing a language
+model could propose and the data could check — the plan's optional phase.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -461,7 +503,8 @@ over games. Every action between two level completions counts, exploration inclu
 |---|---|---|
 | graph exploration | 17 / 75 | 0.26 |
 | model, Phase 10 | 20 / 95 | 0.39 |
-| model, Phase 11 (default) | 21 / 98 | 0.42 |
+| model, Phase 11 | 21 / 98 | 0.42 |
+| model, Phase 12 (default) | 23 / 110 | 0.44 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -486,10 +529,11 @@ do anything, which actions or cells lose the game — used to prune and order th
 exploration. Everything after that (planning towards past goals, state abstraction,
 curiosity, instance-level rules, object-targeted exploration) was measured and found
 neutral or negative at 4,000 steps, and is kept only as an opt-in variant. The gain from
-the rules grows with the budget: +31 % levels per run at 4,000 steps, +51 % at 24,000
-(the latter measured before Phases 10–11). Phase 11 showed that a planner is only as
-good as the world model under it: fixing how a jumping avatar's moves are credited was
-worth more on `tu93` than any planning heuristic tried before it.
+the rules grows with the budget: +47 % levels per run at 4,000 steps, +51 % at 24,000
+(the latter measured before Phases 10–12). Phases 11 and 12 showed that a planner is
+only as good as the world model under it: fixing how a jumping avatar's moves are
+credited, and explaining a loss before blaming it, were worth more on `tu93` and `sp80`
+than any planning heuristic tried before them.
 
 The remaining losses are of one kind. What completes a level, and what loses the game,
 is relational — *which* instance of an object, *where*, in *what* state, *pushed* against

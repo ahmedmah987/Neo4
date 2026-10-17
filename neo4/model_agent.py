@@ -76,11 +76,12 @@ class ModelAgent(GraphAgent):
         self.plans_this_level = 0
         self.explore_plans_this_level = 0
         self.plan_cooldown = 0
+        self.fatal: set[tuple[int, int, int]] = set()  # (x, y, action) moves that lost this level
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
-             "noise_sigs": 0, "graph_rebuilds": 0}
+             "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -111,6 +112,7 @@ class ModelAgent(GraphAgent):
         self.explore_plans_this_level = 0
         self.plan_cooldown = 0
         self.rebuilt_this_level = False
+        self.fatal = set()
 
     def _drop_plan(self) -> None:
         self.plan = []
@@ -125,6 +127,7 @@ class ModelAgent(GraphAgent):
 
     def act(self, obs: FrameDataRaw) -> tuple[GameAction, dict[str, int] | None]:
         grid = None if obs.is_empty() else np.asarray(obs.frame[-1])
+        after: list[Obj] | None = None
         if self.last_cand is not None and self.last_grid is not None and self.last_objs is not None:
             if obs.state == GameState.GAME_OVER:
                 outcome = GAME_OVER
@@ -132,12 +135,24 @@ class ModelAgent(GraphAgent):
                 outcome = LEVEL_UP
             else:
                 outcome = OK
-            after = extract(grid, self.mask) if grid is not None and outcome == OK else None
+            # The frame of a lost game is kept: it usually still shows the scene,
+            # with whatever killed the avatar standing where the avatar went.
+            after = extract(grid, self.mask) if grid is not None and outcome != LEVEL_UP else None
             action, data = self.last_cand
+            avatar = self.dyn.avatar()
+            me = find(self.last_objs, avatar) if avatar is not None else None
             self.dyn.observe(action, data, self.last_objs, self.last_grid, after, outcome)
             self.last_cand = None
-        else:
-            after = None
+            if outcome == GAME_OVER:
+                if self.dyn.last_death_budget:
+                    # The move budget ran out: the edge did nothing wrong, leave it untested.
+                    self.last_key = self.last_idx = None
+                    self.stats["budget_deaths"] += 1
+                elif me is not None and not action.is_complex():
+                    self.fatal.add((me.x1, me.y1, action.value))
+                    self.stats["fatal_moves"] += 1
+            if outcome != OK:
+                after = None
         self.cur_grid = grid
         # Within a level the mask is fixed, so this frame's objects are the ones just extracted.
         self._cur_objs = after
@@ -146,6 +161,8 @@ class ModelAgent(GraphAgent):
         action, data = super().act(obs)
 
         if action is GameAction.RESET or grid is None:
+            if obs.state != GameState.GAME_OVER:
+                self.dyn.new_attempt()
             self.last_cand = None
             self._drop_plan()
         else:
@@ -168,7 +185,10 @@ class ModelAgent(GraphAgent):
                 return idx
         for i in node.untested(self.graph.max_group(), self.graph.epoch):
             c = node.cands[i]
-            verdict = self.dyn.predict(c.action, c.data, objs, self.cur_grid).verdict
+            if me is not None and c.data is None and (me.x1, me.y1, c.action.value) in self.fatal:
+                verdict = "danger"  # this very move lost the game in this level
+            else:
+                verdict = self.dyn.predict(c.action, c.data, objs, self.cur_grid).verdict
             if self.skip and self.graph.epoch == 0 and verdict in SKIP_VERDICTS:
                 self.graph.mark_tested(node.key, i)
                 self.stats["skipped"] += 1
@@ -255,7 +275,11 @@ class ModelAgent(GraphAgent):
             if not target.any():
                 return None
             is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
-        found = plan_path(self.cur_grid, me, dirs, self.dyn.passable, is_goal)
+        found = plan_path(
+            self.cur_grid, me, dirs, self.dyn.passable, is_goal,
+            avoid=self.dyn.hazard_zone(self.cur_objs(), self.cur_grid.shape),
+            forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
+        )
         if found is None:
             # No route through cells known to be passable yet; try again after a
             # cooldown, and do not spend the per-level allowance on the search.

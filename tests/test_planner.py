@@ -77,3 +77,24 @@ def test_plan_path_sweeps_the_cells_between_jumps():
         pos = nxt
     assert any(p[1] >= 40 for p in positions)  # the route went under the wall
     assert cells_ahead(g, rel, (14, 10), (6, 0)) == {0, 3}  # a jump over the wall sees it
+
+
+def test_plan_path_respects_avoid_zone_and_forbidden_moves():
+    g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    g[10:12, 4:6] = 9  # avatar 2x2
+    g[10:12, 20:22] = 12  # goal straight ahead
+    me = next(o for o in extract(g) if o.color == 9)
+    dirs = {1: (2, 0), 2: (-2, 0), 3: (0, -2), 4: (0, 2)}
+    direct = plan_path(g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols)
+    assert direct is not None and all(a == 1 for a in direct[0])
+    avoid = np.zeros((fp.GRID, fp.GRID), dtype=bool)
+    avoid[8:14, 10:14] = True  # a patrol's reach across the direct route
+    found = plan_path(g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols, avoid=avoid)
+    assert found is not None and len(found[0]) > len(direct[0])
+    assert all(not avoid[y, x] for _, (x, y) in zip(found[0], found[1]) for y in range(y, y + 2))
+    fatal = {(4, 10, 1)}  # moving right from the start lost the game before
+    found = plan_path(
+        g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols,
+        forbidden=lambda pos, aid: (pos[0], pos[1], aid) in fatal,
+    )
+    assert found is not None and found[0][0] != 1

@@ -155,3 +155,69 @@ def test_jumping_avatar_blames_the_wall_between_not_the_landing_cell():
     assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "blocked"
     grid = jump_world(8)
     assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "move"
+
+
+def test_budget_rule_separates_step_limit_losses_from_hazards():
+    """Two losses at the longest attempt length ever seen mean the game ends
+    every attempt after that many actions: such losses blame nothing."""
+    dyn = Dynamics()
+    g = world(10)
+    objs = extract(g)
+    for fifth in (GameAction.ACTION5, GameAction.ACTION3):  # lost at two different places
+        for _ in range(4):
+            dyn.observe(GameAction.ACTION1, None, objs, g, extract(g), OK)
+        dyn.observe(fifth, None, objs, g, None, GAME_OVER)  # fifth action: lost
+    assert dyn.budget() == 5 and dyn.last_death_budget
+    assert dyn.key_death[GameAction.ACTION5.value] == 1  # only the first loss counted
+    assert dyn.key_death[GameAction.ACTION3.value] == 0
+    # A loss earlier in an attempt is an ordinary loss.
+    dyn.observe(GameAction.ACTION5, None, objs, g, None, GAME_OVER)
+    assert not dyn.last_death_budget and dyn.key_death[GameAction.ACTION5.value] == 2
+    # The same fatal move at the same length twice is the move, not a budget.
+    other = Dynamics()
+    for _ in range(2):
+        for _ in range(4):
+            other.observe(GameAction.ACTION1, None, objs, g, extract(g), OK)
+        other.observe(GameAction.ACTION5, None, objs, g, None, GAME_OVER)
+    assert other.budget() is None and not other.last_death_budget
+    # A longer attempt refutes the budget until losses pile up at the new length.
+    dyn.new_attempt()
+    for _ in range(6):
+        dyn.observe(GameAction.ACTION1, None, objs, g, extract(g), OK)
+    assert dyn.budget() is None
+    assert "move budget" not in "\n".join(dyn.describe())
+
+
+def test_contact_loss_names_the_kind_that_kills():
+    """The frame of a lost game still shows the scene: a kind that stands where the
+    avatar went, far more often than it is beside the avatar otherwise, kills."""
+    dyn = Dynamics()
+
+    def scene(ax, ex=None):
+        g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+        g[20:22, ax : ax + 2] = 9  # avatar
+        g[40:42, 40:42] = 6  # a harmless twin colour far away
+        if ex is not None:
+            g[20:22, ex : ex + 2] = 6  # the patrol
+        return g
+
+    for _ in range(2):
+        x = 2
+        for _ in range(10):  # the avatar walks right, the patrol far away
+            before, after = scene(x, 30), scene(x + 2, 30)
+            dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+            x += 2
+    for _ in range(2):  # the patrol steps onto the avatar's destination: lost
+        before = scene(14, 18)
+        after = scene(14, 16)
+        after[20:22, 14:16] = 0  # the avatar is gone
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), GAME_OVER)
+    patrol = next(o.sig for o in extract(scene(2, 30)) if o.color == 6)
+    assert dyn.hazard_sigs() == {patrol}
+    assert "kills on contact" in "\n".join(dyn.describe())
+    grid = scene(14, 18)  # the patrol within a step of the destination
+    assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "danger"
+    grid = scene(2, 30)
+    assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "move"
+    zone = dyn.hazard_zone(extract(grid), grid.shape)
+    assert zone is not None and zone[20, 28] and not zone[20, 4]

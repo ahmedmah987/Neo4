@@ -27,6 +27,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 from . import frame as fp
 
 UNTESTED, TRANSITION, NO_CHANGE = 0, 1, -1
+STUCK_WALKS = 8  # random walks in a row before the graph is reopened
 
 
 @dataclass(slots=True)
@@ -214,6 +215,7 @@ class GraphAgent:
         self.last_idx: int | None = None
         self.priority = 0
         self.since_reset = 0  # actions taken since the level (re)started
+        self.stuck = 0  # random walks in a row (the frontier is out of reach)
         self.stats: dict[str, int] = {
             "nodes": 0,
             "resets": 0,
@@ -233,6 +235,7 @@ class GraphAgent:
         self.last_key = None
         self.last_idx = None
         self.priority = 0
+        self.stuck = 0
 
     def _key(self, grid: np.ndarray) -> str:
         """State identity of a frame; subclasses may abstract it."""
@@ -309,7 +312,24 @@ class GraphAgent:
     curious = False  # walk towards frontier nodes with unknown-outcome candidates first
 
     def _choose(self, node: Node) -> int | None:
+        idx = self._choose_edge(node)
+        if idx is None or self.stats["random_walks"] == self._walks_before:
+            self.stuck = 0
+        return idx
+
+    _walks_before = 0
+
+    def _choose_edge(self, node: Node) -> int | None:
+        self._walks_before = self.stats["random_walks"]
         top = self.graph.max_group()
+        if self.stuck >= STUCK_WALKS:
+            # Wandering among known transitions has not brought the frontier within
+            # reach (a one-way door, a moving hazard that kept killing on the way):
+            # re-test everything rather than wander for the rest of the budget.
+            self.graph.reopen()
+            self.priority = 0
+            self.stuck = 0
+            self.stats["reopens"] += 1
         while True:
             local = node.untested(self.priority, self.graph.epoch)
             if local:
@@ -345,6 +365,7 @@ class GraphAgent:
         moves = [i for i, r in enumerate(node.result) if r == TRANSITION]
         if moves:
             self.stats["random_walks"] += 1
+            self.stuck += 1
             return self.rng.choice(moves)
         return None
 

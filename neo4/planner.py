@@ -85,12 +85,16 @@ def plan_path(
     dirs: dict[int, tuple[int, int]],
     passable: Callable[[int], bool],
     is_goal: Callable[[set[int], list[tuple[int, int]]], bool],
+    avoid: np.ndarray | None = None,
+    forbidden: Callable[[tuple[int, int], int], bool] | None = None,
 ) -> tuple[list[int], list[tuple[int, int]]] | None:
     """Actions (and the avatar position expected after each) to reach a goal.
 
     ``is_goal`` sees the colours and the coordinates of the cells a move would
     enter. The last action is the one that enters the goal; the position
     recorded for it is where the avatar would land if the move went through.
+    ``avoid`` marks cells no move may enter (a patrol's reach); ``forbidden``
+    rejects a (position, action) pair outright (a move that lost the game).
     """
     rel = me.pixels - np.array([me.y1, me.x1])
     start = (me.x1, me.y1)
@@ -113,10 +117,14 @@ def plan_path(
         pos = queue.popleft()
         expansions += 1
         for aid, d in dirs.items():
+            if forbidden is not None and forbidden(pos, aid):
+                continue
             r = ahead(grid, rel, pos, d)
             if r is None:
                 continue
             colors, coords = r
+            if avoid is not None and any(avoid[y, x] for y, x in coords):
+                continue
             nxt = (pos[0] + d[0], pos[1] + d[1])
             if is_goal(colors, coords):
                 actions, positions = unwind(pos)

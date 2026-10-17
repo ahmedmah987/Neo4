@@ -7,7 +7,11 @@
 * for each colour, how often it blocked the avatar versus let it pass (the
   avatar's move is a *sweep*: every cell between its position and its
   destination counts as crossed, and the nearest band counts as blocking),
-* which colours were in front of the avatar when the game was lost,
+* which colours were in front of the avatar when the game was lost, and which
+  object kinds were touching the avatar's place when it was lost (a patrol that
+  kills on contact),
+* whether the game ends every attempt after a fixed number of actions (a move
+  budget), in which case those losses are not blamed on anything,
 * how often clicking a given object signature changed anything.
 
 ``predict`` turns those statistics into a verdict on a candidate action in a
@@ -28,6 +32,7 @@ from .objects import Diff, Obj, at, diff, find
 from .planner import swept
 
 OK, GAME_OVER, LEVEL_UP = "ok", "game_over", "level_up"
+BUDGET = "budget"  # a loss that the attempt's move budget explains, not the move
 
 MIN_SUPPORT = 3  # observations before a rule may be used for a prediction
 BLOCK_RATE = 0.9  # a colour that stopped the avatar at least this often blocks
@@ -40,6 +45,7 @@ GOAL_LIFT = 5.0  # a goal feature ends levels at least this many times the base 
 NOISE_RATE = 0.5  # a signature churning on this share of steps under every action is noise
 NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for noise
 NOISE_REFRESH = 25  # recompute the noise set every this many observations
+MIN_BUDGET = 5  # an attempt length below this is never read as a move budget
 
 
 @dataclass(slots=True)
@@ -78,6 +84,16 @@ class Dynamics:
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
+        self.killer: Counter = Counter()  # sig -> losses with it touching the avatar's place
+        self.near_count: Counter = Counter()  # sig -> keyboard steps it ended beside the avatar
+        self.contact_deaths = 0  # keyboard losses with a frame to look at, budget losses aside
+        self.attempt = 0  # actions since the attempt began (level start, reset or loss)
+        self.longest_attempt: Counter = Counter()  # level -> longest attempt seen there
+        self.death_lengths: dict[int, Counter] = defaultdict(Counter)  # level -> length -> losses
+        # level -> length -> distinct (avatar position, action) the losses came from: a
+        # budget ends attempts wherever the avatar is; one fatal move repeated does not.
+        self.death_places: dict[tuple[int, int], set] = defaultdict(set)
+        self.last_death_budget = False  # the loss just observed was a budget loss
         self._avatar: tuple | None = None
         self._avatar_dirty = True
         self._noise: frozenset = frozenset()
@@ -95,6 +111,23 @@ class Dynamics:
         outcome: str,
     ) -> None:
         self.observations += 1
+        self.attempt += 1
+        level = self.level_ups
+        self.longest_attempt[level] = max(self.longest_attempt[level], self.attempt)
+        self.last_death_budget = False
+        if outcome == GAME_OVER:
+            self.death_lengths[level][self.attempt] += 1
+            place: tuple = (action.value, data["x"], data["y"]) if data else (action.value,)
+            avatar = self.avatar()
+            me = find(before, avatar) if avatar is not None else None
+            if me is not None:
+                place += (me.x1, me.y1)
+            self.death_places[(level, self.attempt)].add(place)
+            if self.attempt == self.budget():
+                self.last_death_budget = True
+                outcome = BUDGET
+        if outcome != OK:
+            self.attempt = 0
         if outcome == LEVEL_UP:
             self.level_ups += 1
         if not action.is_complex():
@@ -121,7 +154,21 @@ class Dynamics:
         if action.is_complex():
             self._observe_click(data, before, d, outcome)
         else:
-            self._observe_key(action, before, before_grid, d, outcome)
+            self._observe_key(action, before, before_grid, d, outcome, after)
+
+    def new_attempt(self) -> None:
+        """The agent reset the level: the move budget starts over."""
+        self.attempt = 0
+
+    def budget(self) -> int | None:
+        """Actions an attempt may take in the current level before the game ends it,
+        if the level has such a limit: at least two losses fell at the longest
+        attempt length seen in it."""
+        level = self.level_ups
+        n = self.longest_attempt[level]
+        if n < MIN_BUDGET or self.death_lengths[level][n] < 2:
+            return None
+        return n if len(self.death_places[(level, n)]) >= 2 else None
 
     def _observe_click(self, data, before, d: Diff | None, outcome: str) -> None:
         if data is None:
@@ -141,9 +188,13 @@ class Dynamics:
             self.click_death[target.esig] += 1
             self.click_death_at[(target.esig, target.x1, target.y1)] += 1
 
-    def _observe_key(self, action, before, before_grid, d: Diff | None, outcome: str) -> None:
+    def _observe_key(
+        self, action, before, before_grid, d: Diff | None, outcome: str, after=None
+    ) -> None:
         aid = action.value
         self.key_uses[aid] += 1
+        if outcome == BUDGET:
+            return  # the budget ran out on this move; the move itself is not to blame
         if outcome == GAME_OVER:
             self.key_death[aid] += 1
         if d is not None:
@@ -170,6 +221,8 @@ class Dynamics:
             for sig in adjacent:
                 self.goal_adjacent[sig] += 1
         direction = self.direction(aid)
+        if after is not None:
+            self._observe_contact(me, direction, before, after, outcome)
         if direction is None:
             return
         bands = self._swept(me, direction, before_grid)
@@ -204,6 +257,67 @@ class Dynamics:
             suspects = [c for c in colors if not self._crosses(c)]
             for c in suspects or colors:
                 self.cell[c]["blocked"] += 1
+
+    def _observe_contact(self, me: Obj, direction, before, after, outcome: str) -> None:
+        """Who was touching the avatar's place after the move: on an ordinary step
+        the base rate, on a loss the suspects (the frame of a lost game usually
+        still shows the scene, with the patrol standing where the avatar went)."""
+        if outcome == OK:
+            me2 = find(after, me.sig)
+            if me2 is not None:
+                for o in after:
+                    if o is not me2 and not o.scenery and o.sig != me.sig and self._touching(me2, o):
+                        self.near_count[o.sig] += 1
+            return
+        if outcome != GAME_OVER:
+            return
+        self.contact_deaths += 1
+        dx, dy = direction if direction is not None else (0, 0)
+        x1, y1 = min(me.x1, me.x1 + dx), min(me.y1, me.y1 + dy)
+        x2, y2 = max(me.x2, me.x2 + dx), max(me.y2, me.y2 + dy)
+        was_there = {(o.sig, o.x1, o.y1) for o in before}
+        for o in after:
+            if o.scenery or o.sig == me.sig or self._crosses(o.color):
+                continue  # the floor the avatar uncovered by vanishing is not a killer
+            if (o.sig, o.x1, o.y1) in was_there:
+                continue  # it stood there before the move: it did not come for the avatar
+            if o.x1 <= x2 + 1 and o.x2 >= x1 - 1 and o.y1 <= y2 + 1 and o.y2 >= y1 - 1:
+                self.killer[o.sig] += 1
+
+    @staticmethod
+    def _touching(a: Obj, b: Obj) -> bool:
+        return b.x1 <= a.x2 + 1 and b.x2 >= a.x1 - 1 and b.y1 <= a.y2 + 1 and b.y2 >= a.y1 - 1
+
+    def hazard_sigs(self) -> set[tuple]:
+        """Object kinds that were touching the avatar's place when the game was
+        lost far more often than they are beside it otherwise."""
+        if not self.contact_deaths or not self.key_frames:
+            return set()
+        base = self.contact_deaths / self.key_frames
+        out = set()
+        for sig, n in self.killer.items():
+            total = n + self.near_count[sig]
+            if n >= DEATH_SUPPORT and n / total >= GOAL_LIFT * base:
+                out.add(sig)
+        return out
+
+    def step_size(self) -> int:
+        """The longest move the keyboard gives the avatar (1 when unknown)."""
+        return max((max(abs(dx), abs(dy)) for dx, dy in self.directions().values()), default=1)
+
+    def hazard_zone(self, objs, shape: tuple[int, int]) -> np.ndarray | None:
+        """Cells within one avatar step of an object of a hazard kind, or None."""
+        sigs = self.hazard_sigs()
+        if not sigs:
+            return None
+        margin = self.step_size()
+        zone = np.zeros(shape, dtype=bool)
+        hit = False
+        for o in objs:
+            if o.sig in sigs:
+                hit = True
+                zone[max(o.y1 - margin, 0) : o.y2 + margin + 1, max(o.x1 - margin, 0) : o.x2 + margin + 1] = True
+        return zone if hit else None
 
     @staticmethod
     def _swept(
@@ -460,6 +574,14 @@ class Dynamics:
         me = find(objs, avatar)
         if me is None:
             return Prediction("unknown")
+        zone = self.hazard_zone(objs, grid.shape)
+        if zone is not None:
+            dx, dy = direction
+            ys, xs = me.pixels[:, 0], me.pixels[:, 1]
+            here = zone[ys, xs].any()
+            ys2, xs2 = np.clip(ys + dy, 0, grid.shape[0] - 1), np.clip(xs + dx, 0, grid.shape[1] - 1)
+            if zone[ys2, xs2].any() and not here:
+                return Prediction("danger", self.contact_deaths, "a kind that kills on contact is within a step")
         colors = self._ahead(me, direction, grid)
         verdict_danger = verdict_block = None
         all_pass = True
@@ -527,6 +649,13 @@ class Dynamics:
                             f"  {what} ahead: blocked {c['blocked']}/{n} times "
                             "(depends on something else)"
                         )
+            budget = self.budget()
+            if budget is not None:
+                lines.append(f"every attempt ends after {budget} actions (a move budget)")
+            for sig in sorted(self.hazard_sigs(), key=repr):
+                lines.append(
+                    f"  colour-{sig[0]} {sig[2]}x{sig[1]} kills on contact ({self.killer[sig]}/{self.killer[sig] + self.near_count[sig]} contacts)"
+                )
             for color, n in self.hazard.most_common():
                 visits = n + sum(self.cell[color].values())
                 lines.append(f"  colour {color} ahead ended the game {n}/{visits} times")

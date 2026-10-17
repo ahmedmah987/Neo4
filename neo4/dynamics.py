@@ -33,7 +33,7 @@ DANGER_RATE = 0.5  # share of visits that ended the game
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
 GOAL_RATE = 0.3  # share of a colour's (or click target's) visits that ended a level
-NOISE_RATE = 0.3  # a signature churning on this share of steps under every action is noise
+NOISE_RATE = 0.5  # a signature churning on this share of steps under every action is noise
 NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for noise
 NOISE_REFRESH = 25  # recompute the noise set every this many observations
 
@@ -75,7 +75,14 @@ class Dynamics:
         self.observations += 1
         d = diff(before, after) if after is not None and outcome == OK else None
         if d is not None:
-            cls = "click" if action.is_complex() else action.value
+            # Clicks on different targets are different actions: something that
+            # changes only when one particular target is clicked is a mechanic,
+            # something that changes whatever is clicked is noise.
+            if action.is_complex():
+                target = at(before, data["x"], data["y"]) if data else None
+                cls: object = ("click", target.sig if target is not None else None)
+            else:
+                cls = action.value
             self.steps_by_class[cls] += 1
             for b, _, _, _ in d.moved:
                 self.churn[b.sig][cls] += 1
@@ -159,7 +166,7 @@ class Dynamics:
             self._noise_at = self.observations
             classes = [c for c, n in self.steps_by_class.items() if n >= NOISE_MIN_STEPS]
             out = set(self._noise)  # membership is sticky: a changing set would re-key the graph
-            if classes:
+            if len(classes) >= 2:
                 for sig, c in self.churn.items():
                     if self._controlled(sig):
                         continue

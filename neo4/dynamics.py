@@ -32,7 +32,7 @@ import numpy as np
 from arcengine import GameAction
 
 from .objects import Diff, Obj, at, diff, find
-from .planner import swept
+from .planner import ahead, swept
 
 OK, GAME_OVER, LEVEL_UP = "ok", "game_over", "level_up"
 BUDGET = "budget"  # a loss that the attempt's move budget explains, not the move
@@ -98,6 +98,10 @@ class Dynamics:
         self.tile_entered: Counter = Counter()  # tile sig -> moves that ended on it
         self.state_graph: dict[tuple[frozenset, tuple], frozenset] = {}  # (state, switch) -> state
         self._indicators: set[tuple] = set()
+        # (sig, x1, y1) of an object on the latest frame -> its displacement on the
+        # last step ((0, 0) when it stood still): the state a patrol's motion is
+        # extrapolated from.
+        self.velocity: dict[tuple, tuple[int, int]] = {}
         self.attempt = 0  # actions since the attempt began (level start, reset or loss)
         self.longest_attempt: Counter = Counter()  # level -> longest attempt seen there
         self.death_lengths: dict[int, Counter] = defaultdict(Counter)  # level -> length -> losses
@@ -147,6 +151,7 @@ class Dynamics:
                 self.instances[sig] += n
         d = diff(before, after) if after is not None and outcome == OK else None
         if d is not None:
+            self._track_velocity(d)
             # Clicks on different targets are different actions: something that
             # changes only when one particular target is clicked is a mechanic,
             # something that changes whatever is clicked is noise.
@@ -436,19 +441,60 @@ class Dynamics:
         """The longest move the keyboard gives the avatar (1 when unknown)."""
         return max((max(abs(dx), abs(dy)) for dx, dy in self.directions().values()), default=1)
 
+    def _track_velocity(self, d: Diff) -> None:
+        new: dict[tuple, tuple[int, int]] = {}
+        for b, a, dx, dy in d.moved:
+            if not b.scenery:
+                new[(a.sig, a.x1, a.y1)] = (dx, dy)
+        for b in d.unchanged:
+            if not b.scenery and (b.sig, b.x1, b.y1) in self.velocity:
+                new[(b.sig, b.x1, b.y1)] = (0, 0)
+        self.velocity = new
+
     def hazard_zone(self, objs, shape: tuple[int, int]) -> np.ndarray | None:
         """Cells within one avatar step of an object of a hazard kind, or None."""
+        static, _ = self.hazard_zones(objs, None, shape, 0)
+        return static
+
+    def hazard_zones(
+        self, objs, grid: np.ndarray | None, shape: tuple[int, int], horizon: int
+    ) -> tuple[np.ndarray | None, list[np.ndarray]]:
+        """The reach (one avatar step around) of every hazard-kind object: a static
+        zone for the ones standing still, and for the ones in motion one zone per
+        future step up to ``horizon``, extrapolated with a bounce model — keep the
+        last displacement, reverse it when the cells ahead cannot be crossed.
+        Without a grid everything is treated as standing still."""
         sigs = self.hazard_sigs()
         if not sigs:
-            return None
+            return None, []
         margin = self.step_size()
-        zone = np.zeros(shape, dtype=bool)
+        static = np.zeros(shape, dtype=bool)
+        zones = [np.zeros(shape, dtype=bool) for _ in range(horizon)]
         hit = False
+
+        def paint(zone: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> None:
+            zone[max(y1 - margin, 0) : y2 + margin + 1, max(x1 - margin, 0) : x2 + margin + 1] = True
+
         for o in objs:
-            if o.sig in sigs:
-                hit = True
-                zone[max(o.y1 - margin, 0) : o.y2 + margin + 1, max(o.x1 - margin, 0) : o.x2 + margin + 1] = True
-        return zone if hit else None
+            if o.sig not in sigs:
+                continue
+            hit = True
+            vec = self.velocity.get((o.sig, o.x1, o.y1), (0, 0))
+            if vec == (0, 0) or grid is None or not horizon:
+                paint(static, o.x1, o.y1, o.x2, o.y2)
+                continue
+            rel = o.pixels - np.array([o.y1, o.x1])
+            pos = (o.x1, o.y1)
+            for t in range(horizon):
+                r = ahead(grid, rel, pos, vec)
+                if r is None or not all(self.passable(c) for c in r[0]):
+                    vec = (-vec[0], -vec[1])
+                    r = ahead(grid, rel, pos, vec)
+                    if r is None:
+                        break
+                pos = (pos[0] + vec[0], pos[1] + vec[1])
+                paint(zones[t], pos[0], pos[1], pos[0] + o.w - 1, pos[1] + o.h - 1)
+        return (static if hit and static.any() else None), zones
 
     @staticmethod
     def _swept(
@@ -710,7 +756,12 @@ class Dynamics:
         me = self.body(find(objs, avatar), objs)
         if me is None:
             return Prediction("unknown")
-        zone = self.hazard_zone(objs, grid.shape)
+        static, zones = self.hazard_zones(objs, grid, grid.shape, 1)
+        zone = None
+        if static is not None or zones:
+            zone = np.zeros(grid.shape, dtype=bool) if static is None else static.copy()
+            for z in zones:
+                zone |= z
         if zone is not None:
             dx, dy = direction
             ys, xs = me.pixels[:, 0], me.pixels[:, 1]

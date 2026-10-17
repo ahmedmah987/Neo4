@@ -17,7 +17,7 @@ import numpy as np
 
 from .objects import Obj
 
-MAX_EXPANSIONS = 20000
+MAX_EXPANSIONS = 60000
 
 
 def swept(
@@ -87,6 +87,7 @@ def plan_path(
     is_goal: Callable[[set[int], list[tuple[int, int]]], bool],
     avoid: np.ndarray | None = None,
     forbidden: Callable[[tuple[int, int], int], bool] | None = None,
+    avoid_t: list[np.ndarray] | None = None,
 ) -> tuple[list[int], list[tuple[int, int]]] | None:
     """Actions (and the avatar position expected after each) to reach a goal.
 
@@ -94,27 +95,33 @@ def plan_path(
     enter. The last action is the one that enters the goal; the position
     recorded for it is where the avatar would land if the move went through.
     ``avoid`` marks cells no move may enter (a patrol's reach); ``forbidden``
-    rejects a (position, action) pair outright (a move that lost the game).
+    rejects a (position, action) pair outright (a move that lost the game);
+    ``avoid_t[t]`` marks the cells a moving hazard is predicted to reach after
+    ``t + 1`` moves, so the search runs over (position, time) while the
+    prediction lasts and over positions alone beyond it.
     """
     rel = me.pixels - np.array([me.y1, me.x1])
     start = (me.x1, me.y1)
-    parent: dict[tuple[int, int], tuple[tuple[int, int], int]] = {}
-    seen = {start}
-    queue: deque[tuple[int, int]] = deque([start])
+    horizon = len(avoid_t) if avoid_t else 0
+    State = tuple[tuple[int, int], int]
+    parent: dict[State, tuple[State, int]] = {}
+    seen = {(start, 0)}
+    queue: deque[State] = deque([(start, 0)])
     expansions = 0
 
-    def unwind(pos: tuple[int, int]) -> tuple[list[int], list[tuple[int, int]]]:
+    def unwind(state: State) -> tuple[list[int], list[tuple[int, int]]]:
         actions: list[int] = []
         positions: list[tuple[int, int]] = []
-        while pos != start:
-            prev, aid = parent[pos]
+        while state != (start, 0):
+            prev, aid = parent[state]
             actions.append(aid)
-            positions.append(pos)
-            pos = prev
+            positions.append(state[0])
+            state = prev
         return actions[::-1], positions[::-1]
 
     while queue and expansions < MAX_EXPANSIONS:
-        pos = queue.popleft()
+        state = queue.popleft()
+        pos, t = state
         expansions += 1
         for aid, d in dirs.items():
             if forbidden is not None and forbidden(pos, aid):
@@ -125,13 +132,16 @@ def plan_path(
             colors, coords = r
             if avoid is not None and any(avoid[y, x] for y, x in coords):
                 continue
+            if t < horizon and any(avoid_t[t][y, x] for y, x in coords):  # type: ignore[index]
+                continue
             nxt = (pos[0] + d[0], pos[1] + d[1])
             if is_goal(colors, coords):
-                actions, positions = unwind(pos)
+                actions, positions = unwind(state)
                 return actions + [aid], positions + [nxt]
-            if nxt in seen or not all(passable(c) for c in colors):
+            nstate = (nxt, min(t + 1, horizon))
+            if nstate in seen or not all(passable(c) for c in colors):
                 continue
-            seen.add(nxt)
-            parent[nxt] = (pos, aid)
-            queue.append(nxt)
+            seen.add(nstate)
+            parent[nstate] = (state, aid)
+            queue.append(nstate)
     return None

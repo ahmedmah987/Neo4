@@ -40,6 +40,7 @@ MAX_PLANS_PER_LEVEL = 5  # goal plans per level and avatar state
 MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
+HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
 
 
 class ModelAgent(GraphAgent):
@@ -316,10 +317,11 @@ class ModelAgent(GraphAgent):
                 return None
             tests = [lambda cols, coords: any(target[y, x] for y, x in coords)]
         found = None
+        static, zones = self.dyn.hazard_zones(self.cur_objs(), self.cur_grid, self.cur_grid.shape, HORIZON)
         for is_goal in tests:
             found = plan_path(
                 self.cur_grid, me, dirs, self.dyn.passable, is_goal,
-                avoid=self.dyn.hazard_zone(self.cur_objs(), self.cur_grid.shape),
+                avoid=static, avoid_t=zones,
                 forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
             )
             if found is not None:
@@ -358,10 +360,11 @@ class ModelAgent(GraphAgent):
         for o in objs:
             if o.sig in choice:
                 target[o.pixels[:, 0], o.pixels[:, 1]] = True
+        static, zones = self.dyn.hazard_zones(objs, self.cur_grid, self.cur_grid.shape, HORIZON)
         found = plan_path(
             self.cur_grid, me, self.dyn.directions(), self.dyn.passable,
             lambda cols, coords: any(target[y, x] for y, x in coords),
-            avoid=self.dyn.hazard_zone(objs, self.cur_grid.shape),
+            avoid=static, avoid_t=zones,
             forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
         )
         if found is None:

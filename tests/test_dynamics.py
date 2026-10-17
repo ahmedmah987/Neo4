@@ -254,3 +254,46 @@ def test_body_includes_sprites_that_move_in_lockstep_with_the_avatar():
     grid = scene(36)
     assert dyn.predict(GameAction.ACTION1, None, extract(grid), grid).verdict == "blocked"
     assert "moves with it as one body: colour-6 2x1" in "\n".join(dyn.describe())
+
+
+def test_moving_hazard_zone_follows_a_bounce_model():
+    """A kind that kills on contact and is in motion is expected where its motion
+    carries it, reversing at walls; a standing one is expected where it is."""
+    dyn = Dynamics()
+
+    def scene(ax, px):
+        g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+        g[:, 30:32] = 3  # a wall the patrol bounces off
+        g[20:23, ax : ax + 3] = 9  # avatar 3x3 (bigger than the patrol, so it wins the avatar role)
+        g[40:42, px : px + 2] = 6  # the patrol, far below
+        return g
+
+    x, p = 2, 10
+    for _ in range(2):
+        x, p = 2, 10
+        for _ in range(10):
+            before, after = scene(x, p), scene(x + 2, p + 2)
+            dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+            x, p = x + 2, p + 2
+    for _ in range(2):  # the patrol steps onto the avatar: lost
+        before = scene(14, 18)
+        after = scene(14, 16)
+        after[20:23, 14:17] = 0
+        after[40:42, 16:18] = 0
+        after[20:22, 16:18] = 6  # the patrol now stands where the avatar went
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), GAME_OVER)
+    patrol = next(o.sig for o in extract(scene(2, 10)) if o.color == 6)
+    assert dyn.avatar()[0] == 9 and dyn.hazard_sigs() == {patrol}
+    # the last tracked frame: the patrol at x=26 moving +2 per step towards the wall at 30
+    before, after = scene(2, 24), scene(4, 26)
+    dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+    objs = extract(after)
+    static, zones = dyn.hazard_zones(objs, after, after.shape, 3)
+    assert static is None and len(zones) == 3
+    assert zones[0][40, 28] and not zones[0][40, 20]  # step 1: at x=28 (reach 26..31)
+    assert zones[2][40, 26] and not zones[2][40, 32]  # step 3: bounced back to x=26
+    # a patrol seen standing still is a static zone
+    still = scene(4, 26)
+    dyn.observe(GameAction.ACTION1, None, extract(after), after, extract(still), OK)
+    static, zones = dyn.hazard_zones(extract(still), still, still.shape, 3)
+    assert static is not None and static[40, 26] and not any(z.any() for z in zones)

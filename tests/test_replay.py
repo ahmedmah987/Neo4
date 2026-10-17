@@ -80,6 +80,7 @@ def level_steps(agent, env, steps):
 def test_solution_replay_makes_later_levels_cheap():
     for cls in (GraphAgent, ModelAgent):
         agent = cls(seed=0)
+        agent.max_replays = 2  # off by default: measured a loss on the public games
         steps = level_steps(agent, ButtonRoom(), 3000)
         assert len(steps) == 3, (cls.__name__, steps, agent.stats)
         assert agent.stats["replays"] >= 2 and agent.stats["replay_steps"] >= 6, agent.stats

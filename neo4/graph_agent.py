@@ -28,7 +28,7 @@ from . import frame as fp
 
 UNTESTED, TRANSITION, NO_CHANGE = 0, 1, -1
 STUCK_WALKS = 8  # random walks in a row before the graph is reopened
-MAX_REPLAYS = 2  # attempts per level at replaying the previous level's solution
+MAX_REPLAYS = 0  # attempts per level at replaying the previous level's solution (off: measured a loss)
 
 
 @dataclass(slots=True)
@@ -308,7 +308,7 @@ class GraphAgent:
     def _begin_replay(self) -> None:
         # Only sequences of clicks are replayed: a keyboard route belongs to one
         # layout, and the planner carries what a route taught over to the next.
-        if self.solutions and self.replay_tries < MAX_REPLAYS and all(
+        if self.solutions and self.replay_tries < self.max_replays and all(
             point is not None for _, _, point in self.solutions[-1]
         ):
             self.replay = list(self.solutions[-1])
@@ -430,6 +430,7 @@ class GraphAgent:
         return self.rng.choice(local)
 
     curious = False  # walk towards frontier nodes with unknown-outcome candidates first
+    max_replays = MAX_REPLAYS  # solution replays per level; 0 unless a variant turns them on
     best_first = False  # walk towards the frontier nodes closest to the learned goal relation
 
     def _choose(self, node: Node) -> int | None:

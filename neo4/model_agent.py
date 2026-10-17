@@ -146,10 +146,27 @@ class ModelAgent(GraphAgent):
         dy = max(0, max(a.y1, b.y1) - min(a.y2, b.y2))
         return dx + dy
 
+    @staticmethod
+    def _summary(objs: list[Obj]) -> list[tuple]:
+        return [(o.sig, o.x1, o.y1, o.x2, o.y2) for o in objs]
+
+    @classmethod
+    def _gap_in(cls, summary: list[tuple], m: tuple, t: tuple) -> int | None:
+        ms = [s for s in summary if s[0] == m]
+        ts = [s for s in summary if s[0] == t]
+        if not ms or not ts:
+            return None
+        return min(
+            max(0, max(a[1], b[1]) - min(a[3], b[3])) + max(0, max(a[2], b[2]) - min(a[4], b[4]))
+            for a in ms for b in ts
+        )
+
     def _learn_relations(self, start: list[Obj] | None, end: list[Obj] | None) -> None:
         """From a level's first and last frames: the kinds whose instances moved (or
-        appeared) and ended nearest to a kind that stood still, ranked by how much
-        the gap closed. The two best pairs become the heuristic for later levels."""
+        appeared) and ended nearest to a kind that stood still. Candidates are ranked
+        by how steadily their gap closed along the solution path (the shortest known
+        route through the level graph), then by how much it closed; the two best
+        pairs become the heuristic for later levels."""
         if not start or not end:
             return
         s0: dict[tuple, list[Obj]] = {}
@@ -161,6 +178,9 @@ class ModelAgent(GraphAgent):
         places = lambda objs: sorted((o.x1, o.y1) for o in objs)
         moved = {k for k in s1 if k not in s0 or places(s0[k]) != places(s1[k])}
         static = {k for k in s0 if k in s1 and places(s0[k]) == places(s1[k])}
+        edges = self._solution_edges() or []
+        path = [self.graph.nodes[k].summary for k, _ in edges if self.graph.nodes[k].summary is not None]
+        path.append(self._summary(end))
         scored = []
         for m in moved:
             if m not in s0:
@@ -168,11 +188,16 @@ class ModelAgent(GraphAgent):
             for t in static:
                 g0 = min(self._gap(a, b) for a in s0[m] for b in s0[t])
                 g1 = min(self._gap(a, b) for a in s1[m] for b in s1[t])
-                if g1 < g0:
-                    scored.append((g0 - g1, g1, m, t))
-        scored.sort(key=lambda r: (-r[0], r[1]))
+                if g1 >= g0:
+                    continue
+                gaps = [g for g in (self._gap_in(sm, m, t) for sm in path) if g is not None]
+                down = sum(1 for a, b in zip(gaps, gaps[1:]) if b < a)
+                up = sum(1 for a, b in zip(gaps, gaps[1:]) if b > a)
+                steadiness = (down - up) / max(1, len(gaps) - 1)
+                scored.append((steadiness, g0 - g1, g1, m, t))
+        scored.sort(key=lambda r: (-r[0], -r[1], r[2]))
         if scored:
-            self.relations = [(m, t) for _, _, m, t in scored[:2]]
+            self.relations = [(m, t) for _, _, _, m, t in scored[:2]]
             self.best_first = True
 
     def _heuristic(self, objs: list[Obj]) -> float | None:
@@ -271,6 +296,8 @@ class ModelAgent(GraphAgent):
         objs = self.cur_objs()
         avatar = self.dyn.avatar()
         me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
+        if node.summary is None:
+            node.summary = self._summary(objs)
         if node.h is None and self.relations:
             node.h = self._heuristic(objs)
         idx = self._replay_step(node)

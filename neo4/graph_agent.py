@@ -55,6 +55,7 @@ class Node:
     deaths: list[int] = field(default_factory=list)  # times the edge ended the game
     interest: int = 0  # untested candidates whose outcome is unknown; set by model agents
     h: float | None = None  # how far the frame is from the learned goal relation; set by model agents
+    summary: list | None = None  # (sig, x1, y1, x2, y2) of the frame's objects; set by model agents
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)
@@ -266,6 +267,19 @@ class GraphAgent:
     def _solution(self) -> list[tuple[int, tuple | None, tuple[int, int] | None]] | None:
         """The shortest known action sequence from the level's first frame to the
         move that completed it: (action id, click-target signature, click point)."""
+        edges = self._solution_edges()
+        if edges is None:
+            return None
+        out = []
+        for k, i in edges:
+            c = self.graph.nodes[k].cands[i]
+            point = (c.data["x"], c.data["y"]) if c.data is not None else None
+            out.append((c.action.value, c.target, point))
+        return out
+
+    def _solution_edges(self) -> list[tuple[str, int]] | None:
+        """The (node, candidate) edges of the shortest known path from the level's
+        first frame to the completing move."""
         if self.first_key is None or self.last_key is None or self.last_idx is None:
             return None
         if self.first_key not in self.graph.nodes:
@@ -289,12 +303,7 @@ class GraphAgent:
             k, i = prev[k]
             edges.append((k, i))
         edges.reverse()
-        out = []
-        for k, i in edges:
-            c = self.graph.nodes[k].cands[i]
-            point = (c.data["x"], c.data["y"]) if c.data is not None else None
-            out.append((c.action.value, c.target, point))
-        return out
+        return edges
 
     def _begin_replay(self) -> None:
         # Only sequences of clicks are replayed: a keyboard route belongs to one

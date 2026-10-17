@@ -44,6 +44,7 @@ The project has two strands that share one codebase:
 | 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | done — neutral (23 / 110, 0.44): it fires on `tu93` and `g50t` a dozen times a run and saves nothing measurable; kept |
 | 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | done — neutral (23 / 110, 0.44): `ls20` learns its energy bar and refill pickups, loses the game less, and still does not reach its second level; kept — second no-gain phase in a row |
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
+| 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score 0.39 → 0.39 on the same seeds; the old 12,000-step run of the Phase 7 agent scored 0.30 | done |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -619,8 +620,12 @@ avatar step around them) still walls off the corridor the route needs. The mecha
 right where it applies and is kept; it is the second phase in a row without a gain on the
 score, which is where this loop stops.
 
-**Where this stands after Phases 15–16.** The default agent is unchanged in result since
-Phase 12: 23 median levels, 110 over all runs, official-style score 0.44. The two
+**Where this stands after Phases 15–20.** The default agent is unchanged in result since
+Phase 12: 23 median levels, 110 over all runs, official-style score 0.44 at 4,000 steps,
+1.09 levels per run at 12,000. Phases 17 and 18 (budget-aware attempts, resource bars)
+were neutral like 15 and 16, each right where it applies and each blocked by the next
+mechanic in the same game; Phase 19 validated the bundle through the official
+framework's own loop and gave it the caps the threaded competition rerun needs. The two
 mechanics that these phases model — a state the avatar must be in, and hazards that move
 — are each implemented, tested on toy rooms, and blocked on the public games by a
 *third* mechanic in the same game (`ls20`'s energy bar; `tu93`'s charge trigger). That is
@@ -669,6 +674,25 @@ one-time, the cycle of "reach the box, find it locked, walk to a switch, come ba
 costs more than one bar, and the agent cannot yet ration the pickups across that cycle.
 Second scoring phase in a row without a gain: by the loop's rule, development stops
 here, and the last item of the plan — the scaling check — is a measurement.
+
+## Results — Phase 20 (scaling check at 12,000 steps)
+
+The default agent, three seeds, 12,000 steps per game (`results/raw/model@12k-p18.jsonl`),
+against the same seeds at 4,000 steps:
+
+| budget | levels per run | official-style score (seeds 0–2) |
+|---|---|---|
+| 4,000 | 0.88 | 0.39 |
+| 12,000 | 1.09 | 0.39 |
+| 12,000, Phase 7 agent (old run) | 0.89 | 0.30 |
+| 12,000, graph exploration (old run) | 0.69 | 0.24 |
+
+A larger budget adds levels (+24 %), and since a level's score counts only the actions
+until it was completed, it can only add score: the gain comes from `tu93` (a fifth
+level on two seeds), `dc22`, `vc33` and `sp80` (a third level each). At the same budget
+the current agent completes 22 % more levels than the Phase 7 agent and 58 % more than
+exploration. The practical reading for a submission is that the action cap in the
+bundle should be as large as the wall-clock allowance permits.
 
 ## The competition metric, and what it says about this agent
 

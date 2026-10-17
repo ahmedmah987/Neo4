@@ -66,7 +66,7 @@ def run(agent, steps=3000):
 
 
 def test_model_agent_touches_objects_faster_than_exhaustive_exploration():
-    model = [ModelAgent(seed=s) for s in range(3)]
+    model = [ModelAgent(seed=s, explore=True) for s in range(3)]
     m = [run(a) for a in model]
     g = [run(GraphAgent(seed=s)) for s in range(3)]
     assert sum(a.stats["explore_plans"] for a in model) >= 3

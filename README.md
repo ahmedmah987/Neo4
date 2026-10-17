@@ -18,8 +18,8 @@ solve all of them; frontier language models used directly solve almost none.
 | 5 | **Instance-level click rules**: outcomes per object instance (signature + position), not per kind | done — danger rules kept, no-op rules dropped |
 | 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | done — no gain, kept as `model-cur` |
 | 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | done |
-| 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | in progress |
-| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next |
+| 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | done — faster first levels, no extra levels; kept as `model-explore` |
+| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next (not started) |
 | 9 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
@@ -265,6 +265,23 @@ Per game the model is ahead on `dc22` (2 vs 1), `ft09` (2 vs 1), `lp85` (2 vs 1)
 everywhere (`ls20` 198 vs 640 steps, `lp85` 36 vs 156, `lf52` 202 vs 597, `dc22` 805 vs
 1,551). The rules compound with the budget: the more steps, the more of them the pruning
 saves and the more levels the saved steps buy.
+
+## Results — Phase 8a (object-targeted exploration): faster, not further
+
+When nothing of unknown outcome is left to test at the current node, the agent plans a
+route to the nearest object the avatar has never touched and goes there, instead of
+grinding through moves whose outcome it can predict. On a toy open room this reaches the
+goal in ~55 steps against ~650 for exhaustive exploration, and on `ls20` the first level
+falls in 200 steps instead of 604. It fires on few public games, though (`ls20`, `re86`,
+`bp35`, `tu93`), buys no additional level anywhere at 4,000 steps (19 / 90 against
+20 / 93), and costs on `tu93` (10 vs 13 levels over five seeds), where "touching" an
+object pushes it and scrambles the puzzle. Off by default; `model-explore` keeps it.
+
+Two other things the diagnostics settled: `tn36` and `cn04` always lose at exactly 61 and
+75 steps — a step limit, nothing to avoid — and `sp80` loses on ACTION5 145 times per
+run but on only 20 % of its uses, with nothing in the avatar's surroundings separating
+the fatal uses from the safe ones; an action-level danger rule (an action that loses the
+game on half its uses) is in place but does not fire there.
 
 ## Attribution and licence
 

@@ -51,6 +51,7 @@ class ModelAgent(GraphAgent):
         plan: bool = True,
         abstract: bool = False,
         curious: bool = False,
+        explore: bool = False,
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
@@ -58,6 +59,7 @@ class ModelAgent(GraphAgent):
         self.planning = plan
         self.abstract = abstract
         self.curious = curious
+        self.explore = explore
         self.noise: frozenset = frozenset()
         self.rebuilt_this_level = False
         self.last_cand: tuple[GameAction, dict[str, int] | None] | None = None
@@ -171,7 +173,7 @@ class ModelAgent(GraphAgent):
             else:
                 self._verdicts[i] = verdict
         node.interest = sum(1 for v in self._verdicts.values() if v == "unknown")
-        if self.planning and node.interest == 0 and not self.plan:
+        if self.explore and node.interest == 0 and not self.plan:
             # Nothing unknown to test here: go and touch something the avatar has not
             # touched yet, rather than grinding through moves whose outcome is known.
             idx = self._make_plan(node, me, "explore")
@@ -310,3 +312,12 @@ class ModelCuriousAgent(ModelAgent):
 
     def __init__(self, seed: int = 0) -> None:
         super().__init__(seed, curious=True)
+
+
+class ModelExploreAgent(ModelAgent):
+    """Ablation: the default model agent plus object-targeted exploration."""
+
+    name = "model-explore"
+
+    def __init__(self, seed: int = 0) -> None:
+        super().__init__(seed, explore=True)

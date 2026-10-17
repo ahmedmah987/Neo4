@@ -45,6 +45,8 @@ The project has two strands that share one codebase:
 | 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | done — neutral (23 / 110, 0.44): `ls20` learns its energy bar and refill pickups, loses the game less, and still does not reach its second level; kept — second no-gain phase in a row |
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
 | 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score unchanged (0.39 → 0.39 on the same seeds): levels found late score nothing | done |
+| 21 | **Solution replay**: the shortest click sequence that completed a level, replayed by target signature in the next | done — a loss (0.41 vs 0.44): sequences belong to one layout; off by default, kept as a variant |
+| 22 | **Difference reduction**: the kinds that came together when a level ended (a moving kind, a static kind) learned as the goal relation; later levels explored best-first towards the frames where their gap is smallest | measuring — `vc33`'s second level 36 actions instead of 85–138 |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -697,6 +699,27 @@ from a model that understands the level, not from a longer search. At the same b
 the current agent completes 22 % more levels than the Phase 7 agent and 58 % more than
 exploration, which is the "beyond" strand's measure, not the competition's. For a
 submission the action cap still costs nothing as long as the wall clock allows it.
+
+## Results — Phase 21 (solution replay): a loss, off by default
+
+The hypothesis: the later levels of a click game repeat its mechanic with a new layout,
+so the sequence that completed one level should be a good first try at the next. Every
+click candidate now carries its target's signature (colour, size, exact shape); at a
+level-up the shortest known sequence from the level's first frame to its completing
+move is extracted from the level graph, and in the next level it is replayed, each click
+going to the nearest target of the recorded signature, aborting at the first missing
+target or no-change step. On a toy room with three buttons to press in order the second
+and third levels fall in three clicks each (`tests/test_replay.py`).
+
+On the public games it transfers nothing: `lp85`'s sequence is 37 clicks that belong to
+its first layout; `vc33`'s is the number of presses one layout needed; `r11l`'s first
+target changes shape after it is clicked. Over the sweep **0.41 against 0.44** (109 /
+110 levels): `vc33` loses 0.5 because the replay's wasted clicks are paid for on its
+second level, the one it completes cheaply. Off by default (`max_replays = 0`), kept as
+a variant. What the accounting behind it showed is the real finding: in a click game's
+later levels nearly every click produces a new state (2,500 distinct states in a
+4,000-step run), so raw exploration of the state graph cannot finish — the search needs
+a direction, which is what Phase 22 gives it.
 
 ## The competition metric, and what it says about this agent
 

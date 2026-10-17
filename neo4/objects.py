@@ -62,9 +62,21 @@ class Obj:
 
 
 def _shape_hash(c: fp.Component) -> str:
+    """Hash of the sprite's shape, the same under rotation and mirroring.
+
+    A sprite with an orientation marker (tu93's player has an "eye" pixel
+    that turns with it) must keep one identity as it turns, so the hash is
+    taken over the canonical member of the eight dihedral transforms.
+    """
     local = np.zeros((c.height, c.width), dtype=bool)
     local[c.pixels[:, 0] - c.y1, c.pixels[:, 1] - c.x1] = True
-    return hashlib.blake2b(np.packbits(local).tobytes(), digest_size=6).hexdigest()
+    variants = []
+    for k in range(4):
+        r = np.rot90(local, k)
+        variants.append(r)
+        variants.append(np.fliplr(r))
+    canon = min(variants, key=lambda m: (m.shape, np.packbits(m).tobytes()))
+    return hashlib.blake2b(np.packbits(canon).tobytes() + bytes(canon.shape), digest_size=6).hexdigest()
 
 
 class Objects(list):
@@ -93,6 +105,7 @@ def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> Objects:
         if c.color == fp.MASK_COLOR:
             continue
         shape = _shape_hash(c) if c.area <= SMALL_AREA else None
+        # The signature's size fields are orientation-free (smaller side, larger side).
         objs.append(
             Obj(
                 color=c.color,
@@ -101,7 +114,7 @@ def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> Objects:
                 w=c.width,
                 h=c.height,
                 area=c.area,
-                sig=(c.color, c.height, c.width, shape),
+                sig=(c.color, min(c.height, c.width), max(c.height, c.width), shape),
                 pixels=c.pixels,
             )
         )

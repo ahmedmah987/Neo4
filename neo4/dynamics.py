@@ -69,6 +69,8 @@ class Dynamics:
         self.goal_adjacent: Counter = Counter()  # signatures touching the avatar when a level ended
         self.adjacent_count: Counter = Counter()  # signature -> keyboard steps it touched the avatar
         self.goal_action: Counter = Counter()  # keyboard action id -> levels it completed
+        self.instances: Counter = Counter()  # signature -> objects of it seen over keyboard frames
+        self.key_frames = 0
         self.key_uses: Counter = Counter()  # keyboard action id -> times used
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
@@ -92,6 +94,10 @@ class Dynamics:
         self.observations += 1
         if outcome == LEVEL_UP:
             self.level_ups += 1
+        if not action.is_complex():
+            self.key_frames += 1
+            for sig, n in Counter(o.sig for o in before if not o.scenery).items():
+                self.instances[sig] += n
         d = diff(before, after) if after is not None and outcome == OK else None
         if d is not None:
             # Clicks on different targets are different actions: something that
@@ -274,14 +280,22 @@ class Dynamics:
         """Signature that the keyboard moves most often."""
         if self._avatar_dirty:
             noise = self.noise()
-            score: Counter = Counter()
+            moves: Counter = Counter()
             for (_, sig), c in self.move.items():
                 if sig in noise:
                     continue
-                score[sig] += sum(n for (dx, dy), n in c.items() if (dx, dy) != (0, 0))
+                moves[sig] += sum(n for (dx, dy), n in c.items() if (dx, dy) != (0, 0))
+            # The avatar is usually the one object of its kind. A floor made of
+            # identical tiles "moves" whenever the avatar covers one of them (the
+            # matcher pairs the tile that vanished with the one that reappeared),
+            # so moves are weighed against how many instances the kind has.
+            def score(sig: tuple) -> float:
+                mean_instances = self.instances[sig] / self.key_frames if self.key_frames else 1.0
+                return moves[sig] / max(1.0, mean_instances)
+
             # Ties (a hole inside the avatar moves exactly as often) go to the bigger sprite.
-            best = max(score.items(), key=lambda kv: (kv[1], kv[0][1] * kv[0][2]), default=None)
-            self._avatar = best[0] if best and best[1] >= MIN_SUPPORT else None
+            best = max(moves, key=lambda s: (score(s), s[1] * s[2]), default=None)
+            self._avatar = best if best is not None and moves[best] >= MIN_SUPPORT else None
             self._avatar_dirty = False
         return self._avatar
 

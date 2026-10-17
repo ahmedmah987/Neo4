@@ -56,3 +56,24 @@ def test_find_and_unchanged():
     assert find(objs, avatar.sig) is avatar
     d = diff(objs, extract(scene()))
     assert not d.changed and len(d.unchanged) == len(objs)
+
+
+def test_signature_is_the_same_under_rotation_and_mirroring():
+    base = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    base[10:13, 10:13] = 9
+    base[10, 11] = 4  # an "eye" at the top: a 3x3 sprite with a marker, like tu93's player
+    sig_up = next(o.sig for o in extract(base) if o.color == 9)
+    turned = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    turned[20:23, 20:23] = 9
+    turned[21, 22] = 4  # the eye now on the right
+    sig_right = next(o.sig for o in extract(turned) if o.color == 9)
+    assert sig_up == sig_right
+    tall = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    tall[5:9, 5:7] = 12  # 2 wide, 4 tall
+    wide = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    wide[5:7, 5:9] = 12  # 4 wide, 2 tall
+    assert next(o.sig for o in extract(tall) if o.color == 12) == next(o.sig for o in extract(wide) if o.color == 12)
+    other = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+    other[10:13, 10:13] = 9
+    other[11, 11] = 4  # eye in the centre: a different shape
+    assert next(o.sig for o in extract(other) if o.color == 9) != sig_up

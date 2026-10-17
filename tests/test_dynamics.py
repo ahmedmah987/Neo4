@@ -106,3 +106,23 @@ def test_action_level_death_rule():
     assert dyn.predict(GameAction.ACTION5, None, objs, g).verdict == "danger"
     assert dyn.predict(GameAction.ACTION1, None, objs, g).verdict == "unknown"
     assert "ACTION5 lost the game 3/3 times" in "\n".join(dyn.describe())
+
+
+def test_avatar_prefers_the_unique_sprite_over_a_floor_of_identical_tiles():
+    """The avatar covers floor tiles as it moves; the matcher then reports a tile
+    'moving' by the opposite vector at every step. The avatar must still win."""
+    dyn = Dynamics()
+
+    def scene(ax):
+        g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+        for x in range(0, 64, 6):
+            g[30:33, x : x + 3] = 7  # a row of identical floor tiles
+        g[30:33, ax : ax + 3] = 9  # the avatar sits on the tiles
+        return g
+
+    x = 0
+    for _ in range(8):
+        before, after = scene(x), scene(x + 6)
+        dyn.observe(GameAction.ACTION1, None, extract(before), before, extract(after), OK)
+        x += 6
+    assert dyn.avatar() is not None and dyn.avatar()[0] == 9

@@ -17,8 +17,9 @@ solve all of them; frontier language models used directly solve almost none.
 | 4 | **State abstraction**: learn which objects change independently of the agent's actions and leave them out of the state identity | done — net loss, kept as the `model-abs` ablation |
 | 5 | **Instance-level click rules**: outcomes per object instance (signature + position), not per kind | done — danger rules kept, no-op rules dropped |
 | 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | done — no gain, kept as `model-cur` |
-| 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | in progress |
-| 8 | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next |
+| 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | done |
+| 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | in progress |
+| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next |
 | 9 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
@@ -237,6 +238,33 @@ has stayed at about +3 median levels / +20 levels over all runs ever since. The
 level-completing transitions (`neo4 explain`, and the diagnostic in the Phase 3 section)
 are relational — which instance, where, in what state — so the next phase induces
 *preconditions* over object relations instead of colours and signatures.
+
+## Results — Phase 7 (goal induction by lift) and the 12,000-step comparison
+
+A fixed "30 % of visits" threshold never recognised a real goal in these games: the click
+that completes a `vc33` level is 1 of ~88 clicks on the rare colour-9 4x4 block, and the
+`ls20` exit colour had been bumped into three times before. A feature is now a goal when
+its share of level-completing visits is at least **5x the base rate** of all transitions.
+`neo4 explain` then reports, for example, `clicking colour-9 4x4 completed a level (2x)`
+on `vc33`, `clicking colour-8 6x8` on `lp85`, and `entering colour 11` on `dc22`. A goal
+by clicked *colour* was tried and dropped: on `r11l` it spent ~500 steps per run clicking
+every colour-15 pixel, where the position decides. The validated default agent
+(`model-lift`: rules, instance-level danger, lift goals, no curiosity, no abstraction)
+scores **20 / 93** at 4,000 steps — the same as the Phase 3 agent.
+
+**At 12,000 steps the gap over the baseline widens** (3 seeds, median levels per game and
+levels over all runs):
+
+| agent | sum of per-game median levels | levels over all runs |
+|---|---|---|
+| graph exploration | 16 | 52 |
+| model (this repo) | **23** | **67** |
+
+Per game the model is ahead on `dc22` (2 vs 1), `ft09` (2 vs 1), `lp85` (2 vs 1), `r11l`
+(2 vs 1) and `tu93` (3 vs 0), behind nowhere, and reaches the first level sooner almost
+everywhere (`ls20` 198 vs 640 steps, `lp85` 36 vs 156, `lf52` 202 vs 597, `dc22` 805 vs
+1,551). The rules compound with the budget: the more steps, the more of them the pruning
+saves and the more levels the saved steps buy.
 
 ## Attribution and licence
 

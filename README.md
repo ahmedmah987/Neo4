@@ -11,7 +11,7 @@ solve all of them; frontier language models used directly solve almost none.
 
 | Phase | Goal | Status |
 |---|---|---|
-| 1 | Reimplement the training-free **graph-exploration** baseline (Rudakov, Shock & Cowley, [arXiv:2512.24156](https://arxiv.org/abs/2512.24156)) and measure it on the public games | in progress |
+| 1 | Reimplement the training-free **graph-exploration** baseline (Rudakov, Shock & Cowley, [arXiv:2512.24156](https://arxiv.org/abs/2512.24156)) and measure it on the public games | done |
 | 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | — |
 | 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | — |
 | 4 | (optional) a local language model that proposes hypotheses | — |
@@ -58,9 +58,44 @@ tests/            unit tests for frame processing and agent behaviour on toy env
   state), the graph is *reopened*: a new epoch re-tests everything in a fresh random
   order while keeping the known transitions for path finding.
 
-## Results
+## Results — Phase 1
 
-Filled in at the end of Phase 1 (see `results/phase1.md`).
+Setting: all 25 public games, 5 seeds each, **4,000 engine steps per run** (every `step`
+call counts, resets included), median over seeds. One run takes 2–15 s; the whole sweep
+takes about 11 minutes on 4 CPU cores. Full per-game table: [`results/phase1.md`](results/phase1.md).
+
+| agent | sum of per-game median levels | games with ≥ 1 level |
+|---|---|---|
+| graph exploration (this repo) | **17** | 14 / 25 |
+| random actions | 6 | 6 / 25 |
+
+Per-game median levels, graph / random (games where both scored 0 omitted):
+
+| game | levels | graph | random |
+|---|---|---|---|
+| vc33 | 7 | 2 | 0 |
+| tu93 | 9 | 2 | 0 |
+| cd82 | 6 | 2 | 0 |
+| ar25, dc22, lf52, ls20, s5i5, su15 | 8, 6, 10, 7, 8, 9 | 1 | 0 |
+| ft09, lp85, m0r0, r11l, sp80 | 6, 8, 6, 6, 6 | 1 | 1 |
+| cn04 | 6 | 0 | 1 |
+
+**Caveats.** These numbers are not comparable with Table 1 of the paper (e.g. vc33 = 5,
+ls20 = 2 at 4,000 steps): those were measured on the 2025 preview versions of six games,
+while the current public set has 25 games with new versions and levels. Several design
+details of the baseline are not specified in the paper and were chosen here (deterministic
+click point nearest the component centre, no retry of no-op actions, epoch-based reopening).
+
+**What the diagnostics say.** Three failure modes dominate and motivate Phase 2:
+
+1. *State explosion.* `cn04`, `re86` and `tr87` reach 2,000–2,700 distinct states within
+   4,000 steps without finishing their first level. Exhaustive exploration cannot scale;
+   the agent has to learn what actions *do* instead of trying them everywhere.
+2. *Hidden state.* `g50t` and `ls20` produce inconsistent transitions (same frame, same
+   action, different outcome) and hundreds of random walks: the masked frame is not the
+   full state.
+3. *Game-over heavy levels.* `sp80`, `r11l`, `ft09` and `tn36` lose the game 60–90 times
+   per run, and every loss costs a path back to the frontier.
 
 ## Attribution
 

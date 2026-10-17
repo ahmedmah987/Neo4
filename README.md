@@ -41,7 +41,7 @@ The project has two strands that share one codebase:
 | 14 | **Exploration variants under the official metric**: object-targeted exploration (Phase 8a) re-measured on the score, where a cheaper first level counts | done — no gain (0.39 vs 0.44): faster first level on `tu93`, dearer later ones; kept as `model-explore` |
 | 15 | **Switches and indicators**: tile kinds whose entry changes a far-away object are switches, the objects they change are indicators, their arrangement is the avatar's state; a goal reached without a level-up locks the state and sends the agent to an untried switch | done — neutral (23 / 110, 0.44); fires only on `ls20`, where the energy budget ends the attempts first; kept |
 | 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | done — neutral (23 / 110, 0.44; `tu93` 1.88 → 1.91), kept: the second no-gain phase in a row, loop stopped |
-| 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | measuring |
+| 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | done — neutral (23 / 110, 0.44): it fires on `tu93` and `g50t` a dozen times a run and saves nothing measurable; kept |
 | 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | measuring — `ls20` learns its energy bar and refill pickups |
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
 | 10 | (optional) a local language model that proposes hypotheses | — |
@@ -628,6 +628,24 @@ the shape of the remaining problem: the public games compose three or four mecha
 each, and a hand-built model gains a level only when every mechanic on the route is
 expressed. The next step that does not have that shape is a library of mechanics learned
 across games, or a language model proposing the composition for the data to check.
+
+## Results — Phase 17 (budget-aware attempts): neutral
+
+With a level's move budget known (Phase 12), a plan or a walk to the nearest untested
+edge that cannot finish within the actions left in the attempt is not started: the level
+is reset instead — one action for a fresh budget, where the walk would have spent them
+all. A route longer than any attempt can be is not planned at all. The first version
+reset whenever the frontier was out of reach, which on `ls20` meant a reset on every
+visit and no progress; a reset is now taken only when a fresh attempt could reach the
+frontier from the start.
+
+Over the 25 games: **23 / 110** levels and **0.44** (0.436 against 0.437), identical to
+the step on every game but `tu93`, where it is within noise. The rule fires a dozen
+times a run on `tu93` and thirty on `g50t`, and saves nothing measurable: on `tu93` the
+budget is 35–50 actions and the frontier is rarely farther than that, so the walks it
+prevents are short, and in click games every node still has untested clicks, so the rule
+never applies. Kept, as it is right and costs nothing. First scoring phase of this
+loop without a gain.
 
 ## The competition metric, and what it says about this agent
 

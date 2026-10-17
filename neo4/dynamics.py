@@ -15,6 +15,9 @@
 * which tile kinds are *switches*: entering them changes something far from the
   avatar (ls20's floor tiles cycle a pattern shown in a panel); the far objects
   they change are *indicators*, and their arrangement is the avatar's state,
+* whether a colour in the status area is a *resource*: its pixel count falls by a
+  fixed amount per action and is at its lowest when the game is lost (ls20's
+  energy bar), and which tile kinds refill it,
 * how often clicking a given object signature changed anything.
 
 ``predict`` turns those statistics into a verdict on a candidate action in a
@@ -50,6 +53,8 @@ NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for 
 NOISE_REFRESH = 25  # recompute the noise set every this many observations
 MIN_BUDGET = 5  # an attempt length below this is never read as a move budget
 REMOTE_RATE = 0.9  # share of entries of a tile kind on which the same far object changed
+RESOURCE_DROP = 0.5  # share of keyboard steps on which a resource colour's count fell
+RESOURCE_MIN_STEPS = 30  # keyboard steps before a colour may be read as a resource
 FAR = 6  # cells beyond the avatar's body from which a change counts as remote
 
 
@@ -102,6 +107,10 @@ class Dynamics:
         # last step ((0, 0) when it stood still): the state a patrol's motion is
         # extrapolated from.
         self.velocity: dict[tuple, tuple[int, int]] = {}
+        self.resource_delta: dict[int, Counter] = defaultdict(Counter)  # colour -> count delta -> steps
+        self.resource_at_loss: dict[int, list[int]] = defaultdict(list)  # colour -> counts at losses
+        self.resource_min: dict[int, int] = {}
+        self.refill: Counter = Counter()  # tile sig -> entries on which the resource jumped up
         self.attempt = 0  # actions since the attempt began (level start, reset or loss)
         self.longest_attempt: Counter = Counter()  # level -> longest attempt seen there
         self.death_lengths: dict[int, Counter] = defaultdict(Counter)  # level -> length -> losses
@@ -124,6 +133,8 @@ class Dynamics:
         before_grid: np.ndarray,
         after: list[Obj] | None,
         outcome: str,
+        after_grid: np.ndarray | None = None,
+        mask: np.ndarray | None = None,
     ) -> None:
         self.observations += 1
         self.attempt += 1
@@ -170,7 +181,13 @@ class Dynamics:
         if action.is_complex():
             self._observe_click(data, before, d, outcome)
         else:
-            self._observe_key(action, before, before_grid, d, outcome, after)
+            if outcome in (GAME_OVER, BUDGET) and mask is not None and mask.any():
+                # A resource that ran out looks like a move budget too; its reading at
+                # every loss is kept whichever way the loss was classed.
+                counts = self._masked_counts(before_grid, mask)
+                for c in range(16):  # a colour that has run out is absent: read it as zero
+                    self.resource_at_loss[c].append(counts.get(c, 0))
+            self._observe_key(action, before, before_grid, d, outcome, after, after_grid, mask)
 
     def new_attempt(self) -> None:
         """The agent reset the level: the move budget starts over."""
@@ -205,7 +222,8 @@ class Dynamics:
             self.click_death_at[(target.esig, target.x1, target.y1)] += 1
 
     def _observe_key(
-        self, action, before, before_grid, d: Diff | None, outcome: str, after=None
+        self, action, before, before_grid, d: Diff | None, outcome: str, after=None,
+        after_grid=None, mask=None,
     ) -> None:
         aid = action.value
         self.key_uses[aid] += 1
@@ -244,6 +262,9 @@ class Dynamics:
         direction = self.direction(aid)
         if after is not None:
             self._observe_contact(me, direction, before, after, outcome)
+        if mask is not None and mask.any():
+            moved_now = d is not None and any(b.sig == avatar for b, _, _, _ in d.moved)
+            self._observe_resource(me, before, before_grid, after, after_grid, mask, outcome, moved_now)
         if direction is None:
             return
         bands = self._swept(me, direction, before_grid)
@@ -281,12 +302,11 @@ class Dynamics:
             for c in suspects or colors:
                 self.cell[c]["blocked"] += 1
 
-    def _observe_remote(self, me: Obj, before, after, d: Diff) -> None:
-        """The tile kinds the avatar's body came to rest on, and what changed far
-        away from it on the same step."""
+    def _tiles_entered(self, me: Obj, before, after) -> tuple[Obj | None, set[tuple]]:
+        """The avatar's body after the move, and the tile kinds it came to rest on."""
         me2 = self.body(find(after, me.sig), after)
         if me2 is None:
-            return
+            return None, set()
         comp = self.companions()
         foot = set(zip(me2.pixels[:, 0].tolist(), me2.pixels[:, 1].tolist()))
         tiles = set()
@@ -297,8 +317,77 @@ class Dynamics:
                 continue
             if any((y, x) in foot for y, x in zip(o.pixels[:, 0].tolist(), o.pixels[:, 1].tolist())):
                 tiles.add(o.sig)
-        if not tiles:
+        return me2, tiles
+
+    @staticmethod
+    def _masked_counts(grid: np.ndarray, mask: np.ndarray) -> dict[int, int]:
+        return {int(c): int(n) for c, n in zip(*np.unique(grid[mask], return_counts=True))}
+
+    def _observe_resource(
+        self, me: Obj, before, before_grid, after, after_grid, mask, outcome: str, moved: bool
+    ) -> None:
+        """How the colours of the status area change per action, what they read when
+        the game is lost, and which tile kinds make the resource jump back up."""
+        if outcome != OK or after_grid is None:
             return
+        counts = self._masked_counts(before_grid, mask)
+        after_counts = self._masked_counts(after_grid, mask)
+        res = self.resource()
+        for c in set(counts) | set(after_counts):
+            b, a = counts.get(c, 0), after_counts.get(c, 0)
+            self.resource_delta[c][a - b] += 1
+            self.resource_min[c] = min(self.resource_min.get(c, b), b, a)
+            if res is not None and c == res[0] and a - b >= 2 * res[1] and moved and after is not None:
+                _, tiles = self._tiles_entered(me, before, after)
+                for t in tiles:
+                    self.refill[t] += 1
+
+    def resource(self) -> tuple[int, int] | None:
+        """The status-area colour that is a resource, and how many of its pixels one
+        action costs; None when no colour behaves like one."""
+        best = None
+        for c, counter in self.resource_delta.items():
+            n = sum(counter.values())
+            if n < RESOURCE_MIN_STEPS:
+                continue
+            neg = sum(k for d, k in counter.items() if d < 0)
+            if neg / n < RESOURCE_DROP:
+                continue
+            losses = self.resource_at_loss.get(c, [])
+            if len(losses) < DEATH_SUPPORT:
+                continue
+            low = self.resource_min.get(c, 0)
+            if sum(1 for v in losses if v <= low) < len(losses) / 2:
+                continue
+            drop = max((-d for d, k in counter.items() if d < 0), key=lambda m: counter[-m])
+            if best is None or neg > best[2]:
+                best = (c, drop, neg)
+        return None if best is None else (best[0], best[1])
+
+    def energy_left(self, grid: np.ndarray, mask: np.ndarray | None) -> int | None:
+        """Actions the resource still pays for, read off the current frame."""
+        res = self.resource()
+        if res is None or mask is None:
+            return None
+        c, drop = res
+        return int(((grid == c) & mask).sum()) // drop
+
+    def refill_tiles(self) -> set[tuple]:
+        """Tile kinds whose entry has made the resource jump back up."""
+        # Entering a refill tile with the resource already full refills nothing, so
+        # the bar is half of the entries rather than nearly all of them.
+        return {
+            t for t, n in self.refill.items()
+            if n >= DEATH_SUPPORT and n / max(self.tile_entered[t], n) >= 0.5
+        }
+
+    def _observe_remote(self, me: Obj, before, after, d: Diff) -> None:
+        """The tile kinds the avatar's body came to rest on, and what changed far
+        away from it on the same step."""
+        me2, tiles = self._tiles_entered(me, before, after)
+        if me2 is None or not tiles:
+            return
+        comp = self.companions()
 
         def far(o: Obj) -> bool:
             return o.x2 < me2.x1 - FAR or o.x1 > me2.x2 + FAR or o.y2 < me2.y1 - FAR or o.y1 > me2.y2 + FAR
@@ -846,6 +935,16 @@ class Dynamics:
                 lines.append(
                     f"  colour-{sig[0]} {sig[2]}x{sig[1]} kills on contact ({self.killer[sig]}/{self.killer[sig] + self.near_count[sig]} contacts)"
                 )
+            res = self.resource()
+            if res is not None:
+                c, drop = res
+                losses = self.resource_at_loss[c]
+                lines.append(
+                    f"colour {c} in the status area is a resource: {drop} pixels per action, "
+                    f"at its lowest on {sum(1 for v in losses if v <= self.resource_min.get(c, 0))}/{len(losses)} losses"
+                )
+                for t in sorted(self.refill_tiles(), key=repr):
+                    lines.append(f"  entering colour-{t[0]} {t[2]}x{t[1]} refills it ({self.refill[t]}x)")
             for t in sorted(self.switches(), key=repr):
                 n = self.tile_entered[t]
                 effects = [f"{what} colour-{sig[0]} {sig[2]}x{sig[1]} ({k}/{n})" for (what, sig), k in self.remote[t].items() if k / n >= REMOTE_RATE]

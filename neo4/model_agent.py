@@ -91,7 +91,7 @@ class ModelAgent(GraphAgent):
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
-             "switch_plans": 0, "locked_goals": 0, "budget_resets": 0}
+             "switch_plans": 0, "locked_goals": 0, "budget_resets": 0, "refill_plans": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -156,7 +156,10 @@ class ModelAgent(GraphAgent):
             action, data = self.last_cand
             avatar = self.dyn.avatar()
             me = self.dyn.body(find(self.last_objs, avatar), self.last_objs) if avatar is not None else None
-            self.dyn.observe(action, data, self.last_objs, self.last_grid, after, outcome)
+            self.dyn.observe(
+                action, data, self.last_objs, self.last_grid, after, outcome,
+                after_grid=grid, mask=self.mask,
+            )
             self.last_cand = None
             if outcome == GAME_OVER:
                 if self.dyn.last_death_budget:
@@ -197,10 +200,13 @@ class ModelAgent(GraphAgent):
             if idx is None and not self.plan:
                 idx = self._make_plan(node, me, "goal")
             if idx is not None:
-                if self._beyond_budget(len(self.plan)):
-                    # The plan cannot finish in this attempt: a reset costs one
-                    # action and starts a fresh budget, the walk would cost them all.
+                if self.plan_kind != "refill" and self._beyond_budget(len(self.plan)):
+                    # The plan cannot finish in this attempt: refill the resource if a
+                    # tile for that is in reach, else reset (one action, a fresh budget).
                     self._drop_plan()
+                    idx = self._refill_plan(node, me)
+                    if idx is not None:
+                        return idx
                     self.stats["budget_resets"] += 1
                     return None
                 return idx
@@ -223,6 +229,9 @@ class ModelAgent(GraphAgent):
             if idx is not None:
                 return idx
         if self._frontier_beyond_budget(node):
+            idx = self._refill_plan(node, me)
+            if idx is not None:
+                return idx
             self.stats["budget_resets"] += 1
             return None
         return super()._choose(node)
@@ -230,12 +239,50 @@ class ModelAgent(GraphAgent):
     # -- move budgets ---------------------------------------------------------
 
     def _remaining(self) -> int | None:
-        """Actions left in this attempt under the level's move budget, if known
-        and the attempt is under way."""
+        """Actions left in this attempt: under the level's move budget (once the
+        attempt is under way) and under the resource bar, whichever is tighter."""
+        left = []
         budget = self.dyn.budget()
-        if budget is None or self.since_reset == 0:
+        if budget is not None and self.since_reset > 0:
+            left.append(budget - self.dyn.attempt)
+        if self.cur_grid is not None:
+            energy = self.dyn.energy_left(self.cur_grid, self.mask)
+            if energy is not None:
+                left.append(energy)
+        return min(left) if left else None
+
+    def _refill_plan(self, node: Node, me: Obj | None) -> int | None:
+        """Out of steps for what comes next: walk to a tile that refills the resource,
+        if one is on screen and within the energy left."""
+        if me is None or self.cur_grid is None or self.plan:
             return None
-        return budget - self.dyn.attempt
+        energy = self.dyn.energy_left(self.cur_grid, self.mask)
+        tiles = self.dyn.refill_tiles()
+        if energy is None or not tiles:
+            return None
+        objs = self.cur_objs()
+        target = np.zeros(self.cur_grid.shape, dtype=bool)
+        for o in objs:
+            if o.sig in tiles:
+                target[o.pixels[:, 0], o.pixels[:, 1]] = True
+        if not target.any():
+            return None
+        dirs = self.dyn.directions()
+        if not dirs:
+            return None
+        static, zones = self.dyn.hazard_zones(objs, self.cur_grid, self.cur_grid.shape, HORIZON)
+        found = plan_path(
+            self.cur_grid, me, dirs, self.dyn.passable,
+            lambda cols, coords: any(target[y, x] for y, x in coords),
+            avoid=static, avoid_t=zones,
+            forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
+        )
+        if found is None or len(found[0]) > energy:
+            return None
+        self.plan, self.plan_expect = found
+        self.plan_kind = "refill"
+        self.stats["refill_plans"] += 1
+        return self._plan_step(node)
 
     def _beyond_budget(self, actions: int) -> bool:
         remaining = self._remaining()

@@ -77,7 +77,9 @@ class LevelGraph:
 
     def __init__(self) -> None:
         self.nodes: dict[str, Node] = {}
-        self.reverse: dict[str, set[str]] = {}
+        # Insertion-ordered (a dict, not a set): BFS order must not depend on the
+        # process's string-hash seed, or runs with the same seed would differ.
+        self.reverse: dict[str, dict[str, None]] = {}
         self._dist_cache: dict[tuple[int, bool], tuple[dict[str, int], dict[str, str]]] = {}
         self.inconsistent = 0  # same (node, action) led to different targets
         self.epoch = 0
@@ -104,7 +106,7 @@ class LevelGraph:
                 self.inconsistent += 1
             node.result[idx] = TRANSITION
             node.target[idx] = dst
-            self.reverse.setdefault(dst, set()).add(src)
+            self.reverse.setdefault(dst, {})[src] = None
         self._dist_cache.clear()
 
     def reopen(self) -> None:

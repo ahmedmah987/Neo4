@@ -203,19 +203,35 @@ class ModelAgent(GraphAgent):
         self.stats["plan_steps"] += 1
         return idx
 
+    def _goal_candidates(self, node: Node, local: list[int]) -> list[int]:
+        """Untested candidates that reproduce what completed a level before."""
+        if not self.planning or not self.dyn.level_ups:
+            return []
+        objs = self.cur_objs()
+        goal_sigs = self.dyn.goal_click_sigs()
+        goal_click_colors = self.dyn.goal_click_colors()
+        goal_colors = self.dyn.goal_colors()
+        avatar = self.dyn.avatar()
+        me = find(objs, avatar) if avatar is not None else None
+        out = []
+        for i in local:
+            c = node.cands[i]
+            if c.data is not None:
+                t = at(objs, c.data["x"], c.data["y"])
+                if t is not None and (t.sig in goal_sigs or t.color in goal_click_colors):
+                    out.append(i)
+            elif me is not None and goal_colors:
+                d = self.dyn.direction(c.action.value)
+                if d is not None and self.cur_grid is not None:
+                    if self.dyn._ahead(me, d, self.cur_grid) & goal_colors:
+                        out.append(i)
+        return out
+
     def _pick_local(self, node: Node, local: list[int]) -> int:
-        goal_sigs = self.dyn.goal_click_sigs() if self.planning else set()
-        if goal_sigs:
-            objs = self.cur_objs()
-            winners = [
-                i for i in local
-                if node.cands[i].data is not None
-                and (t := at(objs, node.cands[i].data["x"], node.cands[i].data["y"])) is not None
-                and t.sig in goal_sigs
-            ]
-            if winners:
-                self.stats["goal_clicks"] += 1
-                return self.rng.choice(winners)
+        winners = self._goal_candidates(node, local)
+        if winners:
+            self.stats["goal_clicks"] += 1
+            return self.rng.choice(winners)
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
         if unknown:
             self.stats["ran_unknown"] += 1

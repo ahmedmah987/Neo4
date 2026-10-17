@@ -33,7 +33,7 @@ DANGER_RATE = 0.5  # share of visits that ended the game
 DEATH_SUPPORT = 2  # lost games on a click target before its clicks count as dangerous
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
-GOAL_RATE = 0.3  # share of a colour's (or click target's) visits that ended a level
+GOAL_LIFT = 5.0  # a goal feature ends levels at least this many times the base rate
 NOISE_RATE = 0.5  # a signature churning on this share of steps under every action is noise
 NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for noise
 NOISE_REFRESH = 25  # recompute the noise set every this many observations
@@ -54,6 +54,9 @@ class Dynamics:
         self.hazard: Counter = Counter()
         self.goal_ahead: Counter = Counter()  # colours ahead of the avatar when a level ended
         self.goal_click: Counter = Counter()  # signatures clicked when a level ended
+        self.goal_click_color: Counter = Counter()  # colours clicked when a level ended
+        self.click_color: Counter = Counter()  # colours clicked, all outcomes
+        self.level_ups = 0
         self.click_death: Counter = Counter()  # signatures clicked when the game was lost
         # The same, per object instance (signature + position): outcomes often depend on
         # *which* of several identical objects is clicked, not on their kind.
@@ -79,6 +82,8 @@ class Dynamics:
         outcome: str,
     ) -> None:
         self.observations += 1
+        if outcome == LEVEL_UP:
+            self.level_ups += 1
         d = diff(before, after) if after is not None and outcome == OK else None
         if d is not None:
             # Clicks on different targets are different actions: something that
@@ -111,8 +116,10 @@ class Dynamics:
         key = "change" if changed else "none"
         self.click[target.sig][key] += 1
         self.click_at[(target.sig, target.x1, target.y1)][key] += 1
+        self.click_color[target.color] += 1
         if outcome == LEVEL_UP:
             self.goal_click[target.sig] += 1
+            self.goal_click_color[target.color] += 1
         elif outcome == GAME_OVER:
             self.click_death[target.sig] += 1
             self.click_death_at[(target.sig, target.x1, target.y1)] += 1
@@ -260,21 +267,36 @@ class Dynamics:
         passed, n = self._rate(self.cell[color], "passed")
         return n >= MIN_SUPPORT and passed >= PASS_RATE
 
-    def goal_colors(self) -> set[int]:
-        """Colours whose entry ended a level, relative to how often they were merely crossed."""
+    def _lifted(self, goals: Counter, visits) -> set:
+        """Features under which a level ended far more often than the base rate.
+
+        A feature (a colour ahead, a click target) is a goal when the share of
+        its visits that completed a level is at least ``GOAL_LIFT`` times the
+        share of all transitions that did. One event on a rare feature counts;
+        one event on something seen thousands of times does not.
+        """
+        if not self.level_ups or not self.observations:
+            return set()
+        base = self.level_ups / self.observations
         out = set()
-        for c, n in self.goal_ahead.items():
-            visits = n + sum(self.cell[c].values()) + self.hazard[c]
-            if n / visits >= GOAL_RATE:
-                out.add(c)
+        for f, n in goals.items():
+            total = visits(f)
+            if total and n / total >= GOAL_LIFT * base:
+                out.add(f)
         return out
 
+    def goal_colors(self) -> set[int]:
+        """Colours ahead of the avatar when a level ended, beyond chance."""
+        return self._lifted(
+            self.goal_ahead,
+            lambda c: self.goal_ahead[c] + sum(self.cell[c].values()) + self.hazard[c],
+        )
+
     def goal_click_sigs(self) -> set[tuple]:
-        out = set()
-        for sig, n in self.goal_click.items():
-            if n / (n + sum(self.click[sig].values())) >= GOAL_RATE:
-                out.add(sig)
-        return out
+        return self._lifted(self.goal_click, lambda sig: sum(self.click[sig].values()))
+
+    def goal_click_colors(self) -> set[int]:
+        return self._lifted(self.goal_click_color, lambda c: self.click_color[c])
 
     # -- prediction -----------------------------------------------------------
 
@@ -382,6 +404,10 @@ class Dynamics:
         for sig in self.goal_click_sigs():
             lines.append(
                 f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} completed a level ({self.goal_click[sig]}x)"
+            )
+        for c in sorted(self.goal_click_colors()):
+            lines.append(
+                f"clicking colour {c} completed a level ({self.goal_click_color[c]}/{self.click_color[c]} clicks)"
             )
         for sig, n in self.click_death.most_common(6):
             total = sum(self.click[sig].values())

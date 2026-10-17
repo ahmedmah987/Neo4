@@ -23,6 +23,7 @@ solve all of them; frontier language models used directly solve almost none.
 | 8c | **Adjacency preconditions**: the objects touching the avatar when a level ended, and the key that completed it, used as plan targets and candidate priorities | done — neutral (20 / 97 vs 21 / 97), kept as `model-adj` |
 | 8d | **Object–object relations**: what a pushed object ended up touching or covering when a level ended (`tu93`'s blocks on their targets) | proposed next step |
 | 9 | **Competition packaging**: the agent as the single file the Kaggle notebook embeds, tested against the framework contract | done — `kaggle/my_agent.py` |
+| 10 | **Robust avatar identification**: orientation-free sprite signatures, the avatar is usually unique; exact signatures kept for click rules | done — neutral in levels (20 / 95), kept: the avatar is now right |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -365,6 +366,33 @@ because the conditions it can express rarely hold: in `tu93` the avatar is besid
 on 3,327 of 4,000 steps, so adjacency carries no information there; the level ends when
 a *block* reaches a *target*, a relation between two objects other than the avatar. Off
 by default; `model-adj` keeps it.
+
+## Results — Phase 10 (robust avatar identification): neutral in levels, right in substance
+
+A deep look at `tu93` (its public source is in the toolkit's download) found a flaw in the
+object model rather than in the game logic. The player sprite carries an orientation
+marker — an "eye" pixel that turns with it — so its exact shape hash changed every time
+it turned and the matcher never saw it move; meanwhile the identical floor tiles it
+covered appeared to move by the opposite vector, and the avatar detector chose a floor
+tile (29 copies of it on screen). Two general fixes:
+
+* a sprite's shape hash is taken over the canonical member of its eight rotations and
+  mirrorings, and the signature's size fields are orientation-free (`sig`); click rules,
+  where a target's orientation can be what it means, keep an exact signature (`esig`) —
+  the first sweep without that distinction lost levels on `r11l` and `cd82`;
+* the avatar score divides observed moves by the mean number of instances of the
+  signature per frame: the avatar is usually the one object of its kind.
+
+On `tu93` the agent now identifies the colour-9 player with the right four directions,
+learns `entering the colour-14 3x3 sprite completed a level (3/4 contacts)` and plans to
+it (5–10 plans per run, none failing); the first level falls in 197 steps instead of 407.
+Over the 25 games the result is **20 / 95** against 21 / 97 — within run-to-run noise
+(`dc22` +1, `tu93` −2 over seeds, `tr87` −1). It is kept as the default because every
+avatar-dependent component (pruning, hazards, goals, planning) now reasons about the
+right object. Two hypotheses were checked on the same data and dropped before building:
+"an object kind approaches the avatar when the game is lost" (no kind is near the avatar
+at death beyond chance in any game; `tu93`'s losses are its per-level step limit) and
+the push-chain pattern (avatar → block → target) for `tu93`.
 
 ## Conclusion and next step
 

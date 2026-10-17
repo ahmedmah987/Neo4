@@ -19,7 +19,8 @@ solve all of them; frontier language models used directly solve almost none.
 | 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | done — no gain, kept as `model-cur` |
 | 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | done |
 | 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | done — faster first levels, no extra levels; kept as `model-explore` |
-| 8b | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | proposed next step (not started) |
+| 8b | **Object-level goals**: the *signature* of the object the avatar entered when a level ended, planned to by signature | done — +1 median level (`dc22`), new default |
+| 8c | **Adjacency preconditions**: the objects touching the avatar when a level ended (e.g. the colour-2 blocks of `tu93`), used as plan targets and candidate priorities | proposed next step |
 | 9 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -296,6 +297,23 @@ run but on only 20 % of its uses, with nothing in the avatar's surroundings sepa
 the fatal uses from the safe ones; an action-level danger rule (an action that loses the
 game on half its uses) is in place but does not fire there.
 
+## Results — Phase 8b (object-level goals): +1 median level
+
+A level-completing move now records the *signature* of the object the avatar entered,
+not just its colour, with lift measured against how often that signature was ahead of
+the avatar. `neo4 explain` reports e.g. `entering the colour-5 7x7 sprite completed a
+level (1/2 contacts)` on `ls20` and `entering the colour-11 2x2 sprite` on `dc22`, and
+lists the objects touching the avatar at that moment (`tu93`: colour-2 3x3 blocks, three
+times out of three). The planner targets goal objects by signature and falls back to
+colours; in a test room whose walls share the exit's colour, the colour goal plans into
+the walls (every plan fails) while the signature goal reaches the exit. A second fix
+mattered as much: a failed route search no longer spends the per-level planning
+allowance, which it used to exhaust before the agent had learned the new level's floor.
+
+Result at 4,000 steps, 5 seeds: **21 / 97** against 20 / 93 for the previous default, the
+whole difference on `dc22` (median 1 → 2, 5 → 9 levels over seeds, one plan per run and
+no failed plan); no game is worse. This is the new default agent.
+
 ## Conclusion and next step
 
 What moved the needle was Phase 2: rules induced from the agent's own transitions —
@@ -308,9 +326,10 @@ the rules grows with the budget: +24 % levels per run at 4,000 steps, +51 % at 2
 
 The remaining losses are of one kind. What completes a level, and what loses the game,
 is relational — *which* instance of an object, *where*, in *what* state, *pushed* against
-what — and a model over colours and signatures cannot express it. The proposed next step
-(Phase 8b) is to induce preconditions over object relations at the level-completing
-transitions, which `neo4 explain` already exposes.
+what — and a model over colours and signatures cannot express it. Phase 8b took the first
+step (goals as object signatures, +1 median level); the proposed next one (Phase 8c) uses
+the objects *touching* the avatar at level-completing moves, which `neo4 explain` already
+reports, as plan targets and candidate priorities — `tu93` is the test case.
 
 The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
 the agent runs at about 60–250 engine steps per second on one CPU core depending on the

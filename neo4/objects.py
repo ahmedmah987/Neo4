@@ -32,7 +32,8 @@ class Obj:
     w: int
     h: int
     area: int
-    sig: tuple  # (colour, height, width, shape-hash or None)
+    sig: tuple  # (colour, smaller side, larger side, orientation-free shape hash or None)
+    esig: tuple  # (colour, height, width, exact shape hash or None): orientation matters
     pixels: np.ndarray
 
     @property
@@ -59,6 +60,12 @@ class Obj:
     def label(self) -> str:
         kind = "region" if self.scenery else "sprite"
         return f"colour-{self.color} {self.w}x{self.h} {kind}"
+
+
+def _exact_hash(c: fp.Component) -> str:
+    local = np.zeros((c.height, c.width), dtype=bool)
+    local[c.pixels[:, 0] - c.y1, c.pixels[:, 1] - c.x1] = True
+    return hashlib.blake2b(np.packbits(local).tobytes(), digest_size=6).hexdigest()
 
 
 def _shape_hash(c: fp.Component) -> str:
@@ -104,8 +111,10 @@ def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> Objects:
     for c in comps:
         if c.color == fp.MASK_COLOR:
             continue
-        shape = _shape_hash(c) if c.area <= SMALL_AREA else None
-        # The signature's size fields are orientation-free (smaller side, larger side).
+        small = c.area <= SMALL_AREA
+        shape = _shape_hash(c) if small else None
+        # `sig` is orientation-free (an avatar keeps its identity as it turns);
+        # `esig` is exact (a click target's orientation can be what it means).
         objs.append(
             Obj(
                 color=c.color,
@@ -115,6 +124,7 @@ def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> Objects:
                 h=c.height,
                 area=c.area,
                 sig=(c.color, min(c.height, c.width), max(c.height, c.width), shape),
+                esig=(c.color, c.height, c.width, _exact_hash(c) if small else None),
                 pixels=c.pixels,
             )
         )

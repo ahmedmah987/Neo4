@@ -334,7 +334,7 @@ class ModelAgent(GraphAgent):
             c = node.cands[i]
             if c.data is not None:
                 t = at(objs, c.data["x"], c.data["y"])
-                if t is not None and t.sig in goal_click:
+                if t is not None and t.esig in goal_click:
                     out.append(i)
             elif me is not None and (goal_sigs or goal_colors) and self.cur_grid is not None:
                 d = self.dyn.direction(c.action.value)

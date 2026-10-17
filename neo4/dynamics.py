@@ -105,7 +105,7 @@ class Dynamics:
             # something that changes whatever is clicked is noise.
             if action.is_complex():
                 target = at(before, data["x"], data["y"]) if data else None
-                cls: object = ("click", target.sig if target is not None else None)
+                cls: object = ("click", target.esig if target is not None else None)
             else:
                 cls = action.value
             self.steps_by_class[cls] += 1
@@ -128,15 +128,15 @@ class Dynamics:
             return
         changed = outcome != OK or (d is not None and d.changed)
         key = "change" if changed else "none"
-        self.click[target.sig][key] += 1
-        self.click_at[(target.sig, target.x1, target.y1)][key] += 1
+        self.click[target.esig][key] += 1
+        self.click_at[(target.esig, target.x1, target.y1)][key] += 1
         self.click_color[target.color] += 1
         if outcome == LEVEL_UP:
-            self.goal_click[target.sig] += 1
+            self.goal_click[target.esig] += 1
             self.goal_click_color[target.color] += 1
         elif outcome == GAME_OVER:
-            self.click_death[target.sig] += 1
-            self.click_death_at[(target.sig, target.x1, target.y1)] += 1
+            self.click_death[target.esig] += 1
+            self.click_death_at[(target.esig, target.x1, target.y1)] += 1
 
     def _observe_key(self, action, before, before_grid, d: Diff | None, outcome: str) -> None:
         aid = action.value
@@ -409,18 +409,18 @@ class Dynamics:
             target = at(objs, data["x"], data["y"])
             if target is None:
                 return Prediction("unknown")
-            inst = (target.sig, target.x1, target.y1)
+            inst = (target.esig, target.x1, target.y1)
             # Danger generalises per instance (this cell kills) and per kind; a no-op
             # rule only per kind: a cell that did nothing so far may matter later, and
             # skipping it per instance cost levels on r11l and su15.
             for deaths, counter, where in (
                 (self.click_death_at[inst], self.click_at[inst], f"{target.label()} at {target.x1},{target.y1}"),
-                (self.click_death[target.sig], self.click[target.sig], target.label()),
+                (self.click_death[target.esig], self.click[target.esig], target.label()),
             ):
                 n = sum(counter.values())
                 if deaths >= DEATH_SUPPORT and deaths / n >= DANGER_RATE:
                     return Prediction("danger", n, f"clicking {where} lost the game {deaths}/{n}x")
-            rate, n = self._rate(self.click[target.sig], "none")
+            rate, n = self._rate(self.click[target.esig], "none")
             if n >= MIN_SUPPORT and rate >= NOOP_RATE:
                 return Prediction("noop_click", n, f"clicking {target.label()} changed nothing {n}x")
             return Prediction("unknown", n)

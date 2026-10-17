@@ -94,7 +94,7 @@ def test_click_rules_distinguish_instances_of_one_signature():
 
 
 def objs_sig(objs, color):
-    return next(o.sig for o in objs if o.color == color)
+    return next(o.esig for o in objs if o.color == color)
 
 
 def test_action_level_death_rule():

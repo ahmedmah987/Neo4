@@ -195,6 +195,9 @@ class ModelAgent(GraphAgent):
         objs = self.cur_objs()
         avatar = self.dyn.avatar()
         me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
+        idx = self._replay_step(node)
+        if idx is not None:
+            return idx
         if self.planning:
             idx = self._follow_plan(node, me)
             if idx is None and not self.plan:

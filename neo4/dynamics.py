@@ -197,6 +197,8 @@ class Dynamics:
         """Actions an attempt may take in the current level before the game ends it,
         if the level has such a limit: at least two losses fell at the longest
         attempt length seen in it."""
+        if self.resource() is not None:
+            return None  # a resource bar explains the losses; it is not a fixed budget
         level = self.level_ups
         n = self.longest_attempt[level]
         if n < MIN_BUDGET or self.death_lengths[level][n] < 2:

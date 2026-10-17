@@ -28,6 +28,7 @@ from . import frame as fp
 
 UNTESTED, TRANSITION, NO_CHANGE = 0, 1, -1
 STUCK_WALKS = 8  # random walks in a row before the graph is reopened
+MAX_REPLAYS = 2  # attempts per level at replaying the previous level's solution
 
 
 @dataclass(slots=True)
@@ -35,6 +36,7 @@ class Candidate:
     action: GameAction
     data: dict[str, int] | None
     group: int
+    target: tuple | None = None  # (colour, height, width, shape hash) of the clicked component
 
     def describe(self) -> str:
         if self.data is None:
@@ -216,6 +218,13 @@ class GraphAgent:
         self.priority = 0
         self.since_reset = 0  # actions taken since the level (re)started
         self.stuck = 0  # random walks in a row (the frontier is out of reach)
+        # Solution replay: the shortest action sequence that completed the previous
+        # level, replayed in the next one by action and click-target signature.
+        self.solutions: list[list[tuple[int, tuple | None, tuple[int, int] | None]]] = []
+        self.replay: list | None = None
+        self.replay_pos = 0
+        self.replay_tries = 0
+        self.replay_last: tuple[str, int] | None = None
         self.stats: dict[str, int] = {
             "nodes": 0,
             "resets": 0,
@@ -224,6 +233,9 @@ class GraphAgent:
             "random_walks": 0,
             "reopens": 0,
             "inconsistent": 0,
+            "replays": 0,
+            "replay_steps": 0,
+            "replay_aborted": 0,
         }
 
     # -- observation handling -------------------------------------------------
@@ -236,6 +248,88 @@ class GraphAgent:
         self.last_idx = None
         self.priority = 0
         self.stuck = 0
+        self.replay_tries = 0
+        self._begin_replay()
+
+    # -- solution replay ------------------------------------------------------
+
+    def _solution(self) -> list[tuple[int, tuple | None, tuple[int, int] | None]] | None:
+        """The shortest known action sequence from the level's first frame to the
+        move that completed it: (action id, click-target signature, click point)."""
+        if self.first_key is None or self.last_key is None or self.last_idx is None:
+            return None
+        if self.first_key not in self.graph.nodes:
+            return None
+        prev: dict[str, tuple[str, int]] = {}
+        seen = {self.first_key}
+        queue: deque[str] = deque([self.first_key])
+        while queue and self.last_key not in seen:
+            v = queue.popleft()
+            node = self.graph.nodes[v]
+            for i, (r, t) in enumerate(zip(node.result, node.target)):
+                if r == TRANSITION and t is not None and t not in seen:
+                    seen.add(t)
+                    prev[t] = (v, i)
+                    queue.append(t)
+        if self.last_key not in seen:
+            return None
+        edges: list[tuple[str, int]] = [(self.last_key, self.last_idx)]
+        k = self.last_key
+        while k != self.first_key:
+            k, i = prev[k]
+            edges.append((k, i))
+        edges.reverse()
+        out = []
+        for k, i in edges:
+            c = self.graph.nodes[k].cands[i]
+            point = (c.data["x"], c.data["y"]) if c.data is not None else None
+            out.append((c.action.value, c.target, point))
+        return out
+
+    def _begin_replay(self) -> None:
+        # Only sequences of clicks are replayed: a keyboard route belongs to one
+        # layout, and the planner carries what a route taught over to the next.
+        if self.solutions and self.replay_tries < MAX_REPLAYS and all(
+            point is not None for _, _, point in self.solutions[-1]
+        ):
+            self.replay = list(self.solutions[-1])
+            self.replay_pos = 0
+            self.replay_tries += 1
+            self.replay_last = None
+            self.stats["replays"] += 1
+        else:
+            self.replay = None
+
+    def _abort_replay(self) -> None:
+        if self.replay is not None:
+            self.replay = None
+            self.stats["replay_aborted"] += 1
+
+    def _replay_step(self, node: Node) -> int | None:
+        """The next step of the replay at this node, or None when it is over or the
+        level does not match it (no such target, or the last step changed nothing)."""
+        if self.replay is None:
+            return None
+        if self.replay_last is not None:
+            k, i = self.replay_last
+            if self.graph.nodes[k].result[i] == NO_CHANGE:
+                self._abort_replay()
+                return None
+        if self.replay_pos >= len(self.replay):
+            self.replay = None  # fully replayed without a level-up: back to exploration
+            return None
+        aid, target, point = self.replay[self.replay_pos]
+        matches = [i for i, c in enumerate(node.cands) if c.action.value == aid and (c.data is None or c.target == target)]
+        if not matches:
+            self._abort_replay()
+            return None
+        if point is not None:
+            matches.sort(key=lambda i: abs(node.cands[i].data["x"] - point[0]) + abs(node.cands[i].data["y"] - point[1]))
+        idx = matches[0]
+        self.replay_pos += 1
+        self.replay_last = (node.key, idx)
+        self.stats["replay_steps"] += 1
+        return idx
 
     def _key(self, grid: np.ndarray) -> str:
         """State identity of a frame; subclasses may abstract it."""
@@ -252,7 +346,7 @@ class GraphAgent:
                 comps = fp.segment(masked)
                 for c, g in zip(comps, fp.click_groups(comps)):
                     x, y = c.click_point()
-                    cands.append(Candidate(action, {"x": x, "y": y}, g))
+                    cands.append(Candidate(action, {"x": x, "y": y}, g, target_signature(c)))
             else:
                 cands.append(Candidate(action, None, 0))
         return cands
@@ -261,6 +355,9 @@ class GraphAgent:
         self.last_key = self.last_idx = None
         self.since_reset = 0
         self.stats["resets"] += 1
+        if self.replay is not None:
+            self._abort_replay()
+        self._begin_replay()  # a level restart is where a replay can start again
         return GameAction.RESET, None
 
     def act(self, obs: FrameDataRaw) -> tuple[GameAction, dict[str, int] | None]:
@@ -274,6 +371,10 @@ class GraphAgent:
 
         grid = np.asarray(obs.frame[-1])
         if obs.levels_completed != self.levels_completed:
+            if obs.levels_completed > self.levels_completed >= 0:
+                solution = self._solution()
+                if solution:
+                    self.solutions.append(solution)
             self.levels_completed = obs.levels_completed
             self._start_level(grid)
 
@@ -321,6 +422,9 @@ class GraphAgent:
 
     def _choose_edge(self, node: Node) -> int | None:
         self._walks_before = self.stats["random_walks"]
+        idx = self._replay_step(node)
+        if idx is not None:
+            return idx
         top = self.graph.max_group()
         if self.stuck >= STUCK_WALKS:
             # Wandering among known transitions has not brought the frontier within
@@ -368,6 +472,17 @@ class GraphAgent:
             self.stuck += 1
             return self.rng.choice(moves)
         return None
+
+
+def target_signature(c: fp.Component) -> tuple:
+    """(colour, height, width, exact shape hash) of a component: what a click target
+    is, independently of where it is."""
+    import hashlib
+
+    local = np.zeros((c.y2 - c.y1 + 1, c.x2 - c.x1 + 1), dtype=bool)
+    local[c.pixels[:, 0] - c.y1, c.pixels[:, 1] - c.x1] = True
+    digest = hashlib.blake2b(np.packbits(local).tobytes(), digest_size=6).hexdigest()
+    return (int(c.color), int(local.shape[0]), int(local.shape[1]), digest)
 
 
 class RandomAgent:

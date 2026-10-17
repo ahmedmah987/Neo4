@@ -170,7 +170,7 @@ def cmd_summarize(_: argparse.Namespace) -> None:
     budget = sorted({r["budget"] for r in rows})
 
     lines = [
-        "# Phase 1 — exploration baseline on the public games",
+        "# Results on the public games",
         "",
         f"Step budget per run: {', '.join(map(str, budget))}. "
         "Cell = median levels completed over seeds (min–max), out of the game's level count.",
@@ -179,6 +179,7 @@ def cmd_summarize(_: argparse.Namespace) -> None:
         "|---|---|" + "---|" * len(agents),
     ]
     totals = {ag: [] for ag in agents}
+    solved = {ag: 0 for ag in agents}
     for g in games:
         cells = []
         n_levels = next(r["win_levels"] for r in rows if r["game"] == g)
@@ -190,6 +191,7 @@ def cmd_summarize(_: argparse.Namespace) -> None:
             levels = [r["levels"] for r in runs]
             med = statistics.median(levels)
             totals[ag].append(med)
+            solved[ag] += sum(levels)
             cells.append(f"{med:g} ({min(levels)}–{max(levels)}) n={len(runs)}")
         lines.append(f"| {g} | {n_levels} | " + " | ".join(cells) + " |")
     lines.append(
@@ -197,8 +199,33 @@ def cmd_summarize(_: argparse.Namespace) -> None:
         + " | ".join(f"**{sum(totals[ag]):g}**" for ag in agents)
         + " |"
     )
+    lines.append(
+        "| levels solved over all runs | | " + " | ".join(str(solved[ag]) for ag in agents) + " |"
+    )
+
+    # Efficiency: how many steps it took to finish the first level, where it was finished.
+    lines += [
+        "",
+        "Median steps to complete the first level, over the seeds that completed it "
+        "(count in brackets); games nobody finished a level in are omitted.",
+        "",
+        "| game | " + " | ".join(agents) + " |",
+        "|---|" + "---|" * len(agents),
+    ]
+    for g in games:
+        cells = []
+        any_hit = False
+        for ag in agents:
+            hits = [r["level_steps"][0] for r in by.get((g, ag), []) if r.get("level_steps")]
+            if hits:
+                any_hit = True
+                cells.append(f"{statistics.median(hits):g} [{len(hits)}]")
+            else:
+                cells.append("—")
+        if any_hit:
+            lines.append(f"| {g} | " + " | ".join(cells) + " |")
     RESULTS.mkdir(exist_ok=True)
-    (RESULTS / "phase1.md").write_text("\n".join(lines) + "\n")
+    (RESULTS / "summary.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 

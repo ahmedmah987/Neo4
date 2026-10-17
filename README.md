@@ -12,8 +12,8 @@ solve all of them; frontier language models used directly solve almost none.
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | Reimplement the training-free **graph-exploration** baseline (Rudakov, Shock & Cowley, [arXiv:2512.24156](https://arxiv.org/abs/2512.24156)) and measure it on the public games | done |
-| 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | — |
-| 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | — |
+| 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | done |
+| 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | in progress |
 | 4 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
@@ -24,7 +24,7 @@ pip install -e ".[dev]"
 pytest                                                   # unit tests
 neo4 run --agent graph --games ls20 vc33 --steps 4000 --seeds 3
 neo4 run --agent random --games all --steps 4000 --seeds 5
-neo4 summarize                                           # writes results/phase1.md
+neo4 summarize                                           # writes results/summary.md
 ```
 
 No GPU and no API key are needed: the official `arc-agi` toolkit downloads the public
@@ -38,9 +38,23 @@ neo4/
   frame.py        frame processing: connected components, status-bar masking,
                   state keys, click candidates in five priority tiers
   graph_agent.py  graph-exploration agent (Algorithm 1 of the paper) and a random control agent
-  run.py          runner: games x seeds under a step budget, multi-process; results summariser
+  objects.py      objects with signatures; matching two frames into moved / vanished / appeared
+  dynamics.py     rule induction from transitions; predictions per candidate; English report
+  planner.py      BFS path planning for the avatar through cells the model knows to be passable
+  model_agent.py  the graph agent guided by the induced rules ("model"), plus a no-planning ablation
+  run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
-tests/            unit tests for frame processing and agent behaviour on toy environments
+tests/            unit tests for every module, on synthetic frames and toy environments
+```
+
+`neo4 explain --game ls20` plays a game with the model agent and prints what it learned, e.g.
+
+```
+avatar: colour-9 3x5 sprite
+  ACTION1: moves it by (0, -5) (745/748 times; stuck 3x)
+  ACTION3: moves it by (-5, 0) (477/479 times; stuck 2x)
+  colour 3 is walkable (1889/1903)
+  colour 5 blocks the avatar (3/3)
 ```
 
 ## How the exploration agent works
@@ -58,11 +72,35 @@ tests/            unit tests for frame processing and agent behaviour on toy env
   state), the graph is *reopened*: a new epoch re-tests everything in a fresh random
   order while keeping the known transitions for path finding.
 
+## How the model-guided agent works
+
+The model agent is the exploration agent plus rules it induces from its own transitions.
+
+* **Objects.** A frame is a set of objects: single-colour connected components with a
+  signature (colour, size, and the exact shape for small sprites). Two consecutive frames
+  are matched into *moved*, *vanished*, *appeared* and *recoloured* objects; large regions
+  are static scenery.
+* **Rules** (`dynamics.py`), kept for the whole game so they transfer between levels:
+  the *avatar* (the signature the keyboard moves most), the displacement each action gives
+  it, which colours block it or let it pass, which colours ahead of it ended the game,
+  and which click targets never change anything.
+* **Pruning.** Before testing a node's candidates, each one gets a verdict. A candidate
+  predicted to do nothing (a known wall ahead, a click target that never did anything) or
+  to lose the game is counted as tested without being executed — in the first epoch only,
+  so a wrong rule costs at most one re-test when the graph is reopened. Candidates with an
+  unknown outcome are tested before predictable ones.
+* **Goal transfer and planning** (`planner.py`). When a level is completed, the model
+  records what did it: the colour the avatar entered, or the signature clicked. In later
+  levels the agent plans a path to that colour through cells it knows to be passable and
+  follows it while every step lands where the model predicted; a surprise abandons the
+  plan and hands control back to exploration. Clicks on a level-completing signature are
+  tested first.
+
 ## Results — Phase 1
 
 Setting: all 25 public games, 5 seeds each, **4,000 engine steps per run** (every `step`
 call counts, resets included), median over seeds. One run takes 2–15 s; the whole sweep
-takes about 11 minutes on 4 CPU cores. Full per-game table: [`results/phase1.md`](results/phase1.md).
+takes about 11 minutes on 4 CPU cores. Full per-game table: [`results/summary.md`](results/summary.md).
 
 | agent | sum of per-game median levels | games with ≥ 1 level |
 |---|---|---|
@@ -96,6 +134,29 @@ click point nearest the component centre, no retry of no-op actions, epoch-based
    full state.
 3. *Game-over heavy levels.* `sp80`, `r11l`, `ft09` and `tn36` lose the game 60–90 times
    per run, and every loss costs a path back to the frontier.
+
+## Results — Phase 2 (rule induction, no planning)
+
+Same setting: 25 games, 5 seeds, 4,000 steps. `model-noplan` is the exploration agent with
+the induced rules used only to prune and order candidates.
+
+| agent | sum of per-game median levels | games with ≥ 1 level |
+|---|---|---|
+| model-noplan (rules) | **20** | 15 / 25 |
+| graph exploration | 17 | 14 / 25 |
+| random actions | 6 | 6 / 25 |
+
+Where it differs: `lp85` 1 → 2, `r11l` 1 → 2, `tu93` 2 → 3, and the first level of `ls20`,
+`m0r0` and `su15` is now completed in every seed instead of most. No game got worse.
+The rules also make the first level cheaper almost everywhere (median steps to complete
+it, graph → model-noplan): `lp85` 129 → 36, `lf52` 670 → 175, `cd82` 1,070 → 474,
+`dc22` 1,551 → 810, `s5i5` 784 → 556, `sp80` 86 → 63.
+
+What the induced rules reveal about the hard games (from `neo4 explain`): `tr87`'s state
+explosion is caused by colour-7 single pixels that drift one cell per step — moving
+particles make every frame unique; `cn04` is a pushing game in which the colour-8 avatar
+moves colour-10 bars and is stuck 60 % of the time because whether a push works depends on
+what lies beyond the bar, a conditional rule the current colour-level model cannot express.
 
 ## Attribution
 

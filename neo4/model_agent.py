@@ -52,6 +52,7 @@ class ModelAgent(GraphAgent):
         abstract: bool = False,
         curious: bool = False,
         explore: bool = False,
+        adjacency: bool = True,
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
@@ -60,6 +61,7 @@ class ModelAgent(GraphAgent):
         self.abstract = abstract
         self.curious = curious
         self.explore = explore
+        self.adjacency = adjacency
         self.noise: frozenset = frozenset()
         self.rebuilt_this_level = False
         self.last_cand: tuple[GameAction, dict[str, int] | None] | None = None
@@ -224,12 +226,18 @@ class ModelAgent(GraphAgent):
         if kind == "goal":
             if self.plans_this_level >= MAX_PLANS_PER_LEVEL:
                 return None
-            # Object-level goals first (the exit sprite), colour goals as the fallback.
+            # Object-level goals first (the exit sprite), then the halo around objects
+            # that were beside the avatar when a level ended, colour goals last.
             goal_sigs = self.dyn.goal_sigs()
             target = np.zeros(self.cur_grid.shape, dtype=bool)
             for o in self.cur_objs():
                 if o.sig in goal_sigs:
                     target[o.pixels[:, 0], o.pixels[:, 1]] = True
+            if not target.any() and self.adjacency:
+                near_sigs = self.dyn.goal_adjacent_sigs()
+                near = [o for o in self.cur_objs() if o.sig in near_sigs]
+                if near and not any(self._touching(me, o) for o in near):
+                    target = self._halo(near, me)
             if target.any():
                 is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
             else:
@@ -262,6 +270,53 @@ class ModelAgent(GraphAgent):
         self.stats["plans" if kind == "goal" else "explore_plans"] += 1
         return self._plan_step(node)
 
+    @staticmethod
+    def _touching(me: Obj, o: Obj) -> bool:
+        return o.x1 <= me.x2 + 1 and o.x2 >= me.x1 - 1 and o.y1 <= me.y2 + 1 and o.y2 >= me.y1 - 1
+
+    def _halo(self, objs: list[Obj], me: Obj) -> np.ndarray:
+        """Cells from which the avatar would touch one of ``objs``: a band as wide as
+        the avatar's own step around each object, excluding the objects themselves."""
+        assert self.cur_grid is not None
+        h, w = self.cur_grid.shape
+        halo = np.zeros((h, w), dtype=bool)
+        band = max(me.w, me.h)
+        for o in objs:
+            y1, y2 = max(o.y1 - band, 0), min(o.y2 + band, h - 1)
+            x1, x2 = max(o.x1 - band, 0), min(o.x2 + band, w - 1)
+            halo[y1 : y2 + 1, x1 : x2 + 1] = True
+        for o in objs:
+            halo[o.pixels[:, 0], o.pixels[:, 1]] = False
+        return halo
+
+    def _push_candidates(self, node: Node, local: list[int], me: Obj, objs: list[Obj]) -> list[int]:
+        """Beside a goal-adjacent object: the key that completed levels before, or a
+        move towards the object (a push)."""
+        near_sigs = self.dyn.goal_adjacent_sigs()
+        if not near_sigs or self.cur_grid is None:
+            return []
+        near = [o for o in objs if o.sig in near_sigs and self._touching(me, o)]
+        if not near:
+            return []
+        keys = self.dyn.goal_key_actions()
+        out = [i for i in local if node.cands[i].data is None and node.cands[i].action.value in keys]
+        if out:
+            return out
+        for i in local:
+            c = node.cands[i]
+            if c.data is not None:
+                continue
+            d = self.dyn.direction(c.action.value)
+            if d is None:
+                continue
+            for o in near:
+                dx = (o.x1 + o.x2) / 2 - (me.x1 + me.x2) / 2
+                dy = (o.y1 + o.y2) / 2 - (me.y1 + me.y2) / 2
+                if d[0] * dx + d[1] * dy > 0 and abs(dx) * abs(d[0]) + abs(dy) * abs(d[1]) >= max(abs(dx), abs(dy)):
+                    out.append(i)
+                    break
+        return out
+
     def _goal_candidates(self, node: Node, local: list[int]) -> list[int]:
         """Untested candidates that reproduce what completed a level before."""
         if not self.planning or not self.dyn.level_ups:
@@ -289,6 +344,8 @@ class ModelAgent(GraphAgent):
                     out.append(i)
                 elif not goal_sigs and self.dyn._ahead(me, d, self.cur_grid) & goal_colors:
                     out.append(i)
+        if not out and me is not None and self.adjacency:
+            out = self._push_candidates(node, local, me, objs)
         return out
 
     def _pick_local(self, node: Node, local: list[int]) -> int:

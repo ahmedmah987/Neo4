@@ -67,6 +67,8 @@ class Dynamics:
         self.touch_count: Counter = Counter()  # signature -> times it was ahead of the avatar
         self.goal_ahead_sig: Counter = Counter()  # object signatures entered when a level ended
         self.goal_adjacent: Counter = Counter()  # signatures touching the avatar when a level ended
+        self.adjacent_count: Counter = Counter()  # signature -> keyboard steps it touched the avatar
+        self.goal_action: Counter = Counter()  # keyboard action id -> levels it completed
         self.key_uses: Counter = Counter()  # keyboard action id -> times used
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
@@ -145,11 +147,21 @@ class Dynamics:
         avatar = self.avatar()
         if avatar is None:
             return
-        direction = self.direction(aid)
-        if direction is None:
-            return
         me = find(before, avatar)
         if me is None:
+            return
+        # Adjacency is recorded for every keyboard action, including ones that do
+        # not move the avatar ("interact"): the thing beside the avatar may be what
+        # the action acts on.
+        adjacent = self._adjacent_sigs(me, before)
+        for sig in adjacent:
+            self.adjacent_count[sig] += 1
+        if outcome == LEVEL_UP:
+            self.goal_action[aid] += 1
+            for sig in adjacent:
+                self.goal_adjacent[sig] += 1
+        direction = self.direction(aid)
+        if direction is None:
             return
         colors, coords = self._ahead_cells(me, direction, before_grid)
         ahead_sigs = set()
@@ -169,8 +181,6 @@ class Dynamics:
                 self.goal_ahead[c] += 1
             for sig in ahead_sigs:
                 self.goal_ahead_sig[sig] += 1
-            for sig in self._adjacent_sigs(me, before):
-                self.goal_adjacent[sig] += 1
             return
         moved = d is not None and any(b.sig == avatar for b, _, _, _ in d.moved)
         key = "passed" if moved else "blocked"
@@ -348,6 +358,26 @@ class Dynamics:
         """
         return self._lifted(self.goal_ahead_sig, lambda sig: self.touch_count[sig])
 
+    def goal_adjacent_sigs(self) -> set[tuple]:
+        """Signatures that touched the avatar when a level ended, beyond chance.
+
+        For games where the avatar pushes or carries things (tu93's blocks), the
+        object that matters is beside the avatar, not in the cell it enters.
+        """
+        return self._lifted(self.goal_adjacent, lambda sig: self.adjacent_count[sig])
+
+    def goal_key_actions(self) -> set[int]:
+        """Keyboard actions that completed levels beyond chance (an 'interact' key).
+
+        Keys are pressed constantly, so the lift test alone rarely fires; a key
+        that completed at least two levels and nearly all of them also counts.
+        """
+        out = self._lifted(self.goal_action, lambda aid: self.key_uses[aid])
+        for aid, n in self.goal_action.items():
+            if n >= 2 and n / self.level_ups >= 0.8:
+                out.add(aid)
+        return out
+
     def goal_click_sigs(self) -> set[tuple]:
         return self._lifted(self.goal_click, lambda sig: sum(self.click[sig].values()))
 
@@ -422,7 +452,7 @@ class Dynamics:
 
     def describe(self) -> list[str]:
         lines: list[str] = [f"{self.observations} transitions observed"]
-        for sig in sorted(self.noise()):
+        for sig in sorted(self.noise(), key=repr):
             total = sum(self.churn[sig].values())
             lines.append(
                 f"noise: colour-{sig[0]} {sig[2]}x{sig[1]} changes whatever the action ({total} events)"
@@ -465,16 +495,21 @@ class Dynamics:
                 lines.append(f"  colour {color} ahead ended the game {n}/{visits} times")
             for color in sorted(self.goal_colors()):
                 lines.append(f"  entering colour {color} completed a level ({self.goal_ahead[color]}x)")
-            for sig in sorted(self.goal_sigs()):
+            for sig in sorted(self.goal_sigs(), key=repr):
                 lines.append(
                     f"  entering the colour-{sig[0]} {sig[2]}x{sig[1]} sprite completed a level "
                     f"({self.goal_ahead_sig[sig]}/{self.touch_count[sig]} contacts)"
                 )
             if self.goal_adjacent:
                 near = ", ".join(
-                    f"colour-{s[0]} {s[2]}x{s[1]} ({n}x)" for s, n in self.goal_adjacent.most_common(4)
+                    f"colour-{s[0]} {s[2]}x{s[1]} ({n}/{self.adjacent_count[s]})"
+                    for s, n in self.goal_adjacent.most_common(4)
                 )
                 lines.append(f"  objects touching the avatar when levels ended: {near}")
+            for sig in sorted(self.goal_adjacent_sigs(), key=repr):
+                lines.append(
+                    f"  being next to the colour-{sig[0]} {sig[2]}x{sig[1]} sprite is a goal condition"
+                )
         for sig in self.goal_click_sigs():
             lines.append(
                 f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} completed a level ({self.goal_click[sig]}x)"

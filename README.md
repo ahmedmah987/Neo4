@@ -39,6 +39,8 @@ The project has two strands that share one codebase:
 | 12 | **Death attribution**: a level's move budget is detected and its losses blame nothing; the frame of a lost game names the kind that moved into the avatar (kills on contact → predicted danger, planned around); a move that lost the game is not repeated in the level; a graph with its frontier out of reach is reopened instead of wandered | done — 23 / 110, official-style score 0.44 (from 0.42), new default |
 | 13 | **The avatar's body**: sprites that move in lockstep with the avatar whenever they touch it are part of it (ls20's bar over its block); sweeps, predictions, contact rules and routes use the whole body | done — neutral (23 / 110, 0.44), kept: the footprint is now right |
 | 14 | **Exploration variants under the official metric**: object-targeted exploration (Phase 8a) re-measured on the score, where a cheaper first level counts | done — no gain (0.39 vs 0.44): faster first level on `tu93`, dearer later ones; kept as `model-explore` |
+| 15 | **Switches and indicators**: tile kinds whose entry changes a far-away object are switches, the objects they change are indicators, their arrangement is the avatar's state; a goal reached without a level-up locks the state and sends the agent to an untried switch | done — neutral (23 / 110, 0.44); fires only on `ls20`, where the energy budget ends the attempts first; kept |
+| 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | in progress — `tu93`'s fourth level 1,035 → 304 actions on one seed |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -546,6 +548,27 @@ promoted.
 
 This is the second phase in a row without a gain on the score, which is where the
 development loop was set to stop. Where things stand is below.
+
+## Results — Phase 15 (switches and indicators): neutral
+
+The mechanism for "collect the key, then the door" in its general form. A tile kind whose
+entry changes the same far-away object nearly every time it is entered is a *switch*
+(`ls20`: two floor tiles move a colour-9 piece in the pattern panel, 87 of 87 entries);
+the objects switches change are *indicators*, and the arrangement of their exact
+signatures and positions is the avatar's *state*. A goal plan that reaches the goal and
+does not end the level locks that state; the agent then plans a route to a switch it has
+not tried from this state, and plans for the goal again once the state has changed. Goal
+plans also learned to aim at the sprite *enclosing* an unreachable goal (the box around
+`ls20`'s exit pattern) before falling back to colour goals that are not walls elsewhere.
+On a toy room with a three-state switch the second level falls in a few dozen actions
+where exploration needs thousands (`tests/test_switch.py`).
+
+On the public games it is exactly neutral — **23 / 110**, **0.44** — because it fires only
+on `ls20` (14–30 switch plans per run), and there every attempt at the box ends with the
+energy bar running out on the way (16–21 moves to the box, 19–27 losses per run). The
+level needs the energy mechanic (what refills it, and when to go for it) before the
+state mechanic can pay. No other public game shows a switch, so the cost is nil and the
+mechanism is kept.
 
 ## The competition metric, and what it says about this agent
 

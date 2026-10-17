@@ -12,6 +12,9 @@
   kills on contact),
 * whether the game ends every attempt after a fixed number of actions (a move
   budget), in which case those losses are not blamed on anything,
+* which tile kinds are *switches*: entering them changes something far from the
+  avatar (ls20's floor tiles cycle a pattern shown in a panel); the far objects
+  they change are *indicators*, and their arrangement is the avatar's state,
 * how often clicking a given object signature changed anything.
 
 ``predict`` turns those statistics into a verdict on a candidate action in a
@@ -46,6 +49,8 @@ NOISE_RATE = 0.5  # a signature churning on this share of steps under every acti
 NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for noise
 NOISE_REFRESH = 25  # recompute the noise set every this many observations
 MIN_BUDGET = 5  # an attempt length below this is never read as a move budget
+REMOTE_RATE = 0.9  # share of entries of a tile kind on which the same far object changed
+FAR = 6  # cells beyond the avatar's body from which a change counts as remote
 
 
 @dataclass(slots=True)
@@ -89,6 +94,10 @@ class Dynamics:
         self.killer: Counter = Counter()  # sig -> losses with it touching the avatar's place
         self.near_count: Counter = Counter()  # sig -> keyboard steps it ended beside the avatar
         self.contact_deaths = 0  # keyboard losses with a frame to look at, budget losses aside
+        self.remote: dict[tuple, Counter] = defaultdict(Counter)  # tile sig -> far change -> count
+        self.tile_entered: Counter = Counter()  # tile sig -> moves that ended on it
+        self.state_graph: dict[tuple[frozenset, tuple], frozenset] = {}  # (state, switch) -> state
+        self._indicators: set[tuple] = set()
         self.attempt = 0  # actions since the attempt began (level start, reset or loss)
         self.longest_attempt: Counter = Counter()  # level -> longest attempt seen there
         self.death_lengths: dict[int, Counter] = defaultdict(Counter)  # level -> length -> losses
@@ -257,6 +266,8 @@ class Dynamics:
         if moved:
             for c in colors:
                 self.cell[c]["passed"] += 1
+            if after is not None:
+                self._observe_remote(me, before, after, d)
         else:
             # Whatever stopped the avatar is somewhere in the sweep. Colours it is
             # known to cross are not to blame; the rest share the credit (early on
@@ -264,6 +275,77 @@ class Dynamics:
             suspects = [c for c in colors if not self._crosses(c)]
             for c in suspects or colors:
                 self.cell[c]["blocked"] += 1
+
+    def _observe_remote(self, me: Obj, before, after, d: Diff) -> None:
+        """The tile kinds the avatar's body came to rest on, and what changed far
+        away from it on the same step."""
+        me2 = self.body(find(after, me.sig), after)
+        if me2 is None:
+            return
+        comp = self.companions()
+        foot = set(zip(me2.pixels[:, 0].tolist(), me2.pixels[:, 1].tolist()))
+        tiles = set()
+        for o in before:
+            if o.scenery or o.sig == me.sig or o.sig in comp:
+                continue
+            if o.x1 > me2.x2 or o.x2 < me2.x1 or o.y1 > me2.y2 or o.y2 < me2.y1:
+                continue
+            if any((y, x) in foot for y, x in zip(o.pixels[:, 0].tolist(), o.pixels[:, 1].tolist())):
+                tiles.add(o.sig)
+        if not tiles:
+            return
+
+        def far(o: Obj) -> bool:
+            return o.x2 < me2.x1 - FAR or o.x1 > me2.x2 + FAR or o.y2 < me2.y1 - FAR or o.y1 > me2.y2 + FAR
+
+        changes: set[tuple] = set()
+        for b, _, _, _ in d.moved:
+            if far(b) and b.sig != me.sig and b.sig not in comp:
+                changes.add(("moved", b.sig))
+        for b, a in d.recolored:
+            if far(b):
+                changes.add(("recoloured", b.sig))
+        for o in d.vanished:
+            if far(o):
+                changes.add(("vanished", o.sig))
+        for o in d.appeared:
+            if far(o):
+                changes.add(("appeared", o.sig))
+        s0 = self.indicator_state(before)
+        for t in tiles:
+            self.tile_entered[t] += 1
+            for c in changes:
+                self.remote[t][c] += 1
+        switches = self.switches()
+        if switches & tiles:
+            s1 = self.indicator_state(after)
+            if s1 != s0:
+                for t in switches & tiles:
+                    self.state_graph[(s0, t)] = s1
+
+    def switches(self) -> set[tuple]:
+        """Tile kinds whose entry changes the same far object nearly every time."""
+        out = set()
+        for t, n in self.tile_entered.items():
+            if n >= MIN_SUPPORT and any(k / n >= REMOTE_RATE for k in self.remote[t].values()):
+                out.add(t)
+        return out
+
+    def indicator_sigs(self) -> set[tuple]:
+        """Object kinds that switches change: their arrangement is the avatar's state.
+        Membership is sticky so that a state key does not change under the agent."""
+        for t in self.switches():
+            n = self.tile_entered[t]
+            for (_, sig), k in self.remote[t].items():
+                if k / n >= REMOTE_RATE:
+                    self._indicators.add(sig)
+        return self._indicators
+
+    def indicator_state(self, objs) -> frozenset:
+        sigs = self.indicator_sigs()
+        if not sigs:
+            return frozenset()
+        return frozenset((o.esig, o.x1, o.y1) for o in objs if o.sig in sigs)
 
     def _observe_companions(self, me: Obj, before, d: Diff) -> None:
         """Which sprites touching the avatar moved by its vector on this step."""
@@ -708,6 +790,10 @@ class Dynamics:
                 lines.append(
                     f"  colour-{sig[0]} {sig[2]}x{sig[1]} kills on contact ({self.killer[sig]}/{self.killer[sig] + self.near_count[sig]} contacts)"
                 )
+            for t in sorted(self.switches(), key=repr):
+                n = self.tile_entered[t]
+                effects = [f"{what} colour-{sig[0]} {sig[2]}x{sig[1]} ({k}/{n})" for (what, sig), k in self.remote[t].items() if k / n >= REMOTE_RATE]
+                lines.append(f"  entering colour-{t[0]} {t[2]}x{t[1]} is a switch: far away, {'; '.join(effects)}")
             for color, n in self.hazard.most_common():
                 visits = n + sum(self.cell[color].values())
                 lines.append(f"  colour {color} ahead ended the game {n}/{visits} times")

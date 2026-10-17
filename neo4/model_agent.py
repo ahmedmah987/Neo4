@@ -36,8 +36,9 @@ from .objects import Obj, at, erase, extract, find
 from .planner import plan_path
 
 SKIP_VERDICTS = ("blocked", "danger", "noop_click")
-MAX_PLANS_PER_LEVEL = 5
+MAX_PLANS_PER_LEVEL = 5  # goal plans per level and avatar state
 MAX_EXPLORE_PLANS_PER_LEVEL = 40
+MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
 
 
@@ -77,11 +78,19 @@ class ModelAgent(GraphAgent):
         self.explore_plans_this_level = 0
         self.plan_cooldown = 0
         self.fatal: set[tuple[int, int, int]] = set()  # (x, y, action) moves that lost this level
+        # Goal preconditions: indicator states in which the goal was reached and the
+        # level did not end, the (state, switch) pairs tried, and goal plans per state.
+        self.locked: set[frozenset] = set()
+        self.tried_switch: set[tuple[frozenset, tuple]] = set()
+        self.goal_plans_by_state: dict[frozenset, int] = {}
+        self.switch_plans_this_level = 0
+        self.switch_from: tuple[frozenset, tuple] | None = None
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
-             "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0}
+             "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
+             "switch_plans": 0, "locked_goals": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -113,6 +122,11 @@ class ModelAgent(GraphAgent):
         self.plan_cooldown = 0
         self.rebuilt_this_level = False
         self.fatal = set()
+        self.locked = set()
+        self.tried_switch = set()
+        self.goal_plans_by_state = {}
+        self.switch_plans_this_level = 0
+        self.switch_from = None
 
     def _drop_plan(self) -> None:
         self.plan = []
@@ -210,7 +224,9 @@ class ModelAgent(GraphAgent):
         if not self.plan:
             return None
         expect = self.plan_expect[0]
-        if me is None or (me.x1, me.y1) != expect:
+        # (-1, -1) marks the final move, which is not held to a landing position:
+        # whether the goal admitted the avatar or not, the plan is done.
+        if expect != (-1, -1) and (me is None or (me.x1, me.y1) != expect):
             self._drop_plan()
             self.plan_cooldown = PLAN_COOLDOWN
             self.stats["plan_failures"] += 1
@@ -218,8 +234,21 @@ class ModelAgent(GraphAgent):
         self.plan.pop(0)
         self.plan_expect.pop(0)
         if not self.plan:
+            self._plan_finished()
             return None
         return self._plan_step(node)
+
+    def _plan_finished(self) -> None:
+        """The plan's last move was executed and the level did not end."""
+        objs = self.cur_objs()
+        if self.plan_kind == "goal" and self.dyn.switches():
+            # The goal was reached in this avatar state and nothing happened: it is
+            # locked until a switch changes the state.
+            self.locked.add(self.dyn.indicator_state(objs))
+            self.stats["locked_goals"] += 1
+        elif self.plan_kind == "switch" and self.switch_from is not None:
+            self.tried_switch.add(self.switch_from)
+            self.switch_from = None
 
     def _plan_step(self, node: Node) -> int | None:
         aid = self.plan[0]
@@ -231,7 +260,7 @@ class ModelAgent(GraphAgent):
             # The final move touches the target; whether it goes through or not, the
             # plan is done, so do not hold the next step to a predicted position.
             self.plan_expect[0] = (-1, -1)
-        self.stats["plan_steps" if self.plan_kind == "goal" else "explore_steps"] += 1
+        self.stats["plan_steps" if self.plan_kind != "explore" else "explore_steps"] += 1
         return idx
 
     def _make_plan(self, node: Node, me: Obj | None, kind: str) -> int | None:
@@ -244,7 +273,10 @@ class ModelAgent(GraphAgent):
         if not dirs:
             return None
         if kind == "goal":
-            if self.plans_this_level >= MAX_PLANS_PER_LEVEL:
+            state = self.dyn.indicator_state(self.cur_objs())
+            if state in self.locked:
+                return self._make_switch_plan(node, me, state)
+            if self.goal_plans_by_state.get(state, 0) >= MAX_PLANS_PER_LEVEL:
                 return None
             # Object-level goals first (the exit sprite), then the halo around objects
             # that were beside the avatar when a level ended, colour goals last.
@@ -287,11 +319,49 @@ class ModelAgent(GraphAgent):
             return None
         if kind == "goal":
             self.plans_this_level += 1
+            self.goal_plans_by_state[state] = self.goal_plans_by_state.get(state, 0) + 1
         else:
             self.explore_plans_this_level += 1
         self.plan, self.plan_expect = found
         self.plan_kind = kind
         self.stats["plans" if kind == "goal" else "explore_plans"] += 1
+        return self._plan_step(node)
+
+    def _make_switch_plan(self, node: Node, me: Obj, state: frozenset) -> int | None:
+        """The goal is locked in this avatar state: go and stand on a switch tile.
+        Switches not yet tried from this state come first; a switch whose outcome
+        from here is known to be another locked state is skipped."""
+        if self.switch_plans_this_level >= MAX_SWITCH_PLANS_PER_LEVEL or self.cur_grid is None:
+            return None
+        switches = self.dyn.switches()
+        objs = self.cur_objs()
+        present = [t for t in switches if any(o.sig == t for o in objs)]
+        untried = [t for t in present if (state, t) not in self.tried_switch]
+        useful = [t for t in present if self.dyn.state_graph.get((state, t)) not in self.locked]
+        choice = untried or useful
+        if not choice:
+            return None
+        self.rng.shuffle(choice)
+        target = np.zeros(self.cur_grid.shape, dtype=bool)
+        for o in objs:
+            if o.sig in choice:
+                target[o.pixels[:, 0], o.pixels[:, 1]] = True
+        found = plan_path(
+            self.cur_grid, me, self.dyn.directions(), self.dyn.passable,
+            lambda cols, coords: any(target[y, x] for y, x in coords),
+            avoid=self.dyn.hazard_zone(objs, self.cur_grid.shape),
+            forbidden=lambda pos, aid: (pos[0], pos[1], aid) in self.fatal,
+        )
+        if found is None:
+            self.plan_cooldown = PLAN_COOLDOWN
+            return None
+        self.switch_plans_this_level += 1
+        self.plan, self.plan_expect = found
+        self.plan_kind = "switch"
+        last = self.plan_expect[-1]
+        hit = next((o.sig for o in objs if o.sig in choice and o.x1 <= last[0] + me.w and o.x2 >= last[0] - me.w and o.y1 <= last[1] + me.h and o.y2 >= last[1] - me.h), choice[0])
+        self.switch_from = (state, hit)
+        self.stats["switch_plans"] += 1
         return self._plan_step(node)
 
     @staticmethod

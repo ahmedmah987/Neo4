@@ -42,7 +42,7 @@ The project has two strands that share one codebase:
 | 15 | **Switches and indicators**: tile kinds whose entry changes a far-away object are switches, the objects they change are indicators, their arrangement is the avatar's state; a goal reached without a level-up locks the state and sends the agent to an untried switch | done — neutral (23 / 110, 0.44); fires only on `ls20`, where the energy budget ends the attempts first; kept |
 | 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | done — neutral (23 / 110, 0.44; `tu93` 1.88 → 1.91), kept: the second no-gain phase in a row, loop stopped |
 | 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | done — neutral (23 / 110, 0.44): it fires on `tu93` and `g50t` a dozen times a run and saves nothing measurable; kept |
-| 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | measuring — `ls20` learns its energy bar and refill pickups |
+| 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | done — neutral (23 / 110, 0.44): `ls20` learns its energy bar and refill pickups, loses the game less, and still does not reach its second level; kept — second no-gain phase in a row |
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
@@ -647,6 +647,29 @@ prevents are short, and in click games every node still has untested clicks, so 
 never applies. Kept, as it is right and costs nothing. First scoring phase of this
 loop without a gain.
 
+## Results — Phase 18 (resource bars): neutral
+
+`ls20`'s losses were unexplained because its energy bar lives in the status area, which
+the state key masks out. The model now reads that area: a colour whose pixel count falls
+by a fixed amount on most actions and reads lowest when the game is lost is a *resource*
+(`ls20`: colour 11, 4 pixels per action, at its lowest on 8 of 8 losses — including the
+losses the budget rule had classed as budget losses, which are kept for this purpose and
+a colour that has run out is read as zero), the count divided by the drop is the actions
+it still pays for, and tile kinds whose entry makes it jump back up are *refills*
+(`ls20`'s colour-11 pickups). A plan the resource cannot pay for sends the agent to a
+refill tile within reach; a reset is never taken for energy, since a level restart
+restores the bar but not the position. On a toy room with a bar and a pickup the second
+level falls in a few dozen actions where the direct route is impossible
+(`tests/test_energy.py`).
+
+Over the 25 games: **23 / 110** and **0.44** (0.436), the same as Phases 16 and 17.
+On `ls20` the refill plans fire (1–8 per run) and the losses per run fall from about 35 to
+22–48 depending on the seed, but the second level stays out of reach: its pickups are
+one-time, the cycle of "reach the box, find it locked, walk to a switch, come back"
+costs more than one bar, and the agent cannot yet ration the pickups across that cycle.
+Second scoring phase in a row without a gain: by the loop's rule, development stops
+here, and the last item of the plan — the scaling check — is a measurement.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -663,7 +686,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phase 11 | 21 / 98 | 0.42 |
 | model, Phase 12 | 23 / 110 | 0.44 |
 | model, Phase 13 | 23 / 110 | 0.44 |
-| model, Phases 15–16 (default) | 23 / 110 | 0.44 |
+| model, Phases 15–16 | 23 / 110 | 0.44 |
+| model, Phases 17–18 (default) | 23 / 110 | 0.44 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first

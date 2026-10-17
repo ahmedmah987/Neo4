@@ -46,7 +46,8 @@ The project has two strands that share one codebase:
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
 | 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score unchanged (0.39 → 0.39 on the same seeds): levels found late score nothing | done |
 | 21 | **Solution replay**: the shortest click sequence that completed a level, replayed by target signature in the next | done — a loss (0.41 vs 0.44): sequences belong to one layout; off by default, kept as a variant |
-| 22 | **Difference reduction**: the kinds that came together when a level ended (a moving kind, a static kind) learned as the goal relation; later levels explored best-first towards the frames where their gap is smallest | measuring — `vc33`'s second level 36 actions instead of 85–138 |
+| 22 | **Difference reduction**: the kinds that came together when a level ended (a moving kind, a static kind) learned as the goal relation; later levels explored best-first towards the frames where their gap is smallest | done — neutral (0.43): the frontier choice never matters in a click game, every node still has untested clicks; kept |
+| 23 | **Clicks ordered by learned gain**: the kinds whose clicks have closed the goal gap go first at every node | measuring |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -720,6 +721,29 @@ a variant. What the accounting behind it showed is the real finding: in a click 
 later levels nearly every click produces a new state (2,500 distinct states in a
 4,000-step run), so raw exploration of the state graph cannot finish — the search needs
 a direction, which is what Phase 22 gives it.
+
+## Results — Phase 22 (difference reduction): neutral, and a lesson about where search goes
+
+The planned "soft replay" was dropped once Phase 21 showed sequences do not transfer;
+what the click games need is a direction for their search. At a level-up the agent
+now looks for the pair of kinds that came together: a kind whose instances moved (or
+appeared) and ended nearest to a kind that stood still, ranked by how steadily their
+bounding-box gap closed along the solution path through the level graph, then by how
+much it closed. The two best pairs are the *goal relation*; every later node carries
+the gap between the nearest such pair, and the walk to the frontier aims at the nodes
+with the smallest gap instead of the nearest. On a toy slide puzzle (a block pushed
+towards a target by a button, a decoy that does nothing) the second level is a straight
+descent (`tests/test_reduction.py`).
+
+On the public games: **0.434 against 0.436**, 107 / 110 levels — and, to the action,
+the same second-level timings on `vc33`, `r11l` and `lp85` in every seed. The reason is
+plain in the traces: in a click game every node still has untested clicks (dozens of
+targets), so the agent never walks to a frontier at all, and which frontier the
+heuristic would prefer never comes into play. The 36-action second level seen on `vc33`
+during development came from a different component — ordering a node's clicks by
+proximity to the moving kind — which helped `vc33` and hurt `r11l` and `lp85`; it is
+off by default. The lesson is the next phase: in click games the search is decided by
+*which click to try first at a node*, so that is where the learned relation must act.
 
 ## The competition metric, and what it says about this agent
 

@@ -7,6 +7,17 @@ ARC-AGI-3 is a set of small, game-like environments with **no instructions**: th
 has to discover what the goal is and how the world works by interacting with it. Humans
 solve all of them; frontier language models used directly solve almost none.
 
+The project has two strands that share one codebase:
+
+* **"Beyond"** — a working study of what comes after today's language models: an agent
+  that learns a *model of its world* from its own interaction (which object it controls,
+  what each action does, what blocks, what kills, what completes a level), plans inside
+  that model, and keeps what it learned across levels. Every phase below is an experiment
+  on that question, with its negative results kept.
+* **The competition** — the same agent packaged for the ARC Prize 2026 Kaggle track
+  (`kaggle/my_agent.py`), to be submitted once its score is high enough to be worth it.
+  The two strands pull the same way: what raises the score is a better world model.
+
 ## Plan
 
 | Phase | Goal | Status |
@@ -393,6 +404,35 @@ right object. Two hypotheses were checked on the same data and dropped before bu
 "an object kind approaches the avatar when the game is lost" (no kind is near the avatar
 at death beyond chance in any game; `tu93`'s losses are its per-level step limit) and
 the push-chain pattern (avatar → block → target) for `tu93`.
+
+## The competition metric, and what it says about this agent
+
+The levels-per-budget numbers above are the right measure for the "beyond" strand (does
+the agent learn its world?) but not for the competition. ARC-AGI-3 scores a completed
+level as `min(115, (human_actions / agent_actions)² × 100)`, where the human figure is the
+median of first-time players, weights levels by their 1-indexed number, and averages
+over games. Every action between two level completions counts, exploration included.
+`results/summary.md` now reports this score too. On the public games:
+
+| agent | levels (4,000 steps) | official-style score (0–100) |
+|---|---|---|
+| graph exploration | 17 / 75 | 0.26 |
+| model (this repo) | 20 / 95 | 0.39 |
+
+The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
+many levels are completed but about **how many actions each one costs**: `ls20`'s first
+level takes this agent ~200–1,300 actions against a human's 22, which is worth 0–1 % of
+that level; `r11l`'s first level in 41 actions against 22 is worth 29 %, its second in
+897 against 33 is worth 0.1 %. Exploration is what the metric punishes, quadratically.
+
+Two consequences shape what comes next. First, a level's weight grows with its index, so
+a game's score is dominated by its later levels: an agent that spends the first level
+learning and then solves later levels in near-human action counts can score well even
+with an expensive first level — which is exactly where a learned world model and a
+planner should pay. Second, nothing in a tabula-rasa explorer can make the *first* level
+of a new game cheap; that needs priors about what games tend to be, which is the
+language-model direction (phase 10 in the plan) or a library of mechanics learned
+across games.
 
 ## Conclusion and next step
 

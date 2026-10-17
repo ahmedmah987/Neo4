@@ -31,6 +31,7 @@ Step budget per run: 4000, 12000, 24000. Cell = median levels completed over see
 | wa30 | 9 | 0 (0–0) n=5 | 0 (0–0) n=3 | 0 (0–0) n=2 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=5 | 0 (0–0) n=3 | 0 (0–0) n=2 | 0 (0–0) n=5 |
 | **sum of medians** | | **17** | **16** | **19.5** | **20** | **21** | **16** | **13** | **20** | **19** | **19** | **18** | **20** | **18** | **20** | **19** | **20** | **23** | **29.5** | **6** |
 | levels solved over all runs | | 75 | 52 | 39 | 95 | 97 | 83 | 65 | 97 | 90 | 90 | 91 | 93 | 92 | 94 | 92 | 94 | 67 | 59 | 29 |
+| **official-style score** (0–100; levels weighted by index, actions vs the human baseline squared) | | **0.26** | **0.24** | **0.30** | **0.39** | **0.36** | **0.36** | **0.27** | **0.36** | **0.36** | **0.37** | **0.36** | **0.36** | **0.36** | **0.36** | **0.39** | **0.36** | **0.30** | **0.21** | **0.07** |
 
 Median steps to complete the first level, over the seeds that completed it (count in brackets); games nobody finished a level in are omitted.
 

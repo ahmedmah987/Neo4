@@ -167,6 +167,27 @@ def cmd_run(a: argparse.Namespace) -> None:
                 )
 
 
+def official_score(row: dict[str, Any], baselines: list[int]) -> float:
+    """ARC-AGI-3 scoring for one run: per completed level min(115, (human/agent)^2 * 100),
+    the game score weighted by 1-indexed level number over all of the game's levels."""
+    prev = 0
+    total = 0.0
+    for i, step in enumerate(row.get("level_steps", [])):
+        actions = max(step - prev, 1)
+        prev = step
+        if i < len(baselines):
+            total += min(115.0, (baselines[i] / actions) ** 2 * 100) * (i + 1)
+    n = len(baselines)
+    return total / sum(range(1, n + 1)) if n else 0.0
+
+
+def _baselines() -> dict[str, list[int]]:
+    try:
+        return {e.game_id.split("-")[0]: e.baseline_actions or [] for e in arcade().get_environments()}
+    except Exception:
+        return {}
+
+
 def _load_raw() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in sorted(RAW.glob("*.jsonl")):
@@ -220,6 +241,21 @@ def cmd_summarize(_: argparse.Namespace) -> None:
     lines.append(
         "| levels solved over all runs | | " + " | ".join(str(solved[ag]) for ag in agents) + " |"
     )
+    baselines = _baselines()
+    if baselines:
+        official = {}
+        for ag in agents:
+            per_game = []
+            for g in games:
+                runs = by.get((g, ag), [])
+                if runs and g in baselines:
+                    per_game.append(statistics.mean(official_score(r, baselines[g]) for r in runs))
+            official[ag] = statistics.mean(per_game) if per_game else 0.0
+        lines.append(
+            "| **official-style score** (0–100; levels weighted by index, actions vs the human baseline squared) | | "
+            + " | ".join(f"**{official[ag]:.2f}**" for ag in agents)
+            + " |"
+        )
 
     # Efficiency: how many steps it took to finish the first level, where it was finished.
     lines += [

@@ -23,9 +23,9 @@ from typing import Any
 from arcengine import GameState
 
 from .graph_agent import AGENTS as _GRAPH_AGENTS
-from .model_agent import ModelAgent
+from .model_agent import ModelAgent, ModelNoPlanAgent
 
-AGENTS = {**_GRAPH_AGENTS, ModelAgent.name: ModelAgent}
+AGENTS = {**_GRAPH_AGENTS, ModelAgent.name: ModelAgent, ModelNoPlanAgent.name: ModelNoPlanAgent}
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results"

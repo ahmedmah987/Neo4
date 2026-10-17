@@ -32,6 +32,7 @@ PASS_RATE = 0.9  # a colour the avatar crossed at least this often is passable
 DANGER_RATE = 0.5  # share of visits that ended the game
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
+GOAL_RATE = 0.3  # share of a colour's (or click target's) visits that ended a level
 
 
 @dataclass(slots=True)
@@ -47,6 +48,8 @@ class Dynamics:
         self.click: dict[tuple, Counter] = defaultdict(Counter)
         self.cell: dict[int, Counter] = defaultdict(Counter)
         self.hazard: Counter = Counter()
+        self.goal_ahead: Counter = Counter()  # colours ahead of the avatar when a level ended
+        self.goal_click: Counter = Counter()  # signatures clicked when a level ended
         self.observations = 0
         self._avatar: tuple | None = None
         self._avatar_dirty = True
@@ -77,6 +80,8 @@ class Dynamics:
             return
         changed = outcome != OK or (d is not None and d.changed)
         self.click[target.sig]["change" if changed else "none"] += 1
+        if outcome == LEVEL_UP:
+            self.goal_click[target.sig] += 1
 
     def _observe_key(self, action, before, before_grid, d: Diff | None, outcome: str) -> None:
         aid = action.value
@@ -100,6 +105,10 @@ class Dynamics:
         if outcome == GAME_OVER:
             for c in colors:
                 self.hazard[c] += 1
+            return
+        if outcome == LEVEL_UP:
+            for c in colors:
+                self.goal_ahead[c] += 1
             return
         moved = d is not None and any(b.sig == avatar for b, _, _, _ in d.moved)
         key = "passed" if moved else "blocked"
@@ -153,6 +162,42 @@ class Dynamics:
     def _rate(self, counter: Counter, key: str) -> tuple[float, int]:
         total = sum(counter.values())
         return (counter[key] / total if total else 0.0), total
+
+    def directions(self) -> dict[int, tuple[int, int]]:
+        """Action id -> avatar displacement, for every action with a stable effect."""
+        avatar = self.avatar()
+        if avatar is None:
+            return {}
+        out = {}
+        for aid in {a for a, s in self.move if s == avatar}:
+            d = self.direction(aid)
+            if d is not None:
+                out[aid] = d
+        return out
+
+    def passable(self, color: int) -> bool:
+        """The avatar crossed this colour reliably and never died entering it."""
+        visits = self.hazard[color] + sum(self.cell[color].values())
+        if visits >= MIN_SUPPORT and self.hazard[color] / visits >= DANGER_RATE:
+            return False
+        passed, n = self._rate(self.cell[color], "passed")
+        return n >= MIN_SUPPORT and passed >= PASS_RATE
+
+    def goal_colors(self) -> set[int]:
+        """Colours whose entry ended a level, relative to how often they were merely crossed."""
+        out = set()
+        for c, n in self.goal_ahead.items():
+            visits = n + sum(self.cell[c].values()) + self.hazard[c]
+            if n / visits >= GOAL_RATE:
+                out.add(c)
+        return out
+
+    def goal_click_sigs(self) -> set[tuple]:
+        out = set()
+        for sig, n in self.goal_click.items():
+            if n / (n + sum(self.click[sig].values())) >= GOAL_RATE:
+                out.add(sig)
+        return out
 
     # -- prediction -----------------------------------------------------------
 
@@ -239,6 +284,12 @@ class Dynamics:
             for color, n in self.hazard.most_common():
                 visits = n + sum(self.cell[color].values())
                 lines.append(f"  colour {color} ahead ended the game {n}/{visits} times")
+            for color in sorted(self.goal_colors()):
+                lines.append(f"  entering colour {color} completed a level ({self.goal_ahead[color]}x)")
+        for sig in self.goal_click_sigs():
+            lines.append(
+                f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} completed a level ({self.goal_click[sig]}x)"
+            )
         other = [
             (aid, sig, c)
             for (aid, sig), c in self.move.items()

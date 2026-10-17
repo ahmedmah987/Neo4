@@ -35,6 +35,7 @@ The project has two strands that share one codebase:
 | 8d | **Object–object relations**: what a pushed object ended up touching or covering when a level ended (`tu93`'s blocks on their targets) | proposed next step |
 | 9 | **Competition packaging**: the agent as the single file the Kaggle notebook embeds, tested against the framework contract | done — `kaggle/my_agent.py` |
 | 10 | **Robust avatar identification**: orientation-free sprite signatures, the avatar is usually unique; exact signatures kept for click rules | done — neutral in levels (20 / 95), kept: the avatar is now right |
+| 11 | **Swept-cell world model**: an avatar that jumps several cells is stopped by what lies *between* its position and its destination; a stopped move blames the swept colours not yet known to be crossable; a graph edge that led somewhere more often than it killed survives a loss (move budgets) | done — 21 / 98, official-style score 0.42 (from 0.39), new default |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -42,7 +43,7 @@ budget tried, and the gap widens with the budget (levels per run, all 25 public 
 
 | step budget | graph exploration | model (this repo) | gain |
 |---|---|---|---|
-| 4,000 (5 seeds) | 0.60 | 0.74 | +24 % |
+| 4,000 (5 seeds) | 0.60 | 0.78 | +31 % |
 | 12,000 (3 seeds) | 0.69 | 0.89 | +29 % |
 | 24,000 (2 seeds) | 0.78 | 1.18 | **+51 %** |
 
@@ -153,7 +154,9 @@ The model agent is the exploration agent plus rules it induces from its own tran
 * **Rules** (`dynamics.py`), kept for the whole game so they transfer between levels:
   the *avatar* (the signature the keyboard moves most), the displacement each action gives
   it, which colours block it or let it pass, which colours ahead of it ended the game,
-  and which click targets never change anything.
+  and which click targets never change anything. A move is a *sweep*: every cell between
+  the avatar and its destination counts as crossed, so an avatar that jumps six cells
+  learns that the wall it never lands on is what stops it.
 * **Pruning.** Before testing a node's candidates, each one gets a verdict. A candidate
   predicted to do nothing (a known wall ahead, a click target that never did anything) or
   to lose the game is counted as tested without being executed — in the first epoch only,
@@ -405,6 +408,46 @@ right object. Two hypotheses were checked on the same data and dropped before bu
 at death beyond chance in any game; `tu93`'s losses are its per-level step limit) and
 the push-chain pattern (avatar → block → target) for `tu93`.
 
+## Results — Phase 11 (swept-cell world model): planning fires on `tu93`, +0.03 official
+
+Why did the planner never fire on `tu93`'s later levels although the goal sprite was
+known? Its avatar moves six cells per action, and the model credited a stopped move to
+the cells the avatar *would have landed on*: the floor colour collected 24 "blocked"
+counts against 171 "passed", stayed below the 90 % pass rate, no cell was passable, and
+every route search failed. Three general changes:
+
+* **Sweeps.** A move passes through every cell between the avatar and its destination
+  (`planner.swept`, nearest band first). A successful move credits all swept colours as
+  passed; a stopped move blames the swept colours not yet known to be crossable — early
+  on the floor too, until its passes establish it. Prediction and route search check the
+  whole sweep, so a jump over a thin wall is "blocked" even though its landing cells are
+  floor.
+* **Budget deaths do not kill edges.** `tu93` ends every attempt after fifty moves. A loss
+  recorded on a well-trodden graph edge turned it into a dead end; with the reverse link
+  still in place, path finding kept routing through it, `edge_to` found nothing, and the
+  agent reset on every visit (one seed spent 3,900 of 4,000 steps that way). An edge that
+  led somewhere more often than it killed now survives a loss; an edge that is downgraded
+  drops its reverse link.
+* **Blame by suspicion.** Blocked credit goes only to swept colours that are not already
+  established as crossable, which keeps a well-trodden floor from accumulating blocks when
+  an object stands in the way.
+
+Over the 25 games (4,000 steps, 5 seeds): **21 / 98** levels against 20 / 95, and the
+official-style score **0.42** against 0.39 — the whole gain is `tu93` (0.73 → 1.55),
+whose second level now falls in 14 actions on one seed (the human baseline is 16: the
+level scores the 115 cap). Everything else is unchanged to the second decimal, which is
+what a fix to the model of one movement style should look like.
+
+What still fails on `tu93` is instructive. Its later levels have patrolling enemies that
+kill on contact; a planned route walks into one, the attempt ends, the level restarts and
+the agent makes *the same plan* again — five times, the per-level plan allowance — because
+nothing in the model ties a death to a moving object, and the budget deaths dilute every
+colour-level hazard count. And once the enemies are in the state key, the level graph
+explodes (477 nodes on one seed) and the frontier becomes unreachable after a reset. Both
+point at the next phase: deaths explained by what *moved into* the avatar, a level-local
+memory of fatal moves for the planner, and a budget rule that stops counting the
+fifty-move deaths as hazards.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -417,7 +460,8 @@ over games. Every action between two level completions counts, exploration inclu
 | agent | levels (4,000 steps) | official-style score (0–100) |
 |---|---|---|
 | graph exploration | 17 / 75 | 0.26 |
-| model (this repo) | 20 / 95 | 0.39 |
+| model, Phase 10 | 20 / 95 | 0.39 |
+| model, Phase 11 (default) | 21 / 98 | 0.42 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -442,7 +486,10 @@ do anything, which actions or cells lose the game — used to prune and order th
 exploration. Everything after that (planning towards past goals, state abstraction,
 curiosity, instance-level rules, object-targeted exploration) was measured and found
 neutral or negative at 4,000 steps, and is kept only as an opt-in variant. The gain from
-the rules grows with the budget: +24 % levels per run at 4,000 steps, +51 % at 24,000.
+the rules grows with the budget: +31 % levels per run at 4,000 steps, +51 % at 24,000
+(the latter measured before Phases 10–11). Phase 11 showed that a planner is only as
+good as the world model under it: fixing how a jumping avatar's moves are credited was
+worth more on `tu93` than any planning heuristic tried before it.
 
 The remaining losses are of one kind. What completes a level, and what loses the game,
 is relational — *which* instance of an object, *where*, in *what* state, *pushed* against

@@ -45,6 +45,9 @@ HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for pla
 
 class ModelAgent(GraphAgent):
     name = "model"
+    # Clicks nearest to a moving kind first: measured neutral to harmful on the public
+    # click games (r11l, lp85), so off unless a variant turns it on.
+    near_clicks = False
 
     def __init__(
         self,
@@ -687,7 +690,7 @@ class ModelAgent(GraphAgent):
             return self.rng.choice(winners)
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
         pool = unknown or local
-        if self.relations:
+        if self.relations and self.near_clicks:
             near = self._near_moving(node, pool, self.cur_objs())
             if near:
                 self.stats["near_clicks"] += 1

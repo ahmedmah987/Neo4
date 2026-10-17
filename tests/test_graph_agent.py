@@ -104,6 +104,51 @@ def test_level_graph_bfs_next_hop():
     assert g.edge_to("a", "b") == 0
 
 
+class Exhaustible:
+    """Two frames, no level-up: ACTION1 toggles between them, ACTION2 does nothing.
+
+    The exploration graph is exhausted after a handful of steps; the agent must
+    then keep playing (new epoch) instead of resetting forever.
+    """
+
+    def __init__(self):
+        self.pos, self.state = 0, GameState.NOT_PLAYED
+        self.resets = 0
+
+    def _obs(self):
+        o = FrameDataRaw(state=self.state, win_levels=1, available_actions=[0, 1, 2])
+        g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)
+        g[10:14, 10 + 8 * self.pos : 14 + 8 * self.pos] = 9
+        o.frame = [g]
+        return o
+
+    def reset(self):
+        self.resets += 1
+        self.pos, self.state = 0, GameState.NOT_FINISHED
+        return self._obs()
+
+    def step(self, action, data=None):
+        if action is GameAction.RESET:
+            return self.reset()
+        if action is GameAction.ACTION1:
+            self.pos ^= 1
+        return self._obs()
+
+
+def test_exhausted_graph_reopens_instead_of_reset_loop():
+    env = Exhaustible()
+    agent = GraphAgent(seed=0)
+    obs = env.reset()
+    consecutive = 0
+    for _ in range(200):
+        a, d = agent.act(obs)
+        consecutive = consecutive + 1 if a is GameAction.RESET else 0
+        assert consecutive < 2
+        obs = env.step(a, d)
+    assert agent.stats["reopens"] >= 1
+    assert env.resets < 10
+
+
 def test_agent_resets_on_game_over_and_marks_edge_dead():
     agent = GraphAgent(seed=0)
     g = np.zeros((fp.GRID, fp.GRID), dtype=np.int8)

@@ -34,8 +34,6 @@ PUBLIC_GAMES = [
     "cn04", "r11l", "ft09", "ka59", "cd82", "sc25", "wa30", "g50t", "su15",
     "tr87", "dc22", "s5i5", "sp80", "sk48", "lf52", "re86",
 ]
-# The six games used in the paper's 4000-step comparison (Table 1).
-PAPER_GAMES = ["ft09", "ls20", "vc33", "sp80", "lp85", "as66"]
 
 
 _arcade: Any = None

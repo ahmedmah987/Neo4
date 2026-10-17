@@ -47,31 +47,38 @@ class Node:
     cands: list[Candidate]
     result: list[int] = field(default_factory=list)
     target: list[str | None] = field(default_factory=list)
+    tested_epoch: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)
         self.target = [None] * len(self.cands)
+        self.tested_epoch = [-1] * len(self.cands)
 
-    def untested(self, max_group: int) -> list[int]:
+    def untested(self, max_group: int, epoch: int = 0) -> list[int]:
         return [
             i
-            for i, (c, r) in enumerate(zip(self.cands, self.result))
-            if r == UNTESTED and c.group <= max_group
+            for i, (c, e) in enumerate(zip(self.cands, self.tested_epoch))
+            if e < epoch and c.group <= max_group
         ]
-
-    def lowest_untested_group(self) -> int | None:
-        groups = [c.group for c, r in zip(self.cands, self.result) if r == UNTESTED]
-        return min(groups) if groups else None
 
 
 class LevelGraph:
-    """Nodes, tested edges and shortest paths to the frontier for one level."""
+    """Nodes, tested edges and shortest paths to the frontier for one level.
+
+    Exploration runs in epochs: a candidate counts as untested until it has
+    been executed in the current epoch. ``reopen`` starts a new epoch, which
+    re-tests everything in a fresh random order while keeping the known
+    transitions for path finding. That is what the agent does when a level's
+    graph is exhausted without a level-up, which happens when the state key
+    misses hidden state and the recorded transitions are unreliable.
+    """
 
     def __init__(self) -> None:
         self.nodes: dict[str, Node] = {}
         self.reverse: dict[str, set[str]] = {}
         self._dist_cache: dict[int, tuple[dict[str, int], dict[str, str]]] = {}
         self.inconsistent = 0  # same (node, action) led to different targets
+        self.epoch = 0
 
     def add_node(self, key: str, cands: list[Candidate]) -> Node:
         node = self.nodes.get(key)
@@ -83,6 +90,7 @@ class LevelGraph:
 
     def record(self, src: str, idx: int, dst: str | None) -> None:
         node = self.nodes[src]
+        node.tested_epoch[idx] = self.epoch
         if dst is None or dst == src:
             node.result[idx] = NO_CHANGE
         else:
@@ -94,8 +102,12 @@ class LevelGraph:
             self.reverse.setdefault(dst, set()).add(src)
         self._dist_cache.clear()
 
+    def reopen(self) -> None:
+        self.epoch += 1
+        self._dist_cache.clear()
+
     def frontier(self, max_group: int) -> list[str]:
-        return [k for k, n in self.nodes.items() if n.untested(max_group)]
+        return [k for k, n in self.nodes.items() if n.untested(max_group, self.epoch)]
 
     def distances(self, max_group: int) -> tuple[dict[str, int], dict[str, str]]:
         """Multi-source BFS from the frontier over reversed edges.
@@ -147,12 +159,14 @@ class GraphAgent:
         self.last_key: str | None = None
         self.last_idx: int | None = None
         self.priority = 0
+        self.since_reset = 0  # actions taken since the level (re)started
         self.stats: dict[str, int] = {
             "nodes": 0,
             "resets": 0,
             "game_overs": 0,
             "back_to_start": 0,
             "random_walks": 0,
+            "reopens": 0,
             "inconsistent": 0,
         }
 
@@ -182,18 +196,20 @@ class GraphAgent:
                 cands.append(Candidate(action, None, 0))
         return cands
 
+    def _reset(self) -> tuple[GameAction, None]:
+        self.last_key = self.last_idx = None
+        self.since_reset = 0
+        self.stats["resets"] += 1
+        return GameAction.RESET, None
+
     def act(self, obs: FrameDataRaw) -> tuple[GameAction, dict[str, int] | None]:
         if obs.state == GameState.GAME_OVER:
             if self.last_key is not None and self.last_idx is not None:
                 self.graph.record(self.last_key, self.last_idx, None)
-            self.last_key = self.last_idx = None
             self.stats["game_overs"] += 1
-            self.stats["resets"] += 1
-            return GameAction.RESET, None
+            return self._reset()
         if obs.state == GameState.NOT_PLAYED or obs.is_empty():
-            self.last_key = self.last_idx = None
-            self.stats["resets"] += 1
-            return GameAction.RESET, None
+            return self._reset()
 
         grid = np.asarray(obs.frame[-1])
         if obs.levels_completed != self.levels_completed:
@@ -215,12 +231,14 @@ class GraphAgent:
         self.stats["inconsistent"] = self.graph.inconsistent
 
         idx = self._choose(node)
+        if idx is None and self.since_reset == 0 and node.cands:
+            # A RESET as the first action of a level is a *full* reset back to
+            # level 0 in the engine, so never follow a reset with another one.
+            idx = self.rng.randrange(len(node.cands))
         if idx is None:
-            # Nothing left to test anywhere reachable: reset the level.
-            self.last_key = self.last_idx = None
-            self.stats["resets"] += 1
-            return GameAction.RESET, None
+            return self._reset()
         self.last_key, self.last_idx = key, idx
+        self.since_reset += 1
         cand = node.cands[idx]
         return cand.action, cand.data
 
@@ -229,7 +247,7 @@ class GraphAgent:
     def _choose(self, node: Node) -> int | None:
         top = self.graph.max_group()
         while True:
-            local = node.untested(self.priority)
+            local = node.untested(self.priority, self.graph.epoch)
             if local:
                 return self.rng.choice(local)
             dist, nxt = self.graph.distances(self.priority)
@@ -241,14 +259,22 @@ class GraphAgent:
                 self.priority += 1
                 continue
             break
+        if not self.graph.frontier(top):
+            # Everything reachable is tested and the level is not solved: the
+            # state key must be missing hidden state. Re-test in a new order.
+            self.graph.reopen()
+            self.priority = 0
+            self.stats["reopens"] += 1
+            local = node.untested(self.priority, self.graph.epoch)
+            if local:
+                return self.rng.choice(local)
         # Frontier exists but is unreachable from here (non-determinism or a
         # one-way transition): take a random known transition to move around,
         # or ask for a reset if the node is a dead end.
-        if self.graph.frontier(top):
-            moves = [i for i, r in enumerate(node.result) if r == TRANSITION]
-            if moves:
-                self.stats["random_walks"] += 1
-                return self.rng.choice(moves)
+        moves = [i for i, r in enumerate(node.result) if r == TRANSITION]
+        if moves:
+            self.stats["random_walks"] += 1
+            return self.rng.choice(moves)
         return None
 
 

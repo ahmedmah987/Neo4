@@ -64,6 +64,9 @@ class Dynamics:
         self.click_death_at: Counter = Counter()
         self.churn: dict[tuple, Counter] = defaultdict(Counter)  # sig -> action class -> events
         self.touched: set[tuple] = set()  # object signatures the avatar has moved into / against
+        self.touch_count: Counter = Counter()  # signature -> times it was ahead of the avatar
+        self.goal_ahead_sig: Counter = Counter()  # object signatures entered when a level ended
+        self.goal_adjacent: Counter = Counter()  # signatures touching the avatar when a level ended
         self.key_uses: Counter = Counter()  # keyboard action id -> times used
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
@@ -149,10 +152,14 @@ class Dynamics:
         if me is None:
             return
         colors, coords = self._ahead_cells(me, direction, before_grid)
+        ahead_sigs = set()
         for y, x in coords:
             o = at(before, x, y)
             if o is not None and o.sig != avatar and not o.scenery:
-                self.touched.add(o.sig)
+                ahead_sigs.add(o.sig)
+        for sig in ahead_sigs:
+            self.touched.add(sig)
+            self.touch_count[sig] += 1
         if outcome == GAME_OVER:
             for c in colors:
                 self.hazard[c] += 1
@@ -160,6 +167,10 @@ class Dynamics:
         if outcome == LEVEL_UP:
             for c in colors:
                 self.goal_ahead[c] += 1
+            for sig in ahead_sigs:
+                self.goal_ahead_sig[sig] += 1
+            for sig in self._adjacent_sigs(me, before):
+                self.goal_adjacent[sig] += 1
             return
         moved = d is not None and any(b.sig == avatar for b, _, _, _ in d.moved)
         key = "passed" if moved else "blocked"
@@ -185,6 +196,27 @@ class Dynamics:
 
     def _ahead(self, me: Obj, direction: tuple[int, int], grid: np.ndarray) -> set[int]:
         return self._ahead_cells(me, direction, grid)[0]
+
+    def ahead_sigs(self, me: Obj, direction: tuple[int, int], grid: np.ndarray, objs) -> set[tuple]:
+        """Signatures of the (non-scenery) objects a move would enter."""
+        _, coords = self._ahead_cells(me, direction, grid)
+        out = set()
+        for y, x in coords:
+            o = at(objs, x, y)
+            if o is not None and o.sig != me.sig and not o.scenery:
+                out.add(o.sig)
+        return out
+
+    @staticmethod
+    def _adjacent_sigs(me: Obj, objs) -> set[tuple]:
+        """Signatures of non-scenery objects whose bounding box touches the avatar's."""
+        out = set()
+        for o in objs:
+            if o is me or o.scenery or o.sig == me.sig:
+                continue
+            if o.x1 <= me.x2 + 1 and o.x2 >= me.x1 - 1 and o.y1 <= me.y2 + 1 and o.y2 >= me.y1 - 1:
+                out.add(o.sig)
+        return out
 
     # -- derived rules --------------------------------------------------------
 
@@ -308,6 +340,14 @@ class Dynamics:
             lambda c: self.goal_ahead[c] + sum(self.cell[c].values()) + self.hazard[c],
         )
 
+    def goal_sigs(self) -> set[tuple]:
+        """Object signatures the avatar entered when a level ended, beyond chance.
+
+        Finer than ``goal_colors``: in ls20 the exit and the walls share a colour,
+        so a colour goal sends the planner into walls; the exit's signature does not.
+        """
+        return self._lifted(self.goal_ahead_sig, lambda sig: self.touch_count[sig])
+
     def goal_click_sigs(self) -> set[tuple]:
         return self._lifted(self.goal_click, lambda sig: sum(self.click[sig].values()))
 
@@ -425,6 +465,16 @@ class Dynamics:
                 lines.append(f"  colour {color} ahead ended the game {n}/{visits} times")
             for color in sorted(self.goal_colors()):
                 lines.append(f"  entering colour {color} completed a level ({self.goal_ahead[color]}x)")
+            for sig in sorted(self.goal_sigs()):
+                lines.append(
+                    f"  entering the colour-{sig[0]} {sig[2]}x{sig[1]} sprite completed a level "
+                    f"({self.goal_ahead_sig[sig]}/{self.touch_count[sig]} contacts)"
+                )
+            if self.goal_adjacent:
+                near = ", ".join(
+                    f"colour-{s[0]} {s[2]}x{s[1]} ({n}x)" for s, n in self.goal_adjacent.most_common(4)
+                )
+                lines.append(f"  objects touching the avatar when levels ended: {near}")
         for sig in self.goal_click_sigs():
             lines.append(
                 f"clicking colour-{sig[0]} {sig[2]}x{sig[1]} completed a level ({self.goal_click[sig]}x)"

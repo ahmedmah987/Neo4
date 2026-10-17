@@ -224,10 +224,19 @@ class ModelAgent(GraphAgent):
         if kind == "goal":
             if self.plans_this_level >= MAX_PLANS_PER_LEVEL:
                 return None
-            goals = self.dyn.goal_colors()
-            if not goals:
-                return None
-            is_goal = lambda cols, coords: bool(cols & goals)
+            # Object-level goals first (the exit sprite), colour goals as the fallback.
+            goal_sigs = self.dyn.goal_sigs()
+            target = np.zeros(self.cur_grid.shape, dtype=bool)
+            for o in self.cur_objs():
+                if o.sig in goal_sigs:
+                    target[o.pixels[:, 0], o.pixels[:, 1]] = True
+            if target.any():
+                is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
+            else:
+                goals = self.dyn.goal_colors()
+                if not goals:
+                    return None
+                is_goal = lambda cols, coords: bool(cols & goals)
             self.plans_this_level += 1
         else:
             if self.explore_plans_this_level >= MAX_EXPLORE_PLANS_PER_LEVEL:
@@ -256,7 +265,8 @@ class ModelAgent(GraphAgent):
         objs = self.cur_objs()
         # Click goals by signature only: a goal by *colour* made the agent spend 500
         # steps per run clicking every colour-15 pixel of r11l, where position decides.
-        goal_sigs = self.dyn.goal_click_sigs()
+        goal_click = self.dyn.goal_click_sigs()
+        goal_sigs = self.dyn.goal_sigs()
         goal_colors = self.dyn.goal_colors()
         avatar = self.dyn.avatar()
         me = find(objs, avatar) if avatar is not None else None
@@ -265,13 +275,16 @@ class ModelAgent(GraphAgent):
             c = node.cands[i]
             if c.data is not None:
                 t = at(objs, c.data["x"], c.data["y"])
-                if t is not None and t.sig in goal_sigs:
+                if t is not None and t.sig in goal_click:
                     out.append(i)
-            elif me is not None and goal_colors:
+            elif me is not None and (goal_sigs or goal_colors) and self.cur_grid is not None:
                 d = self.dyn.direction(c.action.value)
-                if d is not None and self.cur_grid is not None:
-                    if self.dyn._ahead(me, d, self.cur_grid) & goal_colors:
-                        out.append(i)
+                if d is None:
+                    continue
+                if goal_sigs and self.dyn.ahead_sigs(me, d, self.cur_grid, objs) & goal_sigs:
+                    out.append(i)
+                elif not goal_sigs and self.dyn._ahead(me, d, self.cur_grid) & goal_colors:
+                    out.append(i)
         return out
 
     def _pick_local(self, node: Node, local: list[int]) -> int:

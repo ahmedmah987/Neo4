@@ -49,7 +49,7 @@ class ModelAgent(GraphAgent):
         skip: bool = True,
         plan: bool = True,
         abstract: bool = False,
-        curious: bool = True,
+        curious: bool = False,
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
@@ -259,10 +259,10 @@ class ModelAbstractAgent(ModelAgent):
         super().__init__(seed, skip=True, plan=True, abstract=True)
 
 
-class ModelNoCuriosityAgent(ModelAgent):
-    """Ablation: the default model agent without the curiosity-directed frontier."""
+class ModelCuriousAgent(ModelAgent):
+    """Ablation: the default model agent with the curiosity-directed frontier."""
 
-    name = "model-nocur"
+    name = "model-cur"
 
     def __init__(self, seed: int = 0) -> None:
-        super().__init__(seed, curious=False)
+        super().__init__(seed, curious=True)

@@ -15,9 +15,11 @@ solve all of them; frontier language models used directly solve almost none.
 | 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | done |
 | 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | done — no gain, see below |
 | 4 | **State abstraction**: learn which objects change independently of the agent's actions and leave them out of the state identity | done — net loss, kept as the `model-abs` ablation |
-| 5 | **Instance-level click rules**: outcomes per object instance (signature + position), not per kind | in progress |
-| 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | next |
-| 7 | (optional) a local language model that proposes hypotheses | — |
+| 5 | **Instance-level click rules**: outcomes per object instance (signature + position), not per kind | done — danger rules kept, no-op rules dropped |
+| 6 | **Curiosity-directed frontier**: walk towards frontier nodes whose untested actions the model cannot predict | done — no gain, kept as `model-cur` |
+| 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | in progress |
+| 8 | **Relational preconditions**: what has to hold around the avatar / the clicked object for an action to complete a level | next |
+| 9 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
 
@@ -219,6 +221,22 @@ fewer levels there too (2 → 1), and `su15` dropped (5 → 3 over all runs), wh
 (4 → 6), `lf52` and `ka59` gained. The instance-level *no-op* rule is the culprit: a cell
 that did nothing three times may be exactly the cell that matters once the state has
 changed. The default agent now keeps instance-level *danger* rules only.
+
+## Results — Phase 6 (curiosity-directed frontier): no gain
+
+With nothing left to test at the current node, the agent first walks towards frontier
+nodes that still hold candidates of unknown outcome, and only then towards the nearest
+frontier of any kind. It took that detour ~215 times per run and scored 19 / 90 against
+18 / 92 for the same agent without it (`model-cur` vs `model-nocur`), losing on `tu93`
+(10 vs 12 levels over five seeds). Off by default.
+
+**Where this leaves the agent.** Phases 4–6 each moved the total by a few levels in either
+direction, which is the run-to-run noise of this benchmark at 4,000 steps; the gain over
+the exploration baseline comes from Phase 2 (rules that prune and order candidates) and
+has stayed at about +3 median levels / +20 levels over all runs ever since. The
+level-completing transitions (`neo4 explain`, and the diagnostic in the Phase 3 section)
+are relational — which instance, where, in what state — so the next phase induces
+*preconditions* over object relations instead of colours and signatures.
 
 ## Attribution and licence
 

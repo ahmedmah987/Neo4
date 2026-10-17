@@ -23,14 +23,14 @@ from typing import Any
 from arcengine import GameState
 
 from .graph_agent import AGENTS as _GRAPH_AGENTS
-from .model_agent import ModelAbstractAgent, ModelAgent, ModelNoCuriosityAgent, ModelNoPlanAgent
+from .model_agent import ModelAbstractAgent, ModelAgent, ModelCuriousAgent, ModelNoPlanAgent
 
 AGENTS = {
     **_GRAPH_AGENTS,
     ModelAgent.name: ModelAgent,
     ModelNoPlanAgent.name: ModelNoPlanAgent,
     ModelAbstractAgent.name: ModelAbstractAgent,
-    ModelNoCuriosityAgent.name: ModelNoCuriosityAgent,
+    ModelCuriousAgent.name: ModelCuriousAgent,
 }
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,7 +87,9 @@ def download_games(games: list[str]) -> None:
             raise RuntimeError(f"could not download game {g}")
 
 
-def play(agent_name: str, game: str, seed: int, steps: int, agent: Any = None) -> dict[str, Any]:
+def play(
+    agent_name: str, game: str, seed: int, steps: int, agent: Any = None, label: str | None = None
+) -> dict[str, Any]:
     """Play one game with a fresh agent under a step budget."""
     env = arcade().make(game, seed=seed)
     if env is None:
@@ -111,7 +113,7 @@ def play(agent_name: str, game: str, seed: int, steps: int, agent: Any = None) -
         if obs.state == GameState.WIN:
             break
     return {
-        "agent": agent_name,
+        "agent": label or agent_name,
         "game": game,
         "seed": seed,
         "budget": steps,
@@ -125,20 +127,21 @@ def play(agent_name: str, game: str, seed: int, steps: int, agent: Any = None) -
     }
 
 
-def _job(args: tuple[str, str, int, int]) -> dict[str, Any]:
+def _job(args: tuple[str, str, int, int, str]) -> dict[str, Any]:
+    agent, game, seed, steps, label = args
     try:
-        return play(*args)
+        return play(agent, game, seed, steps, label=label)
     except Exception as e:  # keep the pool alive; report the failure as a row
-        agent, game, seed, steps = args
-        return {"agent": agent, "game": game, "seed": seed, "budget": steps, "error": repr(e)}
+        return {"agent": label, "game": game, "seed": seed, "budget": steps, "error": repr(e)}
 
 
 def cmd_run(a: argparse.Namespace) -> None:
     games = PUBLIC_GAMES if a.games == ["all"] else a.games
     download_games(games)
-    jobs = [(a.agent, g, s, a.steps) for g in games for s in range(a.seeds)]
+    label = a.label or a.agent
+    jobs = [(a.agent, g, s, a.steps, label) for g in games for s in range(a.seeds)]
     RAW.mkdir(parents=True, exist_ok=True)
-    out = RAW / f"{a.agent}.jsonl"
+    out = RAW / f"{label}.jsonl"
     workers = a.workers or os.cpu_count() or 1
     print(f"{len(jobs)} runs, {workers} workers -> {out}", file=sys.stderr)
     with Pool(workers) as pool, out.open("a") as f:
@@ -254,6 +257,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--steps", type=int, default=4000, help="step budget per run")
     r.add_argument("--seeds", type=int, default=1)
     r.add_argument("--workers", type=int, default=0, help="processes (default: all cores)")
+    r.add_argument("--label", default="", help="row/file label instead of the agent name")
     r.set_defaults(func=cmd_run)
     s = sub.add_parser("summarize", help="write results/phase1.md from raw runs")
     s.set_defaults(func=cmd_summarize)

@@ -95,3 +95,14 @@ def test_click_rules_distinguish_instances_of_one_signature():
 
 def objs_sig(objs, color):
     return next(o.sig for o in objs if o.color == color)
+
+
+def test_action_level_death_rule():
+    dyn = Dynamics()
+    g = world(10)
+    objs = extract(g)
+    for _ in range(3):
+        dyn.observe(GameAction.ACTION5, None, objs, g, None, GAME_OVER)
+    assert dyn.predict(GameAction.ACTION5, None, objs, g).verdict == "danger"
+    assert dyn.predict(GameAction.ACTION1, None, objs, g).verdict == "unknown"
+    assert "ACTION5 lost the game 3/3 times" in "\n".join(dyn.describe())

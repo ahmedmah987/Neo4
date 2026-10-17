@@ -64,6 +64,8 @@ class Dynamics:
         self.click_death_at: Counter = Counter()
         self.churn: dict[tuple, Counter] = defaultdict(Counter)  # sig -> action class -> events
         self.touched: set[tuple] = set()  # object signatures the avatar has moved into / against
+        self.key_uses: Counter = Counter()  # keyboard action id -> times used
+        self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
         self._avatar: tuple | None = None
@@ -127,6 +129,9 @@ class Dynamics:
 
     def _observe_key(self, action, before, before_grid, d: Diff | None, outcome: str) -> None:
         aid = action.value
+        self.key_uses[aid] += 1
+        if outcome == GAME_OVER:
+            self.key_death[aid] += 1
         if d is not None:
             for b, _, dx, dy in d.moved:
                 self.move[(aid, b.sig)][(dx, dy)] += 1
@@ -336,6 +341,11 @@ class Dynamics:
                 return Prediction("noop_click", n, f"clicking {target.label()} changed nothing {n}x")
             return Prediction("unknown", n)
 
+        # An action that loses the game whatever the situation (sp80's ACTION5 did so
+        # 145 times in one run) is dangerous regardless of what is ahead.
+        deaths, uses = self.key_death[action.value], self.key_uses[action.value]
+        if deaths >= MIN_SUPPORT and deaths / uses >= DANGER_RATE:
+            return Prediction("danger", uses, f"{action.name} lost the game {deaths}/{uses}x")
         avatar = self.avatar()
         direction = self.direction(action.value)
         if avatar is None or direction is None:
@@ -377,6 +387,9 @@ class Dynamics:
             lines.append(
                 f"noise: colour-{sig[0]} {sig[2]}x{sig[1]} changes whatever the action ({total} events)"
             )
+        for aid, n in self.key_death.most_common():
+            if n >= MIN_SUPPORT:
+                lines.append(f"ACTION{aid} lost the game {n}/{self.key_uses[aid]} times")
         avatar = self.avatar()
         if avatar is None:
             lines.append("no avatar found (nothing moves consistently under the keyboard)")

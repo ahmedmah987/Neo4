@@ -106,6 +106,13 @@ class LevelGraph:
         self.epoch += 1
         self._dist_cache.clear()
 
+    def mark_tested(self, key: str, idx: int) -> None:
+        """Count a candidate as tested in this epoch without executing it."""
+        node = self.nodes[key]
+        node.tested_epoch[idx] = self.epoch
+        node.result[idx] = NO_CHANGE
+        self._dist_cache.clear()
+
     def frontier(self, max_group: int) -> list[str]:
         return [k for k, n in self.nodes.items() if n.untested(max_group, self.epoch)]
 
@@ -244,12 +251,16 @@ class GraphAgent:
 
     # -- Algorithm 1 ----------------------------------------------------------
 
+    def _pick_local(self, node: Node, local: list[int]) -> int:
+        """Which of the node's untested candidates to run; subclasses reorder."""
+        return self.rng.choice(local)
+
     def _choose(self, node: Node) -> int | None:
         top = self.graph.max_group()
         while True:
             local = node.untested(self.priority, self.graph.epoch)
             if local:
-                return self.rng.choice(local)
+                return self._pick_local(node, local)
             dist, nxt = self.graph.distances(self.priority)
             if node.key in nxt:
                 idx = self.graph.edge_to(node.key, nxt[node.key])
@@ -267,7 +278,7 @@ class GraphAgent:
             self.stats["reopens"] += 1
             local = node.untested(self.priority, self.graph.epoch)
             if local:
-                return self.rng.choice(local)
+                return self._pick_local(node, local)
         # Frontier exists but is unreachable from here (non-determinism or a
         # one-way transition): take a random known transition to move around,
         # or ask for a reset if the node is a dead end.

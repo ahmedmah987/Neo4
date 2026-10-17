@@ -22,7 +22,10 @@ from typing import Any
 
 from arcengine import GameState
 
-from .graph_agent import AGENTS
+from .graph_agent import AGENTS as _GRAPH_AGENTS
+from .model_agent import ModelAgent
+
+AGENTS = {**_GRAPH_AGENTS, ModelAgent.name: ModelAgent}
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results"
@@ -78,12 +81,13 @@ def download_games(games: list[str]) -> None:
             raise RuntimeError(f"could not download game {g}")
 
 
-def play(agent_name: str, game: str, seed: int, steps: int) -> dict[str, Any]:
+def play(agent_name: str, game: str, seed: int, steps: int, agent: Any = None) -> dict[str, Any]:
     """Play one game with a fresh agent under a step budget."""
     env = arcade().make(game, seed=seed)
     if env is None:
         raise RuntimeError(f"could not create environment for {game}")
-    agent = AGENTS[agent_name](seed=seed)
+    if agent is None:
+        agent = AGENTS[agent_name](seed=seed)
 
     obs = env.reset()
     assert obs is not None
@@ -198,6 +202,16 @@ def cmd_summarize(_: argparse.Namespace) -> None:
     print("\n".join(lines))
 
 
+def cmd_explain(a: argparse.Namespace) -> None:
+    """Play one game with the model agent and print the rules it induced."""
+    download_games([a.game])
+    agent = ModelAgent(seed=a.seed)
+    row = play(ModelAgent.name, a.game, a.seed, a.steps, agent=agent)
+    print(f"{a.game}: {row['levels']}/{row['win_levels']} levels in {row['steps_used']} steps; {row['stats']}")
+    for line in agent.dyn.describe():
+        print(line)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="neo4")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -210,6 +224,11 @@ def main(argv: list[str] | None = None) -> None:
     r.set_defaults(func=cmd_run)
     s = sub.add_parser("summarize", help="write results/phase1.md from raw runs")
     s.set_defaults(func=cmd_summarize)
+    e = sub.add_parser("explain", help="print the rules the model agent learns on a game")
+    e.add_argument("--game", required=True)
+    e.add_argument("--steps", type=int, default=2000)
+    e.add_argument("--seed", type=int, default=0)
+    e.set_defaults(func=cmd_explain)
     a = p.parse_args(argv)
     a.func(a)
 

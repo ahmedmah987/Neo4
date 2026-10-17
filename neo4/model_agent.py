@@ -82,8 +82,11 @@ class ModelAgent(GraphAgent):
             action, data = self.last_cand
             self.dyn.observe(action, data, self.last_objs, self.last_grid, after, outcome)
             self.last_cand = None
+        else:
+            after = None
         self.cur_grid = grid
-        self._cur_objs = None
+        # Within a level the mask is fixed, so this frame's objects are the ones just extracted.
+        self._cur_objs = after
         self._verdicts = {}
 
         action, data = super().act(obs)

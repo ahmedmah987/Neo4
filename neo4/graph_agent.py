@@ -79,6 +79,7 @@ class LevelGraph:
         self._dist_cache: dict[int, tuple[dict[str, int], dict[str, str]]] = {}
         self.inconsistent = 0  # same (node, action) led to different targets
         self.epoch = 0
+        self._max_group = 0
 
     def add_node(self, key: str, cands: list[Candidate]) -> Node:
         node = self.nodes.get(key)
@@ -86,6 +87,8 @@ class LevelGraph:
             node = Node(key, cands)
             self.nodes[key] = node
             self._dist_cache.clear()
+            if cands:
+                self._max_group = max(self._max_group, max(c.group for c in cands))
         return node
 
     def record(self, src: str, idx: int, dst: str | None) -> None:
@@ -149,7 +152,7 @@ class LevelGraph:
         return None
 
     def max_group(self) -> int:
-        return max((c.group for n in self.nodes.values() for c in n.cands), default=0)
+        return self._max_group
 
 
 class GraphAgent:

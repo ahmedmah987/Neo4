@@ -67,10 +67,28 @@ def _shape_hash(c: fp.Component) -> str:
     return hashlib.blake2b(np.packbits(local).tobytes(), digest_size=6).hexdigest()
 
 
-def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> list[Obj]:
+class Objects(list):
+    """The objects of one frame, with a pixel -> object lookup built on demand."""
+
+    shape: tuple[int, int] = (fp.GRID, fp.GRID)
+    _index: np.ndarray | None = None
+
+    def index(self) -> np.ndarray:
+        if self._index is None:
+            idx = np.full(self.shape, -1, dtype=np.int32)
+            # paint big objects first so that small ones win where they overlap
+            for i in sorted(range(len(self)), key=lambda i: -self[i].area):
+                o = self[i]
+                idx[o.pixels[:, 0], o.pixels[:, 1]] = i
+            self._index = idx
+        return self._index
+
+
+def extract(grid: np.ndarray, mask: np.ndarray | None = None) -> Objects:
     """Objects of a frame; status-bar pixels (``mask``) are left out."""
     comps = fp.segment(fp.apply_mask(grid, mask))
-    objs: list[Obj] = []
+    objs = Objects()
+    objs.shape = grid.shape
     for c in comps:
         if c.color == fp.MASK_COLOR:
             continue
@@ -166,5 +184,11 @@ def find(objs: list[Obj], sig: tuple) -> Obj | None:
 
 def at(objs: list[Obj], x: int, y: int) -> Obj | None:
     """The object whose pixels include (x, y); smallest first so sprites win over scenery."""
+    if isinstance(objs, Objects):
+        idx = objs.index()
+        if not (0 <= y < idx.shape[0] and 0 <= x < idx.shape[1]):
+            return None
+        i = int(idx[y, x])
+        return objs[i] if i >= 0 else None
     hits = [o for o in objs if o.contains(x, y)]
     return min(hits, key=lambda o: o.area) if hits else None

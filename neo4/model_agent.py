@@ -200,13 +200,20 @@ class ModelAgent(GraphAgent):
             if idx is None and not self.plan:
                 idx = self._make_plan(node, me, "goal")
             if idx is not None:
-                if self.plan_kind != "refill" and self._beyond_budget(len(self.plan)):
-                    # The plan cannot finish in this attempt: refill the resource if a
-                    # tile for that is in reach, else reset (one action, a fresh budget).
+                if self.plan_kind != "refill" and self._short_of_energy(len(self.plan)):
+                    # The resource will run out before the plan ends: go and refill it
+                    # if a tile for that is in reach, else carry on and take the loss.
+                    saved = (self.plan, self.plan_expect, self.plan_kind)
                     self._drop_plan()
-                    idx = self._refill_plan(node, me)
-                    if idx is not None:
-                        return idx
+                    refill = self._refill_plan(node, me)
+                    if refill is not None:
+                        return refill
+                    self.plan, self.plan_expect, self.plan_kind = saved
+                elif self.plan_kind != "refill" and self._beyond_budget(len(self.plan)):
+                    # The plan cannot finish in this attempt of the move budget: a reset
+                    # costs one action and starts a fresh budget, the walk would cost
+                    # them all.
+                    self._drop_plan()
                     self.stats["budget_resets"] += 1
                     return None
                 return idx
@@ -228,10 +235,12 @@ class ModelAgent(GraphAgent):
             idx = self._make_plan(node, me, "explore")
             if idx is not None:
                 return idx
-        if self._frontier_beyond_budget(node):
+        if self._short_of_energy(2) and not self.plan:
+            # The resource is nearly out: refill while a tile is still in reach.
             idx = self._refill_plan(node, me)
             if idx is not None:
                 return idx
+        if self._frontier_beyond_budget(node):
             self.stats["budget_resets"] += 1
             return None
         return super()._choose(node)
@@ -239,17 +248,19 @@ class ModelAgent(GraphAgent):
     # -- move budgets ---------------------------------------------------------
 
     def _remaining(self) -> int | None:
-        """Actions left in this attempt: under the level's move budget (once the
-        attempt is under way) and under the resource bar, whichever is tighter."""
-        left = []
+        """Actions left in this attempt under the level's move budget, if known
+        and the attempt is under way."""
         budget = self.dyn.budget()
-        if budget is not None and self.since_reset > 0:
-            left.append(budget - self.dyn.attempt)
-        if self.cur_grid is not None:
-            energy = self.dyn.energy_left(self.cur_grid, self.mask)
-            if energy is not None:
-                left.append(energy)
-        return min(left) if left else None
+        if budget is None or self.since_reset == 0:
+            return None
+        return budget - self.dyn.attempt
+
+    def _short_of_energy(self, actions: int) -> bool:
+        """The resource bar pays for fewer actions than ``actions``."""
+        if self.cur_grid is None:
+            return False
+        energy = self.dyn.energy_left(self.cur_grid, self.mask)
+        return energy is not None and actions > energy
 
     def _refill_plan(self, node: Node, me: Obj | None) -> int | None:
         """Out of steps for what comes next: walk to a tile that refills the resource,
@@ -296,7 +307,13 @@ class ModelAgent(GraphAgent):
             return False
         dist, _ = self.graph.distances(self.graph.max_group())
         here = dist.get(node.key)
-        return here is not None and here + 1 > remaining
+        if here is None or here + 1 <= remaining:
+            return False
+        # Only worth it when a fresh attempt can reach the frontier from the start;
+        # otherwise resetting on every visit would never get anywhere.
+        budget = self.dyn.budget()
+        start = dist.get(self.first_key) if self.first_key is not None else None
+        return budget is not None and start is not None and start + 1 <= budget
 
     # -- planning -------------------------------------------------------------
 

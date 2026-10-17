@@ -1,7 +1,7 @@
 """Neo4 — ARC-AGI-3 agent for the ARC Prize 2026 Kaggle track (generated file).
 
 Built by scripts/bundle.py from https://github.com/ahmedmah987/Neo4 at commit
-fb66d81 on 2026-10-17. Do not edit by hand: edit the package and rebuild.
+78c1162 on 2026-10-17. Do not edit by hand: edit the package and rebuild.
 
 Drop this file into agent/my_agent.py of the official ARC-AGI-3-Kaggle-Starter
 kit; `make play-local` and `make submit` work unchanged.
@@ -10,6 +10,7 @@ kit; `make play-local` and `make submit` work unchanged.
 from __future__ import annotations
 
 import os
+import time
 import random
 import sys
 import types
@@ -76,15 +77,25 @@ def _to_raw(latest: FrameData) -> FrameDataRaw:
 
 
 class MyAgent(Agent):
-    """Rule-induction exploration agent; see the repository README for the method."""
+    """Rule-induction exploration agent; see the repository README for the method.
 
-    MAX_ACTIONS = int(os.environ.get("NEO4_MAX_ACTIONS", "1000000"))
+    In the competition rerun the framework plays every game at once, one thread
+    per game in one process, and the notebook has a fixed wall-clock allowance;
+    an agent that never stops would time the whole submission out. Two caps:
+    ``NEO4_MAX_ACTIONS`` actions per game and ``NEO4_TIME_BUDGET`` seconds of
+    wall clock per game, counted from the agent's construction, so that every
+    game's agent stops together whatever the number of games.
+    """
+
+    MAX_ACTIONS = int(os.environ.get("NEO4_MAX_ACTIONS", "40000"))
+    TIME_BUDGET = float(os.environ.get("NEO4_TIME_BUDGET", str(3 * 3600)))
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         seed = random.Random(f"{self.game_id}").randrange(1 << 30)
         self._neo4 = ModelAgent(seed=seed)
         self._steps = 0
+        self._started = time.monotonic()
 
     @property
     def name(self) -> str:
@@ -92,7 +103,9 @@ class MyAgent(Agent):
 
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
         # Never stop on GAME_OVER: the agent resets the level and carries on.
-        return getattr(latest_frame.state, "name", str(latest_frame.state)) == "WIN"
+        if getattr(latest_frame.state, "name", str(latest_frame.state)) == "WIN":
+            return True
+        return time.monotonic() - self._started > self.TIME_BUDGET
 
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         obs = _to_raw(latest_frame)

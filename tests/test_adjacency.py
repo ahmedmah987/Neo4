@@ -73,7 +73,7 @@ def run(agent, steps=4000):
 
 
 def test_block_adjacency_and_the_key_are_learned_as_goal_conditions():
-    agent = ModelAgent(seed=0)
+    agent = ModelAgent(seed=0, adjacency=True)
     solved = run(agent)
     assert len(solved) == 3, solved
     assert any(s[0] == BLOCK for s in agent.dyn.goal_adjacent_sigs()), agent.dyn.describe()

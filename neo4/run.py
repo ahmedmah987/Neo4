@@ -25,6 +25,7 @@ from arcengine import GameState
 from .graph_agent import AGENTS as _GRAPH_AGENTS
 from .model_agent import (
     ModelAbstractAgent,
+    ModelAdjacencyAgent,
     ModelAgent,
     ModelCuriousAgent,
     ModelExploreAgent,
@@ -38,6 +39,7 @@ AGENTS = {
     ModelAbstractAgent.name: ModelAbstractAgent,
     ModelCuriousAgent.name: ModelCuriousAgent,
     ModelExploreAgent.name: ModelExploreAgent,
+    ModelAdjacencyAgent.name: ModelAdjacencyAgent,
 }
 
 ROOT = Path(__file__).resolve().parent.parent

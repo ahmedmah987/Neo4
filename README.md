@@ -20,8 +20,10 @@ solve all of them; frontier language models used directly solve almost none.
 | 7 | **Goal induction by lift** over the base rate (colours ahead, click signatures); default agent validated at 4,000 and 12,000 steps | done |
 | 8a | **Object-targeted exploration**: when nothing unknown is testable locally, walk to the nearest object the avatar has never touched | done — faster first levels, no extra levels; kept as `model-explore` |
 | 8b | **Object-level goals**: the *signature* of the object the avatar entered when a level ended, planned to by signature | done — +1 median level (`dc22`), new default |
-| 8c | **Adjacency preconditions**: the objects touching the avatar when a level ended (e.g. the colour-2 blocks of `tu93`), used as plan targets and candidate priorities | proposed next step |
-| 9 | (optional) a local language model that proposes hypotheses | — |
+| 8c | **Adjacency preconditions**: the objects touching the avatar when a level ended, and the key that completed it, used as plan targets and candidate priorities | done — neutral (20 / 97 vs 21 / 97), kept as `model-adj` |
+| 8d | **Object–object relations**: what a pushed object ended up touching or covering when a level ended (`tu93`'s blocks on their targets) | proposed next step |
+| 9 | **Competition packaging**: the agent in the official harness format, offline, within a wall-clock budget | proposed next step |
+| 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
 budget tried, and the gap widens with the budget (levels per run, all 25 public games):
@@ -314,6 +316,20 @@ Result at 4,000 steps, 5 seeds: **21 / 97** against 20 / 93 for the previous def
 whole difference on `dc22` (median 1 → 2, 5 → 9 levels over seeds, one plan per run and
 no failed plan); no game is worse. This is the new default agent.
 
+## Results — Phase 8c (adjacency goal conditions): neutral
+
+Adjacency between the avatar and every other object is now recorded on each keyboard
+action, including ones that do not move the avatar. Objects beside the avatar when a level
+ended, beyond chance, become goal conditions: the planner targets the band around them
+when no entry-goal object is on screen, and once beside one the key that completed levels
+before (or a move towards the object) is tested first. On a toy room where a level ends by
+pressing a key next to a block this works as intended (later levels in a fraction of the
+steps of the first). On the public games it is neutral — **20 / 97** against 21 / 97 —
+because the conditions it can express rarely hold: in `tu93` the avatar is beside a block
+on 3,327 of 4,000 steps, so adjacency carries no information there; the level ends when
+a *block* reaches a *target*, a relation between two objects other than the avatar. Off
+by default; `model-adj` keeps it.
+
 ## Conclusion and next step
 
 What moved the needle was Phase 2: rules induced from the agent's own transitions —
@@ -327,9 +343,9 @@ the rules grows with the budget: +24 % levels per run at 4,000 steps, +51 % at 2
 The remaining losses are of one kind. What completes a level, and what loses the game,
 is relational — *which* instance of an object, *where*, in *what* state, *pushed* against
 what — and a model over colours and signatures cannot express it. Phase 8b took the first
-step (goals as object signatures, +1 median level); the proposed next one (Phase 8c) uses
-the objects *touching* the avatar at level-completing moves, which `neo4 explain` already
-reports, as plan targets and candidate priorities — `tu93` is the test case.
+step (goals as object signatures, +1 median level); Phase 8c (adjacency) was neutral. Two
+directions remain: object–object relations at level-completing moves (`tu93`: a pushed
+block covering its target), and packaging the agent for the ARC Prize harness.
 
 The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
 the agent runs at about 60–250 engine steps per second on one CPU core depending on the

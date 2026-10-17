@@ -52,7 +52,7 @@ class ModelAgent(GraphAgent):
         abstract: bool = False,
         curious: bool = False,
         explore: bool = False,
-        adjacency: bool = True,
+        adjacency: bool = False,
     ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
@@ -395,3 +395,12 @@ class ModelExploreAgent(ModelAgent):
 
     def __init__(self, seed: int = 0) -> None:
         super().__init__(seed, explore=True)
+
+
+class ModelAdjacencyAgent(ModelAgent):
+    """Ablation: the default model agent plus adjacency goal conditions."""
+
+    name = "model-adj"
+
+    def __init__(self, seed: int = 0) -> None:
+        super().__init__(seed, adjacency=True)

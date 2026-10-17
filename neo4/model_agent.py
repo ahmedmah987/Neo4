@@ -86,12 +86,18 @@ class ModelAgent(GraphAgent):
         self.goal_plans_by_state: dict[frozenset, int] = {}
         self.switch_plans_this_level = 0
         self.switch_from: tuple[frozenset, tuple] | None = None
+        # Difference reduction: the object kinds that came together when a level was
+        # completed (a moving kind M and a static kind T); later levels are explored
+        # towards frames where M is nearest to T.
+        self.level_start_objs: list[Obj] | None = None
+        self.relations: list[tuple[tuple, tuple]] = []
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
-             "switch_plans": 0, "locked_goals": 0, "budget_resets": 0, "refill_plans": 0}
+             "switch_plans": 0, "locked_goals": 0, "budget_resets": 0, "refill_plans": 0,
+             "descents": 0, "near_clicks": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -128,6 +134,74 @@ class ModelAgent(GraphAgent):
         self.goal_plans_by_state = {}
         self.switch_plans_this_level = 0
         self.switch_from = None
+        self._cur_objs = None  # the mask changed with the level
+        self.level_start_objs = list(self.cur_objs()) if self.cur_grid is not None else None
+        self.best_first = bool(self.relations)
+
+    # -- difference reduction ---------------------------------------------------
+
+    @staticmethod
+    def _gap(a: Obj, b: Obj) -> int:
+        dx = max(0, max(a.x1, b.x1) - min(a.x2, b.x2))
+        dy = max(0, max(a.y1, b.y1) - min(a.y2, b.y2))
+        return dx + dy
+
+    def _learn_relations(self, start: list[Obj] | None, end: list[Obj] | None) -> None:
+        """From a level's first and last frames: the kinds whose instances moved (or
+        appeared) and ended nearest to a kind that stood still, ranked by how much
+        the gap closed. The two best pairs become the heuristic for later levels."""
+        if not start or not end:
+            return
+        s0: dict[tuple, list[Obj]] = {}
+        s1: dict[tuple, list[Obj]] = {}
+        for o in start:
+            s0.setdefault(o.sig, []).append(o)
+        for o in end:
+            s1.setdefault(o.sig, []).append(o)
+        places = lambda objs: sorted((o.x1, o.y1) for o in objs)
+        moved = {k for k in s1 if k not in s0 or places(s0[k]) != places(s1[k])}
+        static = {k for k in s0 if k in s1 and places(s0[k]) == places(s1[k])}
+        scored = []
+        for m in moved:
+            if m not in s0:
+                continue
+            for t in static:
+                g0 = min(self._gap(a, b) for a in s0[m] for b in s0[t])
+                g1 = min(self._gap(a, b) for a in s1[m] for b in s1[t])
+                if g1 < g0:
+                    scored.append((g0 - g1, g1, m, t))
+        scored.sort(key=lambda r: (-r[0], r[1]))
+        if scored:
+            self.relations = [(m, t) for _, _, m, t in scored[:2]]
+            self.best_first = True
+
+    def _heuristic(self, objs: list[Obj]) -> float | None:
+        """Sum over the learned relations of the gap between the nearest M and T."""
+        if not self.relations:
+            return None
+        total = 0
+        found = False
+        for m_sig, t_sig in self.relations:
+            ms = [o for o in objs if o.sig == m_sig]
+            ts = [o for o in objs if o.sig == t_sig]
+            if ms and ts:
+                total += min(self._gap(a, b) for a in ms for b in ts)
+                found = True
+        return float(total) if found else None
+
+    def _near_moving(self, node: Node, local: list[int], objs: list[Obj]) -> list[int]:
+        """Click candidates nearest to an instance of a moving kind of the relation."""
+        ms = [o for m_sig, _ in self.relations for o in objs if o.sig == m_sig]
+        clicks = [i for i in local if node.cands[i].data is not None]
+        if not ms or not clicks:
+            return []
+
+        def dist(i: int) -> int:
+            x, y = node.cands[i].data["x"], node.cands[i].data["y"]
+            return min(max(0, o.x1 - x, x - o.x2) + max(0, o.y1 - y, y - o.y2) for o in ms)
+
+        best = min(dist(i) for i in clicks)
+        return [i for i in clicks if dist(i) <= best]
 
     def _drop_plan(self) -> None:
         self.plan = []
@@ -160,6 +234,8 @@ class ModelAgent(GraphAgent):
                 action, data, self.last_objs, self.last_grid, after, outcome,
                 after_grid=grid, mask=self.mask,
             )
+            if outcome == LEVEL_UP:
+                self._learn_relations(self.level_start_objs, self.last_objs)
             self.last_cand = None
             if outcome == GAME_OVER:
                 if self.dyn.last_death_budget:
@@ -195,6 +271,8 @@ class ModelAgent(GraphAgent):
         objs = self.cur_objs()
         avatar = self.dyn.avatar()
         me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
+        if node.h is None and self.relations:
+            node.h = self._heuristic(objs)
         idx = self._replay_step(node)
         if idx is not None:
             return idx
@@ -581,6 +659,12 @@ class ModelAgent(GraphAgent):
             self.stats["goal_clicks"] += 1
             return self.rng.choice(winners)
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
+        pool = unknown or local
+        if self.relations:
+            near = self._near_moving(node, pool, self.cur_objs())
+            if near:
+                self.stats["near_clicks"] += 1
+                return self.rng.choice(near)
         if unknown:
             self.stats["ran_unknown"] += 1
             return self.rng.choice(unknown)

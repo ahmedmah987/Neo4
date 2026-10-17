@@ -54,6 +54,7 @@ class Node:
     passes: list[int] = field(default_factory=list)  # times the edge led somewhere
     deaths: list[int] = field(default_factory=list)  # times the edge ended the game
     interest: int = 0  # untested candidates whose outcome is unknown; set by model agents
+    h: float | None = None  # how far the frame is from the learned goal relation; set by model agents
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)
@@ -155,30 +156,39 @@ class LevelGraph:
         self._downgrade(node, idx)
         self._dist_cache.clear()
 
-    def frontier(self, max_group: int, interesting: bool = False) -> list[str]:
-        return [
+    def frontier(self, max_group: int, interesting: bool = False, best_first: bool = False) -> list[str]:
+        out = [
             k
             for k, n in self.nodes.items()
             if n.untested(max_group, self.epoch) and (not interesting or n.interest > 0)
         ]
+        if best_first:
+            # Only the frontier nodes closest to the learned goal relation count:
+            # exploration then descends the heuristic instead of fanning out.
+            hs = [self.nodes[k].h for k in out if self.nodes[k].h is not None]
+            if hs:
+                best = min(hs)
+                out = [k for k in out if self.nodes[k].h is not None and self.nodes[k].h <= best]
+        return out
 
     def distances(
-        self, max_group: int, interesting: bool = False
+        self, max_group: int, interesting: bool = False, best_first: bool = False
     ) -> tuple[dict[str, int], dict[str, str]]:
         """Multi-source BFS from the frontier over reversed edges.
 
         Returns distance-to-frontier and the next hop for every node that
         can reach the frontier. With ``interesting`` only frontier nodes that
-        still hold candidates of unknown outcome count.
+        still hold candidates of unknown outcome count; with ``best_first``
+        only the frontier nodes with the lowest heuristic.
         """
-        cache_key = (max_group, interesting)
+        cache_key = (max_group, interesting, best_first)
         cached = self._dist_cache.get(cache_key)
         if cached is not None:
             return cached
         dist: dict[str, int] = {}
         nxt: dict[str, str] = {}
         queue: deque[str] = deque()
-        for k in self.frontier(max_group, interesting):
+        for k in self.frontier(max_group, interesting, best_first):
             dist[k] = 0
             queue.append(k)
         while queue:
@@ -411,6 +421,7 @@ class GraphAgent:
         return self.rng.choice(local)
 
     curious = False  # walk towards frontier nodes with unknown-outcome candidates first
+    best_first = False  # walk towards the frontier nodes closest to the learned goal relation
 
     def _choose(self, node: Node) -> int | None:
         idx = self._choose_edge(node)
@@ -444,6 +455,13 @@ class GraphAgent:
                     idx = self.graph.edge_to(node.key, nxt[node.key])
                     if idx is not None:
                         self.stats["curious_steps"] = self.stats.get("curious_steps", 0) + 1
+                        return idx
+            if self.best_first:
+                dist, nxt = self.graph.distances(self.priority, best_first=True)
+                if node.key in nxt:
+                    idx = self.graph.edge_to(node.key, nxt[node.key])
+                    if idx is not None:
+                        self.stats["descents"] = self.stats.get("descents", 0) + 1
                         return idx
             dist, nxt = self.graph.distances(self.priority)
             if node.key in nxt:

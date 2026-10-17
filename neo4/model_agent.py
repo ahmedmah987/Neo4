@@ -237,7 +237,6 @@ class ModelAgent(GraphAgent):
                 if not goals:
                     return None
                 is_goal = lambda cols, coords: bool(cols & goals)
-            self.plans_this_level += 1
         else:
             if self.explore_plans_this_level >= MAX_EXPLORE_PLANS_PER_LEVEL:
                 return None
@@ -248,11 +247,16 @@ class ModelAgent(GraphAgent):
             if not target.any():
                 return None
             is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
-            self.explore_plans_this_level += 1
         found = plan_path(self.cur_grid, me, dirs, self.dyn.passable, is_goal)
         if found is None:
+            # No route through cells known to be passable yet; try again after a
+            # cooldown, and do not spend the per-level allowance on the search.
             self.plan_cooldown = PLAN_COOLDOWN
             return None
+        if kind == "goal":
+            self.plans_this_level += 1
+        else:
+            self.explore_plans_this_level += 1
         self.plan, self.plan_expect = found
         self.plan_kind = kind
         self.stats["plans" if kind == "goal" else "explore_plans"] += 1

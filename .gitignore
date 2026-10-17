@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+
+# ARC-AGI-3 toolkit runtime files (downloaded games, recordings)
+environment_files/
+recordings/
+.env
+
+# Experiment outputs (keep the summarised tables, not raw dumps)
+results/raw/
+
+# Scratch logs
+*.log

@@ -44,7 +44,7 @@ The project has two strands that share one codebase:
 | 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | done — neutral (23 / 110, 0.44): it fires on `tu93` and `g50t` a dozen times a run and saves nothing measurable; kept |
 | 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | done — neutral (23 / 110, 0.44): `ls20` learns its energy bar and refill pickups, loses the game less, and still does not reach its second level; kept — second no-gain phase in a row |
 | 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
-| 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score 0.39 → 0.39 on the same seeds; the old 12,000-step run of the Phase 7 agent scored 0.30 | done |
+| 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score unchanged (0.39 → 0.39 on the same seeds): levels found late score nothing | done |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -687,12 +687,16 @@ against the same seeds at 4,000 steps:
 | 12,000, Phase 7 agent (old run) | 0.89 | 0.30 |
 | 12,000, graph exploration (old run) | 0.69 | 0.24 |
 
-A larger budget adds levels (+24 %), and since a level's score counts only the actions
-until it was completed, it can only add score: the gain comes from `tu93` (a fifth
-level on two seeds), `dc22`, `vc33` and `sp80` (a third level each). At the same budget
+A larger budget adds levels (+24 %: a fifth `tu93` level on two seeds, a third level
+on `dc22`, `vc33` and `sp80`) and **no score at all** — 0.394 to 0.394 on the same seeds.
+The levels the extra budget buys are found by exploration after thousands of actions,
+and a level completed in thousands of actions against a human's tens is worth a few
+hundredths of a point. This is the metric's verdict on the whole approach, stated
+plainly: more time does not help; only levels completed cheaply count, and those come
+from a model that understands the level, not from a longer search. At the same budget
 the current agent completes 22 % more levels than the Phase 7 agent and 58 % more than
-exploration. The practical reading for a submission is that the action cap in the
-bundle should be as large as the wall-clock allowance permits.
+exploration, which is the "beyond" strand's measure, not the competition's. For a
+submission the action cap still costs nothing as long as the wall clock allows it.
 
 ## The competition metric, and what it says about this agent
 

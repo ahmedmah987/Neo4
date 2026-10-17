@@ -22,7 +22,7 @@ solve all of them; frontier language models used directly solve almost none.
 | 8b | **Object-level goals**: the *signature* of the object the avatar entered when a level ended, planned to by signature | done — +1 median level (`dc22`), new default |
 | 8c | **Adjacency preconditions**: the objects touching the avatar when a level ended, and the key that completed it, used as plan targets and candidate priorities | done — neutral (20 / 97 vs 21 / 97), kept as `model-adj` |
 | 8d | **Object–object relations**: what a pushed object ended up touching or covering when a level ended (`tu93`'s blocks on their targets) | proposed next step |
-| 9 | **Competition packaging**: the agent in the official harness format, offline, within a wall-clock budget | proposed next step |
+| 9 | **Competition packaging**: the agent as the single file the Kaggle notebook embeds, tested against the framework contract | done — `kaggle/my_agent.py` |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -53,6 +53,40 @@ No GPU and no API key are needed: the official `arc-agi` toolkit downloads the p
 games with an anonymous key on first use and runs them locally (about 1,500 engine
 steps per second on a laptop-class CPU). After the first download the runner works offline.
 
+## Submitting to Kaggle (ARC Prize 2026, ARC-AGI-3 track)
+
+The Kaggle notebook embeds exactly one file — `agent/my_agent.py` of the official
+[ARC-AGI-3-Kaggle-Starter](https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter) kit — and
+runs it inside the ARC-AGI-3-Agents framework against a local gateway, with no internet.
+`scripts/bundle.py` packs this whole package into that one file:
+
+```bash
+python scripts/bundle.py                      # writes kaggle/my_agent.py (also committed)
+```
+
+`kaggle/my_agent.py` embeds every module's source and materialises them as real modules
+at import time, so the submitted code is byte-for-byte what the tests cover; a `MyAgent`
+class adapts the framework's `FrameData`/`GameAction` to the agent's engine types,
+never stops on `GAME_OVER` (the agent resets the level and carries on) and sets
+`MAX_ACTIONS` to one million so the harness's own budget is what ends a game
+(`NEO4_MAX_ACTIONS` overrides it). `tests/test_bundle.py` runs the bundle through a
+stand-in for the framework's `Agent` loop against the local engine.
+
+To submit:
+
+1. `git clone https://github.com/arcprize/ARC-AGI-3-Kaggle-Starter && cd ARC-AGI-3-Kaggle-Starter`
+   and follow its README (`make setup`, a Kaggle token in `.kaggle/access_token`, your
+   username in `notebooks/kernel-metadata.json`). It needs Python 3.12.
+2. Copy `kaggle/my_agent.py` from this repository over `agent/my_agent.py`.
+3. Set `ACCELERATOR = "cpu"` in `scripts/build_notebook.py` — the agent uses no GPU.
+4. `make play-local` to check it plays, then `make submit`; `make status` follows the run.
+   Kaggle first runs the notebook as a check, then reruns it on the hidden games when
+   you press *Submit to Competition*.
+
+The dependencies the notebook installs offline are `arc-agi` (with `arcengine`) and
+`python-dotenv`; `numpy` and `scipy` are part of the Kaggle image, and the frame code
+falls back to a pure-Python labeller if `scipy` is ever missing.
+
 ## Layout
 
 ```
@@ -66,6 +100,8 @@ neo4/
   model_agent.py  the graph agent guided by the induced rules ("model"), plus a no-planning ablation
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
+scripts/bundle.py builds the single-file Kaggle agent
+kaggle/           my_agent.py — the generated submission file (do not edit by hand)
 tests/            unit tests for every module, on synthetic frames and toy environments
 ```
 

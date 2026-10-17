@@ -22,7 +22,11 @@ import hashlib
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import ndimage
+
+try:
+    from scipy import ndimage
+except ImportError:  # pragma: no cover - exercised only where scipy is absent
+    ndimage = None
 
 GRID = 64
 PALETTE_SIZE = 16
@@ -39,8 +43,32 @@ MEDIUM_MIN = 2  # bounding-box side lengths in [MEDIUM_MIN, MEDIUM_MAX] are "but
 MEDIUM_MAX = 32
 N_GROUPS = 5
 
-_STRUCT_4 = ndimage.generate_binary_structure(2, 1)
-_STRUCT_8 = ndimage.generate_binary_structure(2, 2)
+_STRUCT_4 = ndimage.generate_binary_structure(2, 1) if ndimage is not None else None
+_STRUCT_8 = ndimage.generate_binary_structure(2, 2) if ndimage is not None else None
+
+
+def _label_fallback(mask: np.ndarray, connectivity: int) -> tuple[np.ndarray, int]:
+    """Connected-component labelling without scipy (flood fill); 1-based labels."""
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    steps = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    if connectivity == 8:
+        steps += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    n = 0
+    for sy, sx in zip(*np.nonzero(mask)):
+        if labels[sy, sx]:
+            continue
+        n += 1
+        labels[sy, sx] = n
+        stack = [(int(sy), int(sx))]
+        while stack:
+            y, x = stack.pop()
+            for dy, dx in steps:
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not labels[ny, nx]:
+                    labels[ny, nx] = n
+                    stack.append((ny, nx))
+    return labels, n
 
 
 @dataclass(slots=True)
@@ -93,7 +121,10 @@ def segment(frame: np.ndarray, connectivity: int = 4) -> list[Component]:
     colors: list[int] = []
     offset = 0
     for color in np.unique(frame):
-        lab, n = ndimage.label(frame == color, structure=struct)
+        if ndimage is not None:
+            lab, n = ndimage.label(frame == color, structure=struct)
+        else:
+            lab, n = _label_fallback(frame == color, connectivity)
         if n == 0:
             continue
         mask = lab > 0

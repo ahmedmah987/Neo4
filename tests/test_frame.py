@@ -98,3 +98,15 @@ def test_click_groups():
     masked = fp.apply_mask(f, f == 11)
     comps = fp.segment(masked)
     assert max(fp.click_groups(comps)) == 4
+
+
+def test_segment_without_scipy_matches_scipy(monkeypatch):
+    f = blank()
+    f[5:15, 5:15] = 9
+    f[20, 0:30] = 12
+    f[0, 0] = 7
+    f[1, 1] = 7
+    with_scipy = [(c.color, c.x1, c.y1, c.x2, c.y2, c.area) for c in fp.segment(f)]
+    monkeypatch.setattr(fp, "ndimage", None)
+    without = [(c.color, c.x1, c.y1, c.x2, c.y2, c.area) for c in fp.segment(f)]
+    assert sorted(with_scipy) == sorted(without)

@@ -37,6 +37,7 @@ The project has two strands that share one codebase:
 | 10 | **Robust avatar identification**: orientation-free sprite signatures, the avatar is usually unique; exact signatures kept for click rules | done — neutral in levels (20 / 95), kept: the avatar is now right |
 | 11 | **Swept-cell world model**: an avatar that jumps several cells is stopped by what lies *between* its position and its destination; a stopped move blames the swept colours not yet known to be crossable; a graph edge that led somewhere more often than it killed survives a loss (move budgets) | done — 21 / 98, official-style score 0.42 (from 0.39), new default |
 | 12 | **Death attribution**: a level's move budget is detected and its losses blame nothing; the frame of a lost game names the kind that moved into the avatar (kills on contact → predicted danger, planned around); a move that lost the game is not repeated in the level; a graph with its frontier out of reach is reopened instead of wandered | done — 23 / 110, official-style score 0.44 (from 0.42), new default |
+| 13 | **The avatar's body**: sprites that move in lockstep with the avatar whenever they touch it are part of it (ls20's bar over its block); sweeps, predictions, contact rules and routes use the whole body | done — neutral (23 / 110, 0.44), kept: the footprint is now right |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -490,6 +491,29 @@ re-testing after the graph reopens, not by understanding the trigger. A relation
 rule ("that kind charges along its row or column") is the kind of thing a language
 model could propose and the data could check — the plan's optional phase.
 
+## Results — Phase 13 (the avatar's body): neutral, kept
+
+Why do goal plans come late or never on `dc22` and `ls20`, although the goal sprite is
+known and on screen? A sampling of the planner's preconditions on both games (avatar
+found, directions known, goal on screen, passable colours, route) showed the same
+symptom — no route — with different causes.
+
+On `ls20` the avatar is a colour-9 block with a colour-12 bar riding on top of it; the
+keyboard was seen to move the block, so the bar was just another object, and the body's
+true footprint was wrong. Sprites touching the avatar that move by its vector whenever
+it moves are now its *companions* (the bar: 1,142 of 1,142 moves), and the avatar plus
+the companions touching it form one body for sweeps, predictions, contact rules and
+route planning. That is right in substance and neutral in result: **23 / 110** levels
+and **0.44**, the same as Phase 12 (`lf52` +1 and `sk48` −1 over the seeds, noise).
+
+The route on `ls20` is still missing for another reason, and its public source says
+why: the avatar carries a pattern that tiles on the floor cycle (shape, colour,
+rotation), and the box that completes the level admits the avatar only when the carried
+pattern matches the box's — a precondition on the avatar's *state*, not on the map.
+`dc22` is a tile puzzle: the avatar walks only on tiles, and clicks slide blocks to
+build the path to the goal. Neither is a planning defect; both are mechanics that a
+model over colours, signatures and positions cannot express yet.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -504,7 +528,8 @@ over games. Every action between two level completions counts, exploration inclu
 | graph exploration | 17 / 75 | 0.26 |
 | model, Phase 10 | 20 / 95 | 0.39 |
 | model, Phase 11 | 21 / 98 | 0.42 |
-| model, Phase 12 (default) | 23 / 110 | 0.44 |
+| model, Phase 12 | 23 / 110 | 0.44 |
+| model, Phase 13 (default) | 23 / 110 | 0.44 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first

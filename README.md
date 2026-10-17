@@ -40,7 +40,7 @@ The project has two strands that share one codebase:
 | 13 | **The avatar's body**: sprites that move in lockstep with the avatar whenever they touch it are part of it (ls20's bar over its block); sweeps, predictions, contact rules and routes use the whole body | done — neutral (23 / 110, 0.44), kept: the footprint is now right |
 | 14 | **Exploration variants under the official metric**: object-targeted exploration (Phase 8a) re-measured on the score, where a cheaper first level counts | done — no gain (0.39 vs 0.44): faster first level on `tu93`, dearer later ones; kept as `model-explore` |
 | 15 | **Switches and indicators**: tile kinds whose entry changes a far-away object are switches, the objects they change are indicators, their arrangement is the avatar's state; a goal reached without a level-up locks the state and sends the agent to an untried switch | done — neutral (23 / 110, 0.44); fires only on `ls20`, where the energy budget ends the attempts first; kept |
-| 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | in progress — `tu93`'s fourth level 1,035 → 304 actions on one seed |
+| 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | done — neutral (23 / 110, 0.44; `tu93` 1.88 → 1.91), kept: the second no-gain phase in a row, loop stopped |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -570,6 +570,36 @@ level needs the energy mechanic (what refills it, and when to go for it) before 
 state mechanic can pay. No other public game shows a switch, so the cost is nil and the
 mechanism is kept.
 
+## Results — Phase 16 (patrols in motion): neutral
+
+`tu93`'s later levels hold two kinds of enemy. One patrols its corridor without pause:
+a bounce model — keep the last displacement, reverse it at cells the avatar cannot cross
+— predicts 74 % of its steps from the recorded frames. The other stands still until the
+avatar is in its line at a set distance, then charges; it moves on 2 of 699 steps that
+look "aligned" to a bounding-box test, so nothing simpler than the game's own rule
+predicts it. The model now tracks every object's last displacement, extrapolates the
+reach of hazard kinds in motion for forty moves, and the planner searches over
+(position, time) while the prediction lasts (`planner.plan_path(avoid_t=...)`), so a
+route crosses a patrol's corridor when the patrol is elsewhere; a kind at rest keeps its
+static reach.
+
+Result: **23 / 110** levels and **0.44**, with `tu93` 1.88 → 1.91 — one seed's fourth
+level falls in 304 actions instead of 1,035, the other four seeds are unchanged to the
+action, and the fifth level stays out of reach because the static chargers' reach (one
+avatar step around them) still walls off the corridor the route needs. The mechanism is
+right where it applies and is kept; it is the second phase in a row without a gain on the
+score, which is where this loop stops.
+
+**Where this stands after Phases 15–16.** The default agent is unchanged in result since
+Phase 12: 23 median levels, 110 over all runs, official-style score 0.44. The two
+mechanics that these phases model — a state the avatar must be in, and hazards that move
+— are each implemented, tested on toy rooms, and blocked on the public games by a
+*third* mechanic in the same game (`ls20`'s energy bar; `tu93`'s charge trigger). That is
+the shape of the remaining problem: the public games compose three or four mechanics
+each, and a hand-built model gains a level only when every mechanic on the route is
+expressed. The next step that does not have that shape is a library of mechanics learned
+across games, or a language model proposing the composition for the data to check.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -585,7 +615,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phase 10 | 20 / 95 | 0.39 |
 | model, Phase 11 | 21 / 98 | 0.42 |
 | model, Phase 12 | 23 / 110 | 0.44 |
-| model, Phase 13 (default) | 23 / 110 | 0.44 |
+| model, Phase 13 | 23 / 110 | 0.44 |
+| model, Phases 15–16 (default) | 23 / 110 | 0.44 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first

@@ -91,3 +91,38 @@ def test_model_agent_is_not_worse_than_graph_agent_on_room():
     g = [run(GraphAgent(seed=s), Room(), 3000) for s in range(3)]
     m = [run(ModelAgent(seed=s), Room(), 3000) for s in range(3)]
     assert sum(m) <= sum(g)
+
+
+def test_budget_aware_agent_resets_rather_than_walk_into_the_budget():
+    """With a known move budget, a frontier (or a plan) farther than the actions
+    left in the attempt is not walked towards: the level is reset instead."""
+    from arcengine import GameAction
+    from neo4.graph_agent import Candidate
+
+    agent = ModelAgent(seed=0)
+    g = agent.graph
+    cands = lambda: [Candidate(GameAction.ACTION1, None, 0), Candidate(GameAction.ACTION2, None, 0)]
+    for k in "abcd":
+        g.add_node(k, cands())
+    g.record("a", 0, "b"); g.record("b", 0, "c"); g.record("c", 0, "d")  # a chain
+    g.record("a", 1, "a"); g.record("b", 1, "a"); g.record("c", 1, "b")  # a, b, c fully tested
+    agent.first_key = "a"
+    agent.since_reset = 3
+    dyn = agent.dyn
+    dyn.longest_attempt[0] = 6
+    dyn.death_lengths[0][6] = 2
+    dyn.death_places[(0, 6)] = {(1,), (2,)}
+    assert dyn.budget() == 6
+    node = g.nodes["a"]  # the frontier (d) is three edges away, plus the test itself
+    dyn.attempt = 3  # three actions left: not enough
+    assert agent._frontier_beyond_budget(node)
+    dyn.attempt = 1  # five left: go
+    assert not agent._frontier_beyond_budget(node)
+    agent.plan = [1, 1, 1, 1, 1]
+    dyn.attempt = 3
+    assert agent._beyond_budget(len(agent.plan))
+    dyn.attempt = 0
+    assert not agent._beyond_budget(len(agent.plan))
+    agent.since_reset = 0  # a fresh attempt is never reset again
+    dyn.attempt = 3
+    assert not agent._frontier_beyond_budget(node)

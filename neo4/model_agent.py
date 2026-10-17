@@ -91,7 +91,7 @@ class ModelAgent(GraphAgent):
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
              "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
-             "switch_plans": 0, "locked_goals": 0}
+             "switch_plans": 0, "locked_goals": 0, "budget_resets": 0}
         )
 
     def _key(self, grid: np.ndarray) -> str:
@@ -197,6 +197,12 @@ class ModelAgent(GraphAgent):
             if idx is None and not self.plan:
                 idx = self._make_plan(node, me, "goal")
             if idx is not None:
+                if self._beyond_budget(len(self.plan)):
+                    # The plan cannot finish in this attempt: a reset costs one
+                    # action and starts a fresh budget, the walk would cost them all.
+                    self._drop_plan()
+                    self.stats["budget_resets"] += 1
+                    return None
                 return idx
         for i in node.untested(self.graph.max_group(), self.graph.epoch):
             c = node.cands[i]
@@ -216,7 +222,34 @@ class ModelAgent(GraphAgent):
             idx = self._make_plan(node, me, "explore")
             if idx is not None:
                 return idx
+        if self._frontier_beyond_budget(node):
+            self.stats["budget_resets"] += 1
+            return None
         return super()._choose(node)
+
+    # -- move budgets ---------------------------------------------------------
+
+    def _remaining(self) -> int | None:
+        """Actions left in this attempt under the level's move budget, if known
+        and the attempt is under way."""
+        budget = self.dyn.budget()
+        if budget is None or self.since_reset == 0:
+            return None
+        return budget - self.dyn.attempt
+
+    def _beyond_budget(self, actions: int) -> bool:
+        remaining = self._remaining()
+        return remaining is not None and actions > remaining
+
+    def _frontier_beyond_budget(self, node: Node) -> bool:
+        """Nothing to test here, and the nearest untested edge is farther than the
+        attempt has actions left: walking there would end in the budget."""
+        remaining = self._remaining()
+        if remaining is None or node.untested(self.graph.max_group(), self.graph.epoch):
+            return False
+        dist, _ = self.graph.distances(self.graph.max_group())
+        here = dist.get(node.key)
+        return here is not None and here + 1 > remaining
 
     # -- planning -------------------------------------------------------------
 
@@ -326,6 +359,9 @@ class ModelAgent(GraphAgent):
             )
             if found is not None:
                 break
+        budget = self.dyn.budget()
+        if found is not None and budget is not None and len(found[0]) > budget - 1:
+            found = None  # longer than any attempt can be
         if found is None:
             # No route through cells known to be passable yet; try again after a
             # cooldown, and do not spend the per-level allowance on the search.

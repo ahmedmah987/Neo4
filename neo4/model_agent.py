@@ -208,8 +208,9 @@ class ModelAgent(GraphAgent):
         if not self.planning or not self.dyn.level_ups:
             return []
         objs = self.cur_objs()
+        # Click goals by signature only: a goal by *colour* made the agent spend 500
+        # steps per run clicking every colour-15 pixel of r11l, where position decides.
         goal_sigs = self.dyn.goal_click_sigs()
-        goal_click_colors = self.dyn.goal_click_colors()
         goal_colors = self.dyn.goal_colors()
         avatar = self.dyn.avatar()
         me = find(objs, avatar) if avatar is not None else None
@@ -218,7 +219,7 @@ class ModelAgent(GraphAgent):
             c = node.cands[i]
             if c.data is not None:
                 t = at(objs, c.data["x"], c.data["y"])
-                if t is not None and (t.sig in goal_sigs or t.color in goal_click_colors):
+                if t is not None and t.sig in goal_sigs:
                     out.append(i)
             elif me is not None and goal_colors:
                 d = self.dyn.direction(c.action.value)

@@ -47,7 +47,7 @@ The project has two strands that share one codebase:
 | 20 | **Scaling check** at 12,000 steps (3 seeds): levels per run 0.88 → 1.09, official-style score unchanged (0.39 → 0.39 on the same seeds): levels found late score nothing | done |
 | 21 | **Solution replay**: the shortest click sequence that completed a level, replayed by target signature in the next | done — a loss (0.41 vs 0.44): sequences belong to one layout; off by default, kept as a variant |
 | 22 | **Difference reduction**: the kinds that came together when a level ended (a moving kind, a static kind) learned as the goal relation; later levels explored best-first towards the frames where their gap is smallest | done — neutral (0.43): the frontier choice never matters in a click game, every node still has untested clicks; kept |
-| 23 | **Clicks ordered by learned gain**: the kinds whose clicks have closed the goal gap go first at every node | measuring |
+| 23 | **Clicks ordered by learned gain**: the kinds whose clicks have closed the goal gap go first at every node; relation kinds matched by size and shape when their colour changes between levels | done — levels 110 → 113 (`lp85` 8 → 14: two seeds reach its fifth level), score unchanged (0.44); new default; loop stopped by its rule |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -745,6 +745,39 @@ proximity to the moving kind — which helped `vc33` and hurt `r11l` and `lp85`;
 off by default. The lesson is the next phase: in click games the search is decided by
 *which click to try first at a node*, so that is where the learned relation must act.
 
+## Results — Phase 23 (clicks ordered by learned gain): more levels, same score
+
+Phase 22's lesson applied: in a click game the cost of a level is decided by which
+click is tried first at each node. Every click now credits its target kind with the
+change it produced in the goal-relation gap; at a node, clicks on kinds whose mean
+change is negative go first, kinds not yet tried next, kinds that never closed the gap
+last. Relation kinds are matched by size and shape when their exact colour is absent,
+since levels recolour their pieces (`vc33`'s markers are colour 11 on one level and 14
+on the next). On the toy slide puzzle the second level now takes exactly its seventeen
+pushes (`tests/test_reduction.py`).
+
+Over the 25 games: **113 levels** over all runs against 110, the first rise since Phase
+12, all of it `lp85` (8 → 14: two seeds now complete five of its eight levels, the
+third to fifth in 360–570 actions each with 460–2,600 gain-ordered clicks) — and the
+official-style score unchanged at **0.44** (1.63 → 1.68 on `lp85`, since 400 actions
+against a human's 16–41 is worth little; `tu93` and `cd82` move within noise). On
+`vc33` and `r11l` the ordering fires and changes nothing: their relation is not the
+one that matters, and the gap it measures does not move with the clicks that do.
+
+**Where this stands after Phases 21–23.** The default agent completes 23 median levels
+and 113 over all runs at 4,000 steps, official-style score 0.44 (exploration baseline:
+17 / 75, 0.26). Three phases in a row without a score gain is the loop's stop rule, and
+it stops here. What the three phases established: sequences do not transfer between
+levels (Phase 21); in click games the search never reaches a frontier, so only the
+local click order matters (Phase 22); a learned "which kind closes the gap" order does
+win levels where the relation is right (`lp85`) and nothing where it is not (Phase 23).
+The relation is the bottleneck: it is guessed from one level-up by geometry, and in
+`vc33` and `r11l` the true goal is not a gap between two kinds. Learning what a
+level's goal *is* — from the frames and actions of a completed level, in a form that
+can be checked against the next level — is the open problem that separates this agent
+from a strong one, and it is the problem a language model proposing hypotheses for the
+data to check would be aimed at.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -762,7 +795,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phase 12 | 23 / 110 | 0.44 |
 | model, Phase 13 | 23 / 110 | 0.44 |
 | model, Phases 15–16 | 23 / 110 | 0.44 |
-| model, Phases 17–18 (default) | 23 / 110 | 0.44 |
+| model, Phases 17–18 | 23 / 110 | 0.44 |
+| model, Phases 22–23 (default) | 23 / 113 | 0.44 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first

@@ -170,7 +170,23 @@ The model agent is the exploration agent plus rules it induces from its own tran
   levels the agent plans a path to that colour through cells it knows to be passable and
   follows it while every step lands where the model predicted; a surprise abandons the
   plan and hands control back to exploration. Clicks on a level-completing signature are
-  tested first.
+  tested first. When no route reaches the goal sprite, the plan aims at the sprite that
+  encloses it (a box with the exit pattern inside), then at colour goals that are not
+  walls elsewhere.
+* **Losses explained before they are blamed.** A level whose losses fall at the same
+  attempt length from different places has a move budget, and those losses credit
+  nothing. The frame of a lost game names the kind that moved into the avatar's place;
+  such a kind kills on contact, and its reach — one avatar step around it — is avoided.
+  A kind in motion is expected where its motion carries it: its last displacement is
+  extrapolated with a bounce model (keep going, reverse at cells the avatar cannot
+  cross), and the planner searches over position *and time* so a route crosses a
+  patrol's corridor when the patrol is elsewhere. A move that lost the game is not
+  repeated in the level.
+* **Switches and indicators.** A tile kind whose entry changes the same far-away object
+  nearly every time is a switch; the objects switches change are indicators, and their
+  arrangement is the avatar's *state*. A goal plan that reaches the goal without ending
+  the level locks that state; the agent then plans to a switch not yet tried from the
+  state and plans for the goal again.
 
 ## Results — Phase 1
 

@@ -16,6 +16,12 @@ agent plans a path to that colour through cells it knows to be passable
 (``planner``) and follows it while every step lands where the model said it
 would; a surprise abandons the plan and hands control back to exploration.
 Clicks on a signature that completed a level before are tested first.
+
+Objects the model classes as *noise* — signatures that move, appear or vanish
+whatever the agent does, such as drifting particles or an in-scene timer —
+are erased from the frame before its state key is computed, so that their
+motion does not multiply the number of states. When the noise set changes,
+the current level's graph is rebuilt under the new identity.
 """
 
 from __future__ import annotations
@@ -23,9 +29,10 @@ from __future__ import annotations
 import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
 
+from . import frame as fp
 from .dynamics import GAME_OVER, LEVEL_UP, OK, Dynamics
-from .graph_agent import GraphAgent, Node
-from .objects import Obj, at, extract, find
+from .graph_agent import GraphAgent, LevelGraph, Node
+from .objects import Obj, at, erase, extract, find
 from .planner import plan_path
 
 SKIP_VERDICTS = ("blocked", "danger", "noop_click")
@@ -36,11 +43,16 @@ PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning agai
 class ModelAgent(GraphAgent):
     name = "model"
 
-    def __init__(self, seed: int = 0, skip: bool = True, plan: bool = True) -> None:
+    def __init__(
+        self, seed: int = 0, skip: bool = True, plan: bool = True, abstract: bool = True
+    ) -> None:
         super().__init__(seed)
         self.dyn = Dynamics()
         self.skip = skip
         self.planning = plan
+        self.abstract = abstract
+        self.noise: frozenset = frozenset()
+        self.rebuilt_this_level = False
         self.last_cand: tuple[GameAction, dict[str, int] | None] | None = None
         self.last_grid: np.ndarray | None = None
         self.last_objs: list[Obj] | None = None
@@ -53,8 +65,30 @@ class ModelAgent(GraphAgent):
         self.plan_cooldown = 0
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
-             "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0}
+             "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
+             "noise_sigs": 0, "graph_rebuilds": 0}
         )
+
+    def _key(self, grid: np.ndarray) -> str:
+        if not self.abstract:
+            return super()._key(grid)
+        noise = self.dyn.noise()
+        if noise != self.noise:
+            # The state identity changed: the current level's graph is keyed the old
+            # way. Rebuild it once per level; later growth of the noise set only
+            # strands a few stale nodes, which is cheaper than starting over again.
+            self.noise = noise
+            self.stats["noise_sigs"] = len(noise)
+            if self.graph.nodes and not self.rebuilt_this_level:
+                self.graph = LevelGraph()
+                self.first_key = None
+                self.last_key = self.last_idx = None
+                self.priority = 0
+                self.rebuilt_this_level = True
+                self.stats["graph_rebuilds"] += 1
+        if not noise:
+            return super()._key(grid)
+        return fp.state_key(erase(grid, self.cur_objs(), noise), self.mask)
 
     def _start_level(self, grid: np.ndarray) -> None:
         super()._start_level(grid)
@@ -62,6 +96,7 @@ class ModelAgent(GraphAgent):
         self.plan_expect = []
         self.plans_this_level = 0
         self.plan_cooldown = 0
+        self.rebuilt_this_level = False
 
     def cur_objs(self) -> list[Obj]:
         if self._cur_objs is None:

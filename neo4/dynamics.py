@@ -33,6 +33,9 @@ DANGER_RATE = 0.5  # share of visits that ended the game
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
 GOAL_RATE = 0.3  # share of a colour's (or click target's) visits that ended a level
+NOISE_RATE = 0.3  # a signature churning on this share of steps under every action is noise
+NOISE_MIN_STEPS = 10  # observations an action class needs before it counts for noise
+NOISE_REFRESH = 25  # recompute the noise set every this many observations
 
 
 @dataclass(slots=True)
@@ -50,9 +53,13 @@ class Dynamics:
         self.hazard: Counter = Counter()
         self.goal_ahead: Counter = Counter()  # colours ahead of the avatar when a level ended
         self.goal_click: Counter = Counter()  # signatures clicked when a level ended
+        self.churn: dict[tuple, Counter] = defaultdict(Counter)  # sig -> action class -> events
+        self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
         self._avatar: tuple | None = None
         self._avatar_dirty = True
+        self._noise: frozenset = frozenset()
+        self._noise_at = 0
 
     # -- learning -------------------------------------------------------------
 
@@ -67,6 +74,15 @@ class Dynamics:
     ) -> None:
         self.observations += 1
         d = diff(before, after) if after is not None and outcome == OK else None
+        if d is not None:
+            cls = "click" if action.is_complex() else action.value
+            self.steps_by_class[cls] += 1
+            for b, _, _, _ in d.moved:
+                self.churn[b.sig][cls] += 1
+            for o in d.vanished:
+                self.churn[o.sig][cls] += 1
+            for o in d.appeared:
+                self.churn[o.sig][cls] += 1
         if action.is_complex():
             self._observe_click(data, before, d, outcome)
         else:
@@ -131,11 +147,54 @@ class Dynamics:
 
     # -- derived rules --------------------------------------------------------
 
+    def noise(self) -> frozenset:
+        """Signatures that change whatever the agent does: particles, timers, animations.
+
+        A signature is noise when it moved, appeared or vanished on at least
+        ``NOISE_RATE`` of the transitions under *every* action class that has
+        enough observations. Something that reacts to one particular action
+        is not noise; something that churns regardless of the action is.
+        """
+        if self.observations - self._noise_at >= NOISE_REFRESH or self._noise_at == 0:
+            self._noise_at = self.observations
+            classes = [c for c, n in self.steps_by_class.items() if n >= NOISE_MIN_STEPS]
+            out = set(self._noise)  # membership is sticky: a changing set would re-key the graph
+            if classes:
+                for sig, c in self.churn.items():
+                    if self._controlled(sig):
+                        continue
+                    if all(c[cls] / self.steps_by_class[cls] >= NOISE_RATE for cls in classes):
+                        out.add(sig)
+                # Particles clump into rarer shapes of the same colour; take those along.
+                colors = {sig[0] for sig in out}
+                for sig in self.churn:
+                    if sig[0] in colors and sig not in out and not self._controlled(sig):
+                        out.add(sig)
+            self._noise = frozenset(out)
+        return self._noise
+
+    def _controlled(self, sig: tuple) -> bool:
+        """Some keyboard action moves this signature in one consistent direction."""
+        for (_, s), c in self.move.items():
+            if s != sig:
+                continue
+            nonzero = [(k, n) for k, n in c.items() if k != (0, 0)]
+            if not nonzero:
+                continue
+            best = max(n for _, n in nonzero)
+            total = sum(n for _, n in nonzero)
+            if best >= MIN_SUPPORT and best / total >= DIR_PURITY:
+                return True
+        return False
+
     def avatar(self) -> tuple | None:
         """Signature that the keyboard moves most often."""
         if self._avatar_dirty:
+            noise = self.noise()
             score: Counter = Counter()
             for (_, sig), c in self.move.items():
+                if sig in noise:
+                    continue
                 score[sig] += sum(n for (dx, dy), n in c.items() if (dx, dy) != (0, 0))
             # Ties (a hole inside the avatar moves exactly as often) go to the bigger sprite.
             best = max(score.items(), key=lambda kv: (kv[1], kv[0][1] * kv[0][2]), default=None)
@@ -251,6 +310,11 @@ class Dynamics:
 
     def describe(self) -> list[str]:
         lines: list[str] = [f"{self.observations} transitions observed"]
+        for sig in sorted(self.noise()):
+            total = sum(self.churn[sig].values())
+            lines.append(
+                f"noise: colour-{sig[0]} {sig[2]}x{sig[1]} changes whatever the action ({total} events)"
+            )
         avatar = self.avatar()
         if avatar is None:
             lines.append("no avatar found (nothing moves consistently under the keyboard)")

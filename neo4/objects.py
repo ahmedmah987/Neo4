@@ -178,6 +178,39 @@ def diff(before: list[Obj], after: list[Obj]) -> Diff:
     return Diff(moved=moved, vanished=still_b, appeared=a_free, recolored=recolored, unchanged=unchanged)
 
 
+def erase(grid: np.ndarray, objs: list[Obj], sigs: frozenset | set) -> np.ndarray:
+    """Copy of ``grid`` with the objects of the given signatures painted over.
+
+    Each object is filled with the most common colour of the cells around it,
+    so that an object drifting across a uniform background leaves no trace.
+    """
+    out = grid.copy()
+    h, w = grid.shape
+    for o in objs:
+        if o.sig not in sigs:
+            continue
+        ys, xs = o.pixels[:, 0], o.pixels[:, 1]
+        ring: list[int] = []
+        for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            ny, nx = ys + dy, xs + dx
+            ok = (ny >= 0) & (ny < h) & (nx >= 0) & (nx < w)
+            ring.extend(grid[ny[ok], nx[ok]].tolist())
+        own = set(zip(ys.tolist(), xs.tolist()))
+        ring = [c for c, (y, x) in zip(ring, _ring_coords(ys, xs, h, w)) if (y, x) not in own]
+        fill = max(set(ring), key=ring.count) if ring else 0
+        out[ys, xs] = fill
+    return out
+
+
+def _ring_coords(ys: np.ndarray, xs: np.ndarray, h: int, w: int) -> list[tuple[int, int]]:
+    coords: list[tuple[int, int]] = []
+    for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+        ny, nx = ys + dy, xs + dx
+        ok = (ny >= 0) & (ny < h) & (nx >= 0) & (nx < w)
+        coords.extend(zip(ny[ok].tolist(), nx[ok].tolist()))
+    return coords
+
+
 def find(objs: list[Obj], sig: tuple) -> Obj | None:
     return next((o for o in objs if o.sig == sig), None)
 

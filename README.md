@@ -13,8 +13,9 @@ solve all of them; frontier language models used directly solve almost none.
 |---|---|---|
 | 1 | Reimplement the training-free **graph-exploration** baseline (Rudakov, Shock & Cowley, [arXiv:2512.24156](https://arxiv.org/abs/2512.24156)) and measure it on the public games | done |
 | 2 | **Rule induction**: learn what each action does to each object on screen from the recorded transitions | done |
-| 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | in progress |
-| 4 | (optional) a local language model that proposes hypotheses | — |
+| 3 | **Planning** inside the induced model; measure the gain over the exploration baseline | done — no gain, see below |
+| 4 | **State abstraction**: learn which objects change independently of the agent's actions and leave them out of the state identity | in progress |
+| 5 | (optional) a local language model that proposes hypotheses | — |
 
 ## Setup and usage
 
@@ -157,6 +158,30 @@ explosion is caused by colour-7 single pixels that drift one cell per step — m
 particles make every frame unique; `cn04` is a pushing game in which the colour-8 avatar
 moves colour-10 bars and is stuck 60 % of the time because whether a push works depends on
 what lies beyond the bar, a conditional rule the current colour-level model cannot express.
+
+## Results — Phase 3 (goal transfer and planning): no gain
+
+The full `model` agent (pruning + goal transfer + path planning) scores exactly the same
+as `model-noplan`: 20 median levels, 94 levels over all runs, identical per-game numbers.
+The planner ran on one game only (`ls20`: 5 plans per run, none failed, none completed a
+level) and the "click the signature that completed a level before" rule never fired.
+
+The reason is visible in the statistics. A level-completing event is recorded as a *colour*
+the avatar entered or a *signature* that was clicked, and in these games that is not what
+completes a level:
+
+* in `ls20` the colour entered on level completion is the ordinary floor; the exit works
+  only once a key has been collected, so re-entering that colour does nothing;
+* in `vc33` the level-completing click lands on a colour-9 2x2 block, the same signature
+  as the ~1,900 other clicks in the run, so the signature carries no information about
+  *which* block or *when*.
+
+What completes a level is relational — which object, in what state, relative to what —
+and a colour- or signature-level goal cannot express it. The planner itself works (it is
+exercised on a toy room in the tests, where the second level is solved in a quarter of
+the steps of the first), but on the public games it has nothing useful to plan towards
+yet. Goal induction needs a richer representation; that is left for later, and the next
+phase targets the larger measured loss, the state explosion.
 
 ## Attribution
 

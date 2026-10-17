@@ -190,6 +190,10 @@ class GraphAgent:
         self.last_idx = None
         self.priority = 0
 
+    def _key(self, grid: np.ndarray) -> str:
+        """State identity of a frame; subclasses may abstract it."""
+        return fp.state_key(grid, self.mask)
+
     def _candidates(self, grid: np.ndarray, available: list[int]) -> list[Candidate]:
         cands: list[Candidate] = []
         for aid in available:
@@ -226,7 +230,7 @@ class GraphAgent:
             self.levels_completed = obs.levels_completed
             self._start_level(grid)
 
-        key = fp.state_key(grid, self.mask)
+        key = self._key(grid)
         if self.first_key is None:
             self.first_key = key
         node = self.graph.nodes.get(key)

@@ -41,6 +41,9 @@ The project has two strands that share one codebase:
 | 14 | **Exploration variants under the official metric**: object-targeted exploration (Phase 8a) re-measured on the score, where a cheaper first level counts | done — no gain (0.39 vs 0.44): faster first level on `tu93`, dearer later ones; kept as `model-explore` |
 | 15 | **Switches and indicators**: tile kinds whose entry changes a far-away object are switches, the objects they change are indicators, their arrangement is the avatar's state; a goal reached without a level-up locks the state and sends the agent to an untried switch | done — neutral (23 / 110, 0.44); fires only on `ls20`, where the energy budget ends the attempts first; kept |
 | 16 | **Patrols in motion**: per-object velocities, a bounce model that predicts a patrol's reach for forty moves, and route search over position *and* time | done — neutral (23 / 110, 0.44; `tu93` 1.88 → 1.91), kept: the second no-gain phase in a row, loop stopped |
+| 17 | **Budget-aware attempts**: with a known move budget, a plan or frontier walk that cannot finish in the attempt triggers a deliberate reset (only when a fresh attempt could reach it) | measuring |
+| 18 | **Resource bars**: the status-area colour that runs out per action and reads empty at losses, the tiles that refill it, refill plans before a long route | measuring — `ls20` learns its energy bar and refill pickups |
+| 19 | **Competition harness dry run**: the bundle through the official framework's own loop on all 25 games, action and wall-clock caps for the threaded rerun, submission steps | done |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -84,11 +87,34 @@ python scripts/bundle.py                      # writes kaggle/my_agent.py (also 
 
 `kaggle/my_agent.py` embeds every module's source and materialises them as real modules
 at import time, so the submitted code is byte-for-byte what the tests cover; a `MyAgent`
-class adapts the framework's `FrameData`/`GameAction` to the agent's engine types,
-never stops on `GAME_OVER` (the agent resets the level and carries on) and sets
-`MAX_ACTIONS` to one million so the harness's own budget is what ends a game
-(`NEO4_MAX_ACTIONS` overrides it). `tests/test_bundle.py` runs the bundle through a
-stand-in for the framework's `Agent` loop against the local engine.
+class adapts the framework's `FrameData`/`GameAction` to the agent's engine types and
+never stops on `GAME_OVER` (the agent resets the level and carries on).
+`tests/test_bundle.py` runs the bundle through a stand-in for the framework's `Agent`
+loop against the local engine, and the dry run below ran it through the real one.
+
+**What the competition rerun does** (read from the starter kit's notebook builder and the
+framework's `Swarm`): the notebook copies the framework next to the agent, registers
+`MyAgent`, points it at a local gateway (`http://gateway:8001`, no internet) and runs
+`python main.py --agent myagent`; the swarm then plays *every* game at once, one thread
+per game in one Python process, and closes the scorecard only when all threads have
+returned. Two consequences shape the bundle: the agent's per-game CPU time adds up
+across games (the threads share one interpreter), and an agent that never stops would
+run the notebook into its wall-clock limit before the scorecard is closed. So the
+bundled agent stops a game at `NEO4_MAX_ACTIONS` (40,000) actions or at
+`NEO4_TIME_BUDGET` (three hours) of wall clock counted from its construction, so that
+all games stop together whatever their number. More actions never lower the score —
+a level's score counts only the actions until it was completed — so the cap is a
+safety margin, not a strategy.
+
+**Dry run through the official framework.** The starter kit's `scripts/play_local.py`
+drives `agent/my_agent.py` with the framework's own `Agent.main()` loop against the
+`arc-agi` engine in-process — the same loop the gateway drives on Kaggle. With this
+repository's bundle copied in, all 25 public games ran to a 1,000-action cap at 76–400
+actions per second (2.5–13 s per game; on a machine busy with a sweep), with the
+levels the 4,000-step sweeps predict for that budget, and the package's own scorecard
+reported the result. That scorecard implements the formula this README calls the
+official-style score — per level `min(115, (human / agent)² × 100)`, weighted by level
+number — so the two agree.
 
 To submit:
 
@@ -97,9 +123,12 @@ To submit:
    username in `notebooks/kernel-metadata.json`). It needs Python 3.12.
 2. Copy `kaggle/my_agent.py` from this repository over `agent/my_agent.py`.
 3. Set `ACCELERATOR = "cpu"` in `scripts/build_notebook.py` — the agent uses no GPU.
-4. `make play-local` to check it plays, then `make submit`; `make status` follows the run.
-   Kaggle first runs the notebook as a check, then reruns it on the hidden games when
-   you press *Submit to Competition*.
+4. `make play-local` to check it plays (every game, 200 actions each), then
+   `make submit`; `make status` follows the run. Kaggle first runs the notebook as a
+   check, then reruns it on the hidden games when you press *Submit to Competition*.
+5. If the hidden set is large or the rerun's allowance is short, lower
+   `NEO4_TIME_BUDGET` (seconds per game, wall clock) at the top of the agent file; at the
+   measured 100–300 actions per second, 40,000 actions take 2–7 minutes of CPU per game.
 
 The dependencies the notebook installs offline are `arc-agi` (with `arcengine`) and
 `python-dotenv`; `numpy` and `scipy` are part of the Kaggle image, and the frame code

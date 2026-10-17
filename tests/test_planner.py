@@ -15,7 +15,7 @@ def test_plan_path_finds_route_around_wall():
     g[10:12, 40:42] = 12  # goal
     me = next(o for o in extract(g) if o.color == 9)
     dirs = {1: (2, 0), 2: (-2, 0), 3: (0, -2), 4: (0, 2)}
-    found = plan_path(g, me, dirs, lambda c: c == 0, lambda cols: 12 in cols)
+    found = plan_path(g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols)
     assert found is not None
     actions, positions = found
     assert len(actions) == len(positions)
@@ -36,7 +36,7 @@ def test_plan_path_returns_none_when_unreachable():
     g[10:12, 40:42] = 12
     me = next(o for o in extract(g) if o.color == 9)
     dirs = {1: (2, 0), 2: (-2, 0), 3: (0, -2), 4: (0, 2)}
-    assert plan_path(g, me, dirs, lambda c: c == 0, lambda cols: 12 in cols) is None
+    assert plan_path(g, me, dirs, lambda c: c == 0, lambda cols, coords: 12 in cols) is None
 
 
 def test_model_agent_transfers_goal_to_next_level():

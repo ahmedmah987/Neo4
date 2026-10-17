@@ -20,11 +20,12 @@ from .objects import Obj
 MAX_EXPANSIONS = 20000
 
 
-def cells_ahead(
+def ahead(
     grid: np.ndarray, rel: np.ndarray, pos: tuple[int, int], d: tuple[int, int]
-) -> set[int] | None:
-    """Colours of the cells a sprite with pixel offsets ``rel`` enters when moving
-    from top-left ``pos`` by ``d``; None when the move leaves the grid."""
+) -> tuple[set[int], list[tuple[int, int]]] | None:
+    """Colours and (y, x) coordinates of the cells a sprite with pixel offsets
+    ``rel`` enters when moving from top-left ``pos`` by ``d``; None when the
+    move leaves the grid."""
     x, y = pos
     dx, dy = d
     ys = rel[:, 0] + y + dy
@@ -32,7 +33,16 @@ def cells_ahead(
     if ys.min() < 0 or xs.min() < 0 or ys.max() >= grid.shape[0] or xs.max() >= grid.shape[1]:
         return None
     own = set(zip((rel[:, 0] + y).tolist(), (rel[:, 1] + x).tolist()))
-    return {int(grid[yy, xx]) for yy, xx in zip(ys.tolist(), xs.tolist()) if (yy, xx) not in own}
+    coords = [(yy, xx) for yy, xx in zip(ys.tolist(), xs.tolist()) if (yy, xx) not in own]
+    return {int(grid[yy, xx]) for yy, xx in coords}, coords
+
+
+def cells_ahead(
+    grid: np.ndarray, rel: np.ndarray, pos: tuple[int, int], d: tuple[int, int]
+) -> set[int] | None:
+    """Colours of the cells entered by the move (see ``ahead``)."""
+    r = ahead(grid, rel, pos, d)
+    return None if r is None else r[0]
 
 
 def plan_path(
@@ -40,12 +50,13 @@ def plan_path(
     me: Obj,
     dirs: dict[int, tuple[int, int]],
     passable: Callable[[int], bool],
-    is_goal: Callable[[set[int]], bool],
+    is_goal: Callable[[set[int], list[tuple[int, int]]], bool],
 ) -> tuple[list[int], list[tuple[int, int]]] | None:
     """Actions (and the avatar position expected after each) to reach a goal.
 
-    The last action is the one that enters the goal; the position recorded for
-    it is where the avatar would land if the move went through.
+    ``is_goal`` sees the colours and the coordinates of the cells a move would
+    enter. The last action is the one that enters the goal; the position
+    recorded for it is where the avatar would land if the move went through.
     """
     rel = me.pixels - np.array([me.y1, me.x1])
     start = (me.x1, me.y1)
@@ -68,11 +79,12 @@ def plan_path(
         pos = queue.popleft()
         expansions += 1
         for aid, d in dirs.items():
-            colors = cells_ahead(grid, rel, pos, d)
-            if colors is None:
+            r = ahead(grid, rel, pos, d)
+            if r is None:
                 continue
+            colors, coords = r
             nxt = (pos[0] + d[0], pos[1] + d[1])
-            if is_goal(colors):
+            if is_goal(colors, coords):
                 actions, positions = unwind(pos)
                 return actions + [aid], positions + [nxt]
             if nxt in seen or not all(passable(c) for c in colors):

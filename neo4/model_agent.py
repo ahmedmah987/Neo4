@@ -37,6 +37,7 @@ from .planner import plan_path
 
 SKIP_VERDICTS = ("blocked", "danger", "noop_click")
 MAX_PLANS_PER_LEVEL = 5
+MAX_EXPLORE_PLANS_PER_LEVEL = 40
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
 
 
@@ -67,11 +68,14 @@ class ModelAgent(GraphAgent):
         self._verdicts: dict[int, str] = {}
         self.plan: list[int] = []
         self.plan_expect: list[tuple[int, int]] = []
+        self.plan_kind = ""
         self.plans_this_level = 0
+        self.explore_plans_this_level = 0
         self.plan_cooldown = 0
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
              "plans": 0, "plan_steps": 0, "plan_failures": 0, "goal_clicks": 0,
+             "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0}
         )
 
@@ -98,11 +102,16 @@ class ModelAgent(GraphAgent):
 
     def _start_level(self, grid: np.ndarray) -> None:
         super()._start_level(grid)
-        self.plan = []
-        self.plan_expect = []
+        self._drop_plan()
         self.plans_this_level = 0
+        self.explore_plans_this_level = 0
         self.plan_cooldown = 0
         self.rebuilt_this_level = False
+
+    def _drop_plan(self) -> None:
+        self.plan = []
+        self.plan_expect = []
+        self.plan_kind = ""
 
     def cur_objs(self) -> list[Obj]:
         if self._cur_objs is None:
@@ -134,6 +143,7 @@ class ModelAgent(GraphAgent):
 
         if action is GameAction.RESET or grid is None:
             self.last_cand = None
+            self._drop_plan()
         else:
             self.last_cand = (action, data)
             self.last_grid = grid
@@ -144,8 +154,12 @@ class ModelAgent(GraphAgent):
         if self.cur_grid is None or not self.dyn.observations:
             return super()._choose(node)
         objs = self.cur_objs()
+        avatar = self.dyn.avatar()
+        me = find(objs, avatar) if avatar is not None else None
         if self.planning:
-            idx = self._follow_or_make_plan(node, objs)
+            idx = self._follow_plan(node, me)
+            if idx is None and not self.plan:
+                idx = self._make_plan(node, me, "goal")
             if idx is not None:
                 return idx
         for i in node.untested(self.graph.max_group(), self.graph.epoch):
@@ -157,51 +171,81 @@ class ModelAgent(GraphAgent):
             else:
                 self._verdicts[i] = verdict
         node.interest = sum(1 for v in self._verdicts.values() if v == "unknown")
+        if self.planning and node.interest == 0 and not self.plan:
+            # Nothing unknown to test here: go and touch something the avatar has not
+            # touched yet, rather than grinding through moves whose outcome is known.
+            idx = self._make_plan(node, me, "explore")
+            if idx is not None:
+                return idx
         return super()._choose(node)
 
     # -- planning -------------------------------------------------------------
 
-    def _follow_or_make_plan(self, node: Node, objs: list[Obj]) -> int | None:
-        avatar = self.dyn.avatar()
-        me = find(objs, avatar) if avatar is not None else None
-        if self.plan:
-            expect = self.plan_expect[0]
-            if me is None or (me.x1, me.y1) != expect:
-                self.plan = []
-                self.plan_expect = []
-                self.plan_cooldown = PLAN_COOLDOWN
-                self.stats["plan_failures"] += 1
-            else:
-                self.plan.pop(0)
-                self.plan_expect.pop(0)
+    def _follow_plan(self, node: Node, me: Obj | None) -> int | None:
+        """Next step of the current plan, after checking the last one landed as predicted."""
         if not self.plan:
-            if self.plan_cooldown > 0:
-                self.plan_cooldown -= 1
-                return None
-            if me is None or self.plans_this_level >= MAX_PLANS_PER_LEVEL:
-                return None
-            goals = self.dyn.goal_colors()
-            dirs = self.dyn.directions()
-            if not goals or not dirs:
-                return None
-            assert self.cur_grid is not None
-            found = plan_path(
-                self.cur_grid, me, dirs, self.dyn.passable, lambda cols: bool(cols & goals)
-            )
-            self.plans_this_level += 1
-            if found is None:
-                self.plan_cooldown = PLAN_COOLDOWN
-                return None
-            self.plan, self.plan_expect = found
-            self.stats["plans"] += 1
+            return None
+        expect = self.plan_expect[0]
+        if me is None or (me.x1, me.y1) != expect:
+            self._drop_plan()
+            self.plan_cooldown = PLAN_COOLDOWN
+            self.stats["plan_failures"] += 1
+            return None
+        self.plan.pop(0)
+        self.plan_expect.pop(0)
+        if not self.plan:
+            return None
+        return self._plan_step(node)
+
+    def _plan_step(self, node: Node) -> int | None:
         aid = self.plan[0]
         idx = next((i for i, c in enumerate(node.cands) if c.action.value == aid), None)
         if idx is None:
-            self.plan = []
-            self.plan_expect = []
+            self._drop_plan()
             return None
-        self.stats["plan_steps"] += 1
+        if len(self.plan) == 1:
+            # The final move touches the target; whether it goes through or not, the
+            # plan is done, so do not hold the next step to a predicted position.
+            self.plan_expect[0] = (-1, -1)
+        self.stats["plan_steps" if self.plan_kind == "goal" else "explore_steps"] += 1
         return idx
+
+    def _make_plan(self, node: Node, me: Obj | None, kind: str) -> int | None:
+        if self.plan_cooldown > 0:
+            self.plan_cooldown -= 1
+            return None
+        if me is None or self.cur_grid is None:
+            return None
+        dirs = self.dyn.directions()
+        if not dirs:
+            return None
+        if kind == "goal":
+            if self.plans_this_level >= MAX_PLANS_PER_LEVEL:
+                return None
+            goals = self.dyn.goal_colors()
+            if not goals:
+                return None
+            is_goal = lambda cols, coords: bool(cols & goals)
+            self.plans_this_level += 1
+        else:
+            if self.explore_plans_this_level >= MAX_EXPLORE_PLANS_PER_LEVEL:
+                return None
+            target = np.zeros(self.cur_grid.shape, dtype=bool)
+            for o in self.cur_objs():
+                if not o.scenery and o.sig != me.sig and o.sig not in self.dyn.touched:
+                    target[o.pixels[:, 0], o.pixels[:, 1]] = True
+            if not target.any():
+                return None
+            is_goal = lambda cols, coords: any(target[y, x] for y, x in coords)
+            self.explore_plans_this_level += 1
+        found = plan_path(self.cur_grid, me, dirs, self.dyn.passable, is_goal)
+        if found is None:
+            self.plan_cooldown = PLAN_COOLDOWN
+            return None
+        self.plan, self.plan_expect = found
+        self.plan_kind = kind
+        self.stats["plans" if kind == "goal" else "explore_plans"] += 1
+        return self._plan_step(node)
 
     def _goal_candidates(self, node: Node, local: list[int]) -> list[int]:
         """Untested candidates that reproduce what completed a level before."""

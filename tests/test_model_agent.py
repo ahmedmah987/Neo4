@@ -82,7 +82,7 @@ def test_model_agent_learns_rules_and_solves_room():
     assert dyn.avatar() is not None and dyn.avatar()[0] == AVATAR
     assert {dyn.direction(a.value) for a in DIRS} == {(4, 0), (-4, 0), (0, -4), (0, 4)}
     assert used < 3000, "model agent did not finish both levels"
-    assert agent.stats["skipped"] > 0
+    assert agent.stats["skipped"] + agent.stats["explore_plans"] > 0
     text = "\n".join(dyn.describe())
     assert "colour 3 blocks the avatar" in text
 

@@ -63,6 +63,7 @@ class Dynamics:
         self.click_at: dict[tuple, Counter] = defaultdict(Counter)
         self.click_death_at: Counter = Counter()
         self.churn: dict[tuple, Counter] = defaultdict(Counter)  # sig -> action class -> events
+        self.touched: set[tuple] = set()  # object signatures the avatar has moved into / against
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
         self._avatar: tuple | None = None
@@ -142,7 +143,11 @@ class Dynamics:
         me = find(before, avatar)
         if me is None:
             return
-        colors = self._ahead(me, direction, before_grid)
+        colors, coords = self._ahead_cells(me, direction, before_grid)
+        for y, x in coords:
+            o = at(before, x, y)
+            if o is not None and o.sig != avatar and not o.scenery:
+                self.touched.add(o.sig)
         if outcome == GAME_OVER:
             for c in colors:
                 self.hazard[c] += 1
@@ -157,18 +162,24 @@ class Dynamics:
             self.cell[c][key] += 1
 
     @staticmethod
-    def _ahead(me: Obj, direction: tuple[int, int], grid: np.ndarray) -> set[int]:
-        """Colours of the cells the avatar would occupy after the move, minus its own."""
+    def _ahead_cells(
+        me: Obj, direction: tuple[int, int], grid: np.ndarray
+    ) -> tuple[set[int], list[tuple[int, int]]]:
+        """Colours and (y, x) cells the avatar would occupy after the move, minus its own.
+
+        A move off the grid reports the pseudo-colour -1 and no cells."""
         dx, dy = direction
         ys = me.pixels[:, 0] + dy
         xs = me.pixels[:, 1] + dx
         inside = (ys >= 0) & (ys < grid.shape[0]) & (xs >= 0) & (xs < grid.shape[1])
         if not inside.all():
-            return {-1}  # the grid edge
+            return {-1}, []
         own = set(zip(me.pixels[:, 0].tolist(), me.pixels[:, 1].tolist()))
-        return {
-            int(grid[y, x]) for y, x in zip(ys.tolist(), xs.tolist()) if (y, x) not in own
-        }
+        coords = [(y, x) for y, x in zip(ys.tolist(), xs.tolist()) if (y, x) not in own]
+        return {int(grid[y, x]) for y, x in coords}, coords
+
+    def _ahead(self, me: Obj, direction: tuple[int, int], grid: np.ndarray) -> set[int]:
+        return self._ahead_cells(me, direction, grid)[0]
 
     # -- derived rules --------------------------------------------------------
 

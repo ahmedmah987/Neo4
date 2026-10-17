@@ -38,6 +38,7 @@ The project has two strands that share one codebase:
 | 11 | **Swept-cell world model**: an avatar that jumps several cells is stopped by what lies *between* its position and its destination; a stopped move blames the swept colours not yet known to be crossable; a graph edge that led somewhere more often than it killed survives a loss (move budgets) | done — 21 / 98, official-style score 0.42 (from 0.39), new default |
 | 12 | **Death attribution**: a level's move budget is detected and its losses blame nothing; the frame of a lost game names the kind that moved into the avatar (kills on contact → predicted danger, planned around); a move that lost the game is not repeated in the level; a graph with its frontier out of reach is reopened instead of wandered | done — 23 / 110, official-style score 0.44 (from 0.42), new default |
 | 13 | **The avatar's body**: sprites that move in lockstep with the avatar whenever they touch it are part of it (ls20's bar over its block); sweeps, predictions, contact rules and routes use the whole body | done — neutral (23 / 110, 0.44), kept: the footprint is now right |
+| 14 | **Exploration variants under the official metric**: object-targeted exploration (Phase 8a) re-measured on the score, where a cheaper first level counts | done — no gain (0.39 vs 0.44): faster first level on `tu93`, dearer later ones; kept as `model-explore` |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -514,6 +515,22 @@ pattern matches the box's — a precondition on the avatar's *state*, not on the
 build the path to the goal. Neither is a planning defect; both are mechanics that a
 model over colours, signatures and positions cannot express yet.
 
+## Results — Phase 14 (exploration variants under the official metric): no gain
+
+Phase 8a's object-targeted exploration gave faster first levels and was set aside
+because it completed no extra levels — a judgement made on levels, before the official
+score was computed. Under the score a cheaper first level counts, so the variant was
+re-run with the current code (`model-explore`, 4,000 steps, 5 seeds). It is identical
+to the default on 23 of 25 games to the step: its explore plans only ever fire on `tu93`
+and `ls20`, since elsewhere the frontier is never out of unknowns. On `tu93` it halves
+the first level (121 actions against 238) and then pays for it on every later level,
+where walking to untouched objects competes with the goal plan: 0.71 against 1.88 on
+that game, and **0.39 against 0.44** overall, with the same 111 / 110 levels. Not
+promoted.
+
+This is the second phase in a row without a gain on the score, which is where the
+development loop was set to stop. Where things stand is below.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -563,9 +580,33 @@ than any planning heuristic tried before them.
 The remaining losses are of one kind. What completes a level, and what loses the game,
 is relational — *which* instance of an object, *where*, in *what* state, *pushed* against
 what — and a model over colours and signatures cannot express it. Phase 8b took the first
-step (goals as object signatures, +1 median level); Phase 8c (adjacency) was neutral. Two
-directions remain: object–object relations at level-completing moves (`tu93`: a pushed
-block covering its target), and packaging the agent for the ARC Prize harness.
+step (goals as object signatures, +1 median level); Phase 8c (adjacency) was neutral.
+Phases 11–12 fixed the world model under the planner (sweeps, death attribution) and were
+worth +0.05 on the official score; Phases 13–14 were neutral and negative, and the loop
+stopped there by its own rule.
+
+**Where this stands (default agent, 4,000 steps, 5 seeds):** 23 median levels, 110 levels
+over all runs, official-style score 0.44 against 0.26 for the exploration baseline. The
+score is low in absolute terms because every public game's first level is found by
+exploration at tens of times the human action count, and because the games where later
+levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`) are few.
+
+**What would move it next**, in order of expected value:
+
+1. *State preconditions on goals.* `ls20`'s box admits the avatar only when the pattern it
+   carries matches; the pattern is cycled by floor tiles. The data to learn this is in the
+   transitions already recorded (which sprite changed when the avatar touched what, and
+   what the avatar looked like when a level ended); the model lacks a notion of avatar
+   state. This is the general form of "collect the key, then the door".
+2. *Relational hazards.* `tu93`'s patrol charges along its row or column when the avatar
+   enters it; the reach model (one step around it) is too coarse to plan through, so the
+   agent gets past by re-testing. A rule of the form "kind X moves towards the avatar when
+   aligned" is checkable on the recorded frames.
+3. *Tile mechanics.* `dc22`'s clicks slide blocks that the avatar then walks on. Clicking
+   is modelled per target only; what a click does *to the map* is not.
+4. *Priors.* Nothing above makes the first level of a new game cheap; that needs a library
+   of mechanics learned across games or a language model proposing hypotheses for the data
+   to check — the plan's optional phase.
 
 The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
 the agent runs at about 60–250 engine steps per second on one CPU core depending on the

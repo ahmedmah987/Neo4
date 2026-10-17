@@ -87,3 +87,28 @@ def test_difference_reduction_descends_to_the_target():
     # The second level needs 17 pushes; a plain explorer tests every button at every
     # state and takes far longer than that.
     assert steps[1] - steps[0] <= 60, (steps, agent.stats)
+
+
+def test_relation_kinds_survive_a_recolouring_between_levels():
+    """The block and the target change colour on the second level; the relation
+    learned on the first must still apply by size and shape."""
+
+    class RecolouredSlideRoom(SlideRoom):
+        def _obs(self):
+            o = super()._obs()
+            if o.frame is not None:
+                g = o.frame[-1]
+                # distinctive shapes: a ring for the block, a plus for the target
+                g[self.row + 1 : self.row + 3, self.block + 1 : self.block + 3] = 0
+                for dx, dy in ((0, 0), (3, 0), (0, 3), (3, 3)):
+                    g[self.row + dy, self.target + dx] = 0
+                if self.done % 2 == 1:
+                    g[g == 9] = 10
+                    g[g == 12] = 13
+            return o
+
+    agent = ModelAgent(seed=0)
+    steps = level_steps(agent, RecolouredSlideRoom(), 2000)
+    assert len(steps) == 2, (steps, agent.stats)
+    assert agent.stats["gain_clicks"] >= 10, agent.stats
+    assert steps[1] - steps[0] <= 60, (steps, agent.stats)

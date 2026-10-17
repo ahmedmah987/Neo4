@@ -208,6 +208,32 @@ class ModelAgent(GraphAgent):
             self.relations = [(m, t) for _, _, _, m, t in scored[:2]]
             self.best_first = True
 
+    @staticmethod
+    def _instances(objs: list[Obj], sig: tuple) -> list[Obj]:
+        """Objects of a kind; when none has exactly this signature, the objects of the
+        one kind with the same size and shape in another colour (levels recolour
+        their pieces: vc33's markers are colour 11 on one level and 14 on the next)."""
+        exact = [o for o in objs if o.sig == sig]
+        if exact:
+            return exact
+        shape = sig[1:]
+        kinds = {o.sig for o in objs if o.sig[1:] == shape and not o.scenery}
+        if len(kinds) == 1:
+            k = next(iter(kinds))
+            return [o for o in objs if o.sig == k]
+        return []
+
+    def _kind_of(self, o: Obj, sigs) -> tuple | None:
+        """The learned kind an object counts as: its own signature, or one with the
+        same size and shape in another colour."""
+        for sig in sigs:
+            if o.sig == sig:
+                return sig
+        for sig in sigs:
+            if o.sig[1:] == sig[1:]:
+                return sig
+        return None
+
     def _heuristic(self, objs: list[Obj]) -> float | None:
         """Sum over the learned relations of the gap between the nearest M and T."""
         if not self.relations:
@@ -215,8 +241,8 @@ class ModelAgent(GraphAgent):
         total = 0
         found = False
         for m_sig, t_sig in self.relations:
-            ms = [o for o in objs if o.sig == m_sig]
-            ts = [o for o in objs if o.sig == t_sig]
+            ms = self._instances(objs, m_sig)
+            ts = self._instances(objs, t_sig)
             if ms and ts:
                 total += min(self._gap(a, b) for a in ms for b in ts)
                 found = True
@@ -274,8 +300,9 @@ class ModelAgent(GraphAgent):
                 h_now = self._heuristic(after)
                 target = at(self.last_objs, data["x"], data["y"])
                 if h_now is not None and self.last_h is not None and target is not None:
-                    self.kind_gain[target.sig] = self.kind_gain.get(target.sig, 0.0) + (h_now - self.last_h)
-                    self.kind_tries[target.sig] = self.kind_tries.get(target.sig, 0) + 1
+                    kind = self._kind_of(target, self.kind_tries) or target.sig
+                    self.kind_gain[kind] = self.kind_gain.get(kind, 0.0) + (h_now - self.last_h)
+                    self.kind_tries[kind] = self.kind_tries.get(kind, 0) + 1
             self.last_cand = None
             if outcome == GAME_OVER:
                 if self.dyn.last_death_budget:
@@ -713,9 +740,10 @@ class ModelAgent(GraphAgent):
                 if c.data is None:
                     return None
                 t = at(objs, c.data["x"], c.data["y"])
-                if t is None or t.sig not in self.kind_tries:
+                kind = self._kind_of(t, self.kind_tries) if t is not None else None
+                if kind is None:
                     return None
-                return self.kind_gain[t.sig] / self.kind_tries[t.sig]
+                return self.kind_gain[kind] / self.kind_tries[kind]
 
             gains = {i: mean_gain(i) for i in pool}
             helpful = [i for i, g in gains.items() if g is not None and g < 0]

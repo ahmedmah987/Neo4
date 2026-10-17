@@ -71,19 +71,20 @@ _materialise()
 from neo4.model_agent import ModelAgent  # noqa: E402
 
 # -- the framework adapter ------------------------------------------------------
+# The ARC-AGI-3-Agents framework uses the engine's own types (the starter kit's
+# template imports them the same way), so no translation of enums is needed:
+# only the frame, which the framework hands over as nested lists.
 
+from arcengine import FrameData, FrameDataRaw, GameAction, GameState  # noqa: E402
 from agents.agent import Agent  # noqa: E402
-from agents.structs import FrameData, GameAction, GameState  # noqa: E402
-
-import arcengine  # noqa: E402
 
 
-def _to_raw(latest: FrameData) -> arcengine.FrameDataRaw:
-    """The framework's FrameData -> the engine's FrameDataRaw the agent consumes."""
-    raw = arcengine.FrameDataRaw()
+def _to_raw(latest: FrameData) -> FrameDataRaw:
+    """The framework's FrameData (lists) -> the FrameDataRaw (arrays) the agent consumes."""
+    raw = FrameDataRaw()
     raw.game_id = getattr(latest, "game_id", "") or ""
     state = getattr(latest, "state", None)
-    raw.state = arcengine.GameState(getattr(state, "value", state) or "NOT_PLAYED")
+    raw.state = state if isinstance(state, GameState) else GameState(getattr(state, "value", state) or "NOT_PLAYED")
     raw.levels_completed = int(getattr(latest, "levels_completed", 0) or 0)
     raw.win_levels = int(getattr(latest, "win_levels", 0) or 0)
     raw.full_reset = bool(getattr(latest, "full_reset", False))
@@ -115,17 +116,16 @@ class MyAgent(Agent):
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         obs = _to_raw(latest_frame)
         action, data = self._neo4.act(obs)
-        out = GameAction.from_name(action.name)
-        if data is not None:
-            out.set_data(dict(data))
+        # The framework reads action.action_data.model_dump() and action.reasoning.
+        action.set_data(dict(data) if data is not None else {{}})
         self._steps += 1
-        out.reasoning = {{
+        action.reasoning = {{
             "step": self._steps,
             "nodes": self._neo4.stats.get("nodes", 0),
             "skipped": self._neo4.stats.get("skipped", 0),
             "plans": self._neo4.stats.get("plans", 0),
         }}
-        return out
+        return action
 '''
 
 

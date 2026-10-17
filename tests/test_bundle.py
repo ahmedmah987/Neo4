@@ -1,6 +1,9 @@
 """The bundled single-file agent runs inside a stand-in for the ARC-AGI-3-Agents
-framework: an `agents` package with the Agent base class, FrameData, GameAction and
-GameState shaped like the real ones, driving the local game engine."""
+framework. The real framework uses the engine's own FrameData / GameAction / GameState
+(the starter kit's template imports them from arcengine), so the shim only has to
+reproduce the Agent base class and its main() loop: convert the raw observation to a
+FrameData with list frames, call choose_action, and step the environment with
+action.action_data.model_dump() and action.reasoning, as agents/agent.py does."""
 
 from __future__ import annotations
 
@@ -8,62 +11,17 @@ import importlib.util
 import subprocess
 import sys
 import types
-from enum import Enum
 from pathlib import Path
 
 import pytest
+from arcengine import FrameData, GameAction
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def install_framework_shim() -> None:
-    """A minimal `agents` package mirroring what MyAgent uses from the real framework."""
-    import arcengine
-
     agents = types.ModuleType("agents")
-    structs = types.ModuleType("agents.structs")
     agent_mod = types.ModuleType("agents.agent")
-
-    class GameState(str, Enum):
-        NOT_PLAYED = "NOT_PLAYED"
-        NOT_FINISHED = "NOT_FINISHED"
-        WIN = "WIN"
-        GAME_OVER = "GAME_OVER"
-
-    class GameAction(Enum):
-        RESET = 0
-        ACTION1 = 1
-        ACTION2 = 2
-        ACTION3 = 3
-        ACTION4 = 4
-        ACTION5 = 5
-        ACTION6 = 6
-        ACTION7 = 7
-
-        def __init__(self, value: int) -> None:
-            self.action_data: dict = {}
-            self.reasoning = None
-
-        def is_complex(self) -> bool:
-            return self.value == 6
-
-        def set_data(self, data: dict) -> dict:
-            self.action_data = dict(data)
-            return self.action_data
-
-        @classmethod
-        def from_name(cls, name: str) -> "GameAction":
-            return cls[name.upper()]
-
-    class FrameData:
-        def __init__(self, **kw) -> None:
-            self.game_id = kw.get("game_id", "")
-            self.frame = kw.get("frame", [])
-            self.state = kw.get("state", GameState.NOT_PLAYED)
-            self.levels_completed = kw.get("levels_completed", 0)
-            self.win_levels = kw.get("win_levels", 0)
-            self.full_reset = kw.get("full_reset", False)
-            self.available_actions = kw.get("available_actions", [])
 
     class Agent:
         MAX_ACTIONS = 80
@@ -73,20 +31,23 @@ def install_framework_shim() -> None:
             self.arc_env = arc_env
             self.frames = [FrameData(levels_completed=0)]
             self.action_counter = 0
+            self.steps_with_reasoning = 0
 
         @property
         def name(self) -> str:
             return self.agent_name
 
-        def _convert(self, raw) -> FrameData:
+        @staticmethod
+        def _convert(raw) -> FrameData:
             return FrameData(
                 game_id=raw.game_id,
                 frame=[f.tolist() for f in raw.frame],
-                state=GameState(raw.state.value),
+                state=raw.state,
                 levels_completed=raw.levels_completed,
                 win_levels=raw.win_levels,
+                guid=raw.guid,
                 full_reset=raw.full_reset,
-                available_actions=list(raw.available_actions),
+                available_actions=raw.available_actions,
             )
 
         def main(self) -> None:
@@ -94,18 +55,19 @@ def install_framework_shim() -> None:
                 obs = self.arc_env.observation_space
                 if obs is not None:
                     self.frames[-1] = self._convert(obs)
-                action = self.choose_action(self.frames, self.frames[-1])
-                engine_action = arcengine.GameAction.from_name(action.name)
-                data = action.action_data if action.is_complex() else None
-                raw = self.arc_env.step(engine_action, data=data, reasoning=action.reasoning)
+                action: GameAction = self.choose_action(self.frames, self.frames[-1])
+                data = action.action_data.model_dump()
+                reasoning = getattr(action, "reasoning", None)
+                if reasoning is not None:
+                    self.steps_with_reasoning += 1
+                raw = self.arc_env.step(action, data=data, reasoning=reasoning)
                 if raw is not None:
                     self.frames.append(self._convert(raw))
                 self.action_counter += 1
 
-    structs.FrameData, structs.GameAction, structs.GameState = FrameData, GameAction, GameState
     agent_mod.Agent = Agent
-    agents.structs, agents.agent = structs, agent_mod
-    sys.modules["agents"], sys.modules["agents.structs"], sys.modules["agents.agent"] = agents, structs, agent_mod
+    agents.agent = agent_mod
+    sys.modules["agents"], sys.modules["agents.agent"] = agents, agent_mod
 
 
 @pytest.fixture(scope="module")
@@ -134,6 +96,25 @@ def test_bundle_plays_a_game_through_the_framework_contract(bundle_path: Path):
     agent.MAX_ACTIONS = 800
     agent.main()
     assert agent.action_counter > 700
+    assert agent.steps_with_reasoning == agent.action_counter
     assert agent.frames[-1].levels_completed >= 1, "ls20's first level usually falls within 800 steps"
     assert agent._neo4.stats["nodes"] > 10
     assert "neo4" in agent.name
+
+
+def test_bundle_click_actions_carry_coordinates(bundle_path: Path):
+    install_framework_shim()
+    spec = importlib.util.spec_from_file_location("my_agent_bundle2", bundle_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from neo4.run import arcade
+
+    env = arcade().make("vc33", seed=0)  # a click game
+    agent = module.MyAgent(card_id="test", game_id="vc33", agent_name="MyAgent.test",
+                           ROOT_URL="http://localhost", record=False, arc_env=env)
+    agent.MAX_ACTIONS = 60
+    agent.main()
+    data = GameAction.ACTION6.action_data.model_dump()
+    assert {"x", "y"} <= set(data) and 0 <= data["x"] <= 63 and 0 <= data["y"] <= 63
+    assert agent.frames[-1].levels_completed >= 1

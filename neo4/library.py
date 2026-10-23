@@ -20,7 +20,7 @@ from typing import Any
 
 from arcengine import FrameDataRaw, GameAction, GameState
 
-from .marker import MarkerSolver
+from .marker import MarkerSolver, MarkerSolverNoNav
 from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
@@ -77,3 +77,12 @@ class LibraryAgent:
                 self.stats[f"{s.name}_{k}"] = v
         self.stats["solver_steps"] = self.stats.get("solver_steps", 0)
         return chosen
+
+
+class LibraryNoNavAgent(LibraryAgent):
+    """The library without the Phase 26 navigation additions (ablation)."""
+
+    name = "library-nonav"
+
+    def __init__(self, seed: int = 0) -> None:
+        super().__init__(seed, families=[MarkerSolverNoNav])

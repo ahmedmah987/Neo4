@@ -48,6 +48,9 @@ The project has two strands that share one codebase:
 | 21 | **Solution replay**: the shortest click sequence that completed a level, replayed by target signature in the next | done — a loss (0.41 vs 0.44): sequences belong to one layout; off by default, kept as a variant |
 | 22 | **Difference reduction**: the kinds that came together when a level ended (a moving kind, a static kind) learned as the goal relation; later levels explored best-first towards the frames where their gap is smallest | done — neutral (0.43): the frontier choice never matters in a click game, every node still has untested clicks; kept |
 | 23 | **Clicks ordered by learned gain**: the kinds whose clicks have closed the goal gap go first at every node; relation kinds matched by size and shape when their colour changes between levels | done — levels 110 → 113 (`lp85` 8 → 14: two seeds reach its fifth level), score unchanged (0.44); new default; loop stopped by its rule |
+| 24 | **Game families**: the 25 public games grouped by mechanic, with each family's levels, human baselines, the agent's cost and its share of the official-style score (`scripts/families.py`) | done — navigation and marker games are worth 28 points each; the agent took 0.08 and 0.24 |
+| 25 | **Mechanics library, marker family**: a solver that learns what each action does to the pieces from the frames, finds the marks of each piece's colour, plans the shortest action sequence to cover them, and takes control from the model-guided agent only with a plan in hand | done — official-style score 0.44 → 4.52, levels 113 → 143; `lp85` every level on every seed; new default (`library`) |
+| 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | measured below |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -91,8 +94,9 @@ python scripts/bundle.py                      # writes kaggle/my_agent.py (also 
 
 `kaggle/my_agent.py` embeds every module's source and materialises them as real modules
 at import time, so the submitted code is byte-for-byte what the tests cover; a `MyAgent`
-class adapts the framework's `FrameData`/`GameAction` to the agent's engine types and
-never stops on `GAME_OVER` (the agent resets the level and carries on).
+class runs the `library` agent (the family solvers in front of the model-guided agent),
+adapts the framework's `FrameData`/`GameAction` to the engine types and never stops on
+`GAME_OVER` (the agent resets the level and carries on).
 `tests/test_bundle.py` runs the bundle through a stand-in for the framework's `Agent`
 loop against the local engine, and the dry run below ran it through the real one.
 
@@ -149,9 +153,12 @@ neo4/
   dynamics.py     rule induction from transitions; predictions per candidate; English report
   planner.py      BFS path planning for the avatar through cells the model knows to be passable
   model_agent.py  the graph agent guided by the induced rules ("model"), plus a no-planning ablation
+  marker.py       the marker-family solver: learned action maps, marks, search over piece positions
+  library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
 scripts/bundle.py builds the single-file Kaggle agent
+scripts/families.py the public games by mechanic family, with each family's share of the score
 kaggle/           my_agent.py — the generated submission file (do not edit by hand)
 tests/            unit tests for every module, on synthetic frames and toy environments
 ```
@@ -778,6 +785,147 @@ can be checked against the next level — is the open problem that separates thi
 from a strong one, and it is the problem a language model proposing hypotheses for the
 data to check would be aimed at.
 
+## The mechanics library (Phases 24–)
+
+The metric pays for levels finished in close to a human's number of actions, and an
+explorer that starts from nothing cannot get there: every level it finishes was paid
+for in exploration. What a human brings to a new game is a set of expectations about
+what games are like — a piece is meant to go on the mark of its colour, a wall stops
+you, a key opens a door. The library is an attempt to give the agent such expectations
+without a language model (the competition runs offline on Kaggle's CPU or T4 hardware,
+with no internet): for each *family* of mechanics, a solver that recognises its family
+from what it sees, plans in a model of that family, and gives the game back to the
+model-guided agent the moment the game stops behaving as the family predicts.
+
+The solvers never see a game's identity or its source. The grouping below was made by
+reading the public games' sources, which is fair for choosing what to build and unfair
+for measuring it: the evaluation games are different games, so gains on the public set
+are an upper bound on what transfers. The solvers are written to depend only on what is
+on screen, and are tested on small synthetic games that share a family with no public
+game's layout, colours or sizes.
+
+### Phase 24 — the public games by family
+
+`scripts/families.py` prints this table from the result files. "Agent actions / human"
+is the ratio of the agent's actions to the human baseline on the levels it completes;
+"contribution" is the family's part of the 25-game official-style mean (0–100); a family
+of *n* games can contribute at most about 4*n* points.
+
+| Family | Games | Levels | Human actions | Levels completed (model agent, mean of 5 seeds) | Agent / human | Contribution now | At most |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Navigate an avatar to an exit (keys, switches, hazards, budgets) | ls20, tu93, sc25, g50t, dc22, bp35, m0r0 | 50 | 5,453 | 8.0 | 15.8× | 0.08 | 28 |
+| Bring pieces onto markers by indirect control (no avatar) | lp85, re86, s5i5, r11l, vc33, ar25, su15 | 54 | 4,070 | 9.6 | 21.8× | 0.24 | 28 |
+| Push or carry blocks into marked zones | wa30, ka59 | 16 | 2,573 | 0.0 | – | 0.00 | 8 |
+| Reproduce a shown pattern or sequence | cd82, tr87, sk48 | 20 | 1,655 | 1.4 | 23.0× | 0.01 | 12 |
+| Satisfy local rules on a board (toggles, pegs, jigsaw) | ft09, lf52, cn04 | 22 | 2,336 | 2.0 | 32.9× | 0.00 | 12 |
+| Compose a program or route a flow, then run it | tn36, sb26, sp80 | 21 | 1,048 | 1.6 | 7.3× | 0.10 | 12 |
+
+The games, in a line each (what the player does; what ends a level; what loses it):
+
+| Game | Family | How it is played |
+|---|---|---|
+| ls20 | navigate | A 5×5 avatar walks a maze in 5-px steps; the exit pad admits it only while the glyph it carries matches the pad's (shape, colour and rotation are changed by stepping on tiles); a 42-step energy bar with refills, three lives. |
+| tu93 | navigate | A 3×3 avatar on a lattice maze, one cell per key; reach the exit tile under a per-level move budget, past patrols that bounce, chargers that run along a line once armed, and followers that copy the avatar's path. |
+| sc25 | navigate | Walk a maze to the exit; barriers fall, the avatar shrinks or teleports when a 3×3 grid is clicked into a spell's pattern; a move budget with refills. |
+| g50t | navigate | Walk to the exit bracket; pressure plates hold doors open only while occupied, so a run is recorded and replayed as a ghost that holds the plate; a timer. |
+| dc22 | navigate | A 2×2 avatar must always stand on floor; panel buttons swap which floor pieces are solid, keys reveal buttons, a crane carries bridges; a falling avatar costs 20 steps. |
+| bp35 | navigate | A side-view avatar steps and falls; clicks dig blocks, toggle platforms and flip gravity on the way to a gem; spikes, a rising flood, an action budget. |
+| m0r0 | navigate | Two dots move as mirror images; walls desynchronise them until they meet; switches open gates of their colour, hazards reset positions. |
+| lp85 | marker | Arrow buttons turn rings of tiles; the goal tiles must stop inside the corner marks of their colour; rings intersect in later levels. |
+| re86 | marker | Arrow keys move the selected line drawing (a cross, a frame) in 3-px steps, a key selects the next; every dot must be covered by a stroke of its colour; paint pots recolour and obstacles bend pieces later on. |
+| s5i5 | marker | Clicking a slider's halves lengthens or shortens every arm of its colour; each arm's tip must reach a cross mark; arms carry child arms, rotate buttons appear later. |
+| r11l | marker | Click a handle, then a destination: the piece sits at the centroid of its handles and must overlap the ring of its colour, off the hazard blobs; later, blank pieces collect colours from pickups. |
+| vc33 | marker | Buttons raise one column and lower its partner; tokens ride the columns to the height of the wall patch of their colour, and swap columns over a bridge when two columns are level. |
+| ar25 | marker | Move a piece or a mirror line; the piece and its reflections must cover every target dot. |
+| su15 | marker | A click pulls nearby pieces together; equal pieces merge into the next size; pieces of the required size must end inside the target rings, away from the crabs that bite. |
+| wa30 | sokoban | A 4×4 avatar grabs, drags and drops blocks into outlined zones; helper robots carry blocks in, thief robots carry them out to traps. |
+| ka59 | sokoban | Select a block and walk it; walking into another block kicks it sliding (further on ice); blocks must fill outline slots of their size; timed cannons shove blocks. |
+| cd82 | copy | Paint a canvas to match a reference by stamping halves and triangles of the selected colour from eight positions round it, in the right order. |
+| tr87 | copy | Rewrite rules are shown as tile pairs; set each output tile (cycling glyphs) to the translation of the input row; later levels edit the rules instead. |
+| sk48 | copy | Extend, retract and slide a chain to pick up beads so the colours along it match a template chain; undo is free. |
+| ft09 | constraint | Clicking a tile cycles its colour (some tiles also flip their neighbours); every constraint glyph must see its neighbours equal to or different from its centre colour. |
+| lf52 | constraint | Peg solitaire: jump a peg over a neighbour to remove it, one peg (two in some levels) must remain; sliding platforms carry pegs between islands. |
+| cn04 | constraint | Move and rotate jigsaw pieces until every connector pixel meets a matching one; later levels hide unselected pieces' colours and stack variants. |
+| tn36 | program | Set the switches of a program strip and run it to drive a robot onto a bracket in the right pose, scale and colour; a demo panel shows what the opcodes do. |
+| sb26 | program | Place colour squares into a program frame (hollow squares call sub-frames) so that running it paints the target sequence. |
+| sp80 | program | Move platforms and deflectors, then pour: every cup must fill and no drop may reach the floor; four failed pours lose. |
+
+The two largest families are worth 28 points each; the agent takes 0.08 and 0.24 of
+them. The marker family is attacked first: its games share one goal structure that is
+visible on screen (a piece and a mark of the same colour), so one solver can serve all
+of it, where the navigation games share an avatar but differ in what blocks, kills and
+unlocks.
+
+### Phase 25 — the marker family: pieces onto the mark of their colour
+
+`neo4/marker.py` holds one solver for the whole family; `neo4/library.py` runs it in
+front of the model-guided agent (`LibraryAgent`, the `library` agent of `neo4 run` and
+the agent in the Kaggle bundle). The solver watches every transition while the
+model-guided agent explores and learns three things from the frames alone.
+
+* **What moves.** Components are matched between frames by colour and exact shape with a
+  minimum-path-length assignment, so a ring of identical tiles turning by one cell reads
+  as one step per tile, and a ring wrapping round reads as one long step rather than a
+  reshuffle of its neighbours. A new component touching a moved one of its colour moved
+  with it (an arm drawn shorter where it passes behind something). One copy of common
+  scenery changing place, and two components swapping places with opposite moves, are
+  occlusions (a floor cell hidden by a passing avatar), not moves; a transition that
+  shifts most of the screen alike is a camera scroll.
+* **What each action does.** An action is kept as a *map of places*: for a component of
+  a given shape at *p*, the set of places *q* where, after the action, the colour that was
+  at *p* showed up. Every observation intersects the sets; a one-to-one, least-path
+  assignment over them is the current guess, so a ring guessed from identical tiles
+  still closes into a cycle. An action whose moved components all moved alike is also a
+  *translation* of the piece it moved, which carries on beyond the places seen (a
+  selected piece, an arm tip). An action after which pieces change outline without
+  moving is a *selection change*; the actions bound to those pieces go stale and are
+  re-bound to whatever moves next.
+* **What the goal is.** Marks are small static clusters of a colour that also moves (four
+  corner dots, a cross, a dot, a ring). A mark is met when a piece of its colour covers its
+  centre — tested in the current frame, so a piece that merges with its mark (an arm tip
+  entering a cross) still counts. When a level ends, the first frame of the level-up
+  still shows the completed level: how each mark sat relative to the nearest piece of its
+  colour (on it, or beside it) is recorded by piece size, and later levels find their
+  marks by that arrangement — rescaled when a level is drawn at another scale, and chosen
+  as an exact cover so that marks drawn side by side on a lattice stay apart.
+
+It plans by breadth-first search over piece positions in the learned model, for the
+shortest action sequence after which every mark is met. When the model is unsure what an
+action does at a place, an optimistic search lets any of the nearest candidates happen;
+running such a plan is what resolves the doubt. When the joint goal is out of reach, it
+covers one more mark at a time. Before a long plan it probes look-alike controls it has
+not tried (controls come in families, such as the two arrows of a ring), and when no
+piece of an unmet colour can move it presses the selection action and re-probes a move.
+It takes control only with a plan in hand in a game it has not solved a level of, and
+gives a level back after twenty mispredictions, three lost attempts or 400 actions; two
+give-ups end its part in a game (three once it has solved a level).
+
+Three small synthetic games in `tests/test_marker.py` exercise one mechanism each (a
+ring turned by two buttons, an arm extended by a button whose tip merges into its mark,
+two crosses moved by keys with a selection key between them); none shares a layout,
+colour or size with a public game.
+
+**Results (Phase 25, `library-nonav`: the solver without the Phase 26 additions; 4,000
+steps, 5 seeds).** The official-style mean over the 25 games goes from 0.44 to **4.52**,
+levels from 113 to 143 over all runs; the marker family's share from 0.24 to 4.32, and its
+cost on the levels it completes from 21.8 to 6.6 times the human count.
+
+| game | model agent | library | levels (all seeds) | median actions per level, solver vs human |
+|---|---:|---:|---:|---|
+| lp85 | 1.68 | **101.51** | 14 → 40 (every level, every seed) | 20/17, 18/38, 28/31, 40/16, 15/41, 23/60, 25/26, 20/159 |
+| s5i5 | 0.00 | 1.63 | 5 → 5 | first level 25/20 |
+| re86 | 0.00 | 1.50 | 0 → 3 | first level 26/26 (three seeds of five) |
+| vc33 | 2.04 | 2.41 | 10 → 10 | 15/7, 85/18 |
+| r11l | 2.34 | 1.02 | 9 → 6 | a failed take-over spends the level's 60 actions probing; second level lost on three seeds |
+| other 20 | 0.40 total | 0.42 total | 75 → 79 | the solver does not take control, or gives back after a few actions |
+
+`lp85` is the family in its purest form — the solver plays all eight levels in about 190
+actions where people need 388. On `re86` and `s5i5` it matches people on the first level
+and stops at the second, where the mechanics outgrow its model (`re86`'s pots recolour
+pieces; `s5i5`'s arms collide with walls and carry child arms). `r11l` is a loss: its
+handles move to wherever the player clicks, which a learned map of places cannot express,
+and the solver probes until the level's move budget runs out.
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -796,7 +944,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phase 13 | 23 / 110 | 0.44 |
 | model, Phases 15–16 | 23 / 110 | 0.44 |
 | model, Phases 17–18 | 23 / 110 | 0.44 |
-| model, Phases 22–23 (default) | 23 / 113 | 0.44 |
+| model, Phases 22–23 | 23 / 113 | 0.44 |
+| library, Phase 25 (marker solver) | 143 levels | **4.52** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first

@@ -1048,18 +1048,27 @@ class MarkerSolver:
         if not marks:
             # No mark of a moving colour: a still shape exactly like a moving piece's,
             # drawn in a colour no piece has, is where that piece goes (an outline of
-            # a piece, or of its mirror image, to be covered by it).
+            # a piece, or of its mirror image, to be covered by it). Not for a plain
+            # block, whose look-alikes (walls, tiles) are everywhere, nor for a copy of
+            # the whole sprite, small parts included (an enemy drawn like the avatar).
             count = Counter((c.color, c.shape) for c in self.first)
             by_shape: dict[str, list[Comp]] = {}
             for c in self.comps:
                 if c.id in self.movers:
                     by_shape.setdefault(c.shape, []).append(c)
+
+            def parts(c: Comp, comps: list[Comp]) -> set:
+                return {(a.shape, a.x - c.x, a.y - c.y) for a in comps
+                        if a.color != c.color and a.area < c.area and touching(a, c)}
             for c in self.first:
                 if (c.id in self.movers or c.color in mover_colors or c.area < 4
                         or count[(c.color, c.shape)] >= SCENERY_COPIES):
                     continue
                 m = next(iter(by_shape.get(c.shape, [])), None)
-                if m is None:
+                if m is None or m.area == m.w * m.h:
+                    continue
+                mine = parts(m, self.comps)
+                if mine and mine <= parts(c, self.first):
                     continue
                 pt = (c.x + (c.w - 1) / 2.0, c.y + (c.h - 1) / 2.0)
                 marks.setdefault(m.color, []).append(pt)

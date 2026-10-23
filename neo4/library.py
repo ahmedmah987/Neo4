@@ -21,11 +21,12 @@ from typing import Any
 from arcengine import FrameDataRaw, GameAction, GameState
 
 from .marker import MarkerSolver, MarkerSolverNoNav
+from .painter import PainterSolver
 from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
 
-FAMILIES: list[type] = [MarkerSolver]
+FAMILIES: list[type] = [MarkerSolver, PainterSolver]
 
 
 class LibraryAgent:
@@ -58,7 +59,9 @@ class LibraryAgent:
             s.observe(action, data, obs)
         chosen: Action | None = None
         if obs.state == GameState.NOT_FINISHED and not obs.is_empty():
-            for s in self.solvers:
+            # the solver in control keeps the turn while it wants it
+            order = sorted(self.solvers, key=lambda s: s is not self.controller)
+            for s in order:
                 if s.disabled:
                     continue
                 chosen = s.act(obs)

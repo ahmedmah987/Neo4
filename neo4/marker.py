@@ -58,7 +58,7 @@ MAX_AREA = 400  # larger components are scenery
 MAX_MOVE = 96  # no practical limit: a ring of tiles wraps around, a piece can teleport
 MARK_GAP = 4  # small static components this close together form one mark
 MARK_SIZE = 12  # a mark fits in this many pixels square
-MAX_PROBES = 30  # probes per level
+MAX_PROBES = 60  # probes per level
 MAX_MISMATCHES = 20  # mispredicted actions per level before giving the level back
 MAX_EXPANSIONS = 20000
 LONG_PLAN = 3  # before running a longer plan, probe look-alike controls not yet tried
@@ -320,6 +320,39 @@ def centre(cl: list[Comp]) -> tuple[float, float]:
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
+def exact_cover(slots: list[tuple[tuple[int, int], set]]) -> list[tuple[tuple[int, int], set]]:
+    """The slots whose pixels do not overlap and together use every slot pixel:
+    marks drawn side by side on a lattice also form spurious slots out of their
+    neighbours' dots, which an exact cover leaves out. All slots when none exists."""
+    if len(slots) <= 1:
+        return slots
+    universe = set().union(*(pix for _, pix in slots))
+    order = sorted(range(len(slots)), key=lambda i: slots[i][0])
+    best: list[int] | None = None
+    steps = 0
+
+    def search(chosen: list[int], used: set) -> bool:
+        nonlocal best, steps
+        steps += 1
+        if steps > 5000:
+            return True
+        if used == universe:
+            best = list(chosen)
+            return True
+        first = min(universe - used)
+        for i in order:
+            pix = slots[i][1]
+            if first in pix and not (pix & used):
+                chosen.append(i)
+                if search(chosen, used | pix):
+                    return True
+                chosen.pop()
+        return False
+
+    search([], set())
+    return [slots[i] for i in best] if best else slots
+
+
 def touching(a: Comp, b: Comp) -> bool:
     """Are two components 8-neighbours somewhere?"""
     if a.x - 1 > b.x + b.w - 1 or b.x - 1 > a.x + a.w - 1 or a.y - 1 > b.y + b.h - 1 or b.y - 1 > a.y + a.h - 1:
@@ -368,6 +401,9 @@ class MarkerSolver:
         self.control_kinds: Counter = Counter()  # click-target kinds that moved a mover
         self.key_ops: Counter = Counter()  # keyboard actions that moved a mover
         self.prior_colors: set[int] = set()  # colours of the marks of earlier levels
+        # How the pixels of a mark sat around the piece that covered it when a level
+        # ended, by the piece's size: (dx, dy) of each mark pixel from its top-left.
+        self.slot_patterns: dict[tuple[int, int], frozenset] = {}
         self.in_control = False
         self.stats: Counter = Counter()
         self._next_id = 0
@@ -390,6 +426,8 @@ class MarkerSolver:
         self.plan: list[OpKey] = []
         self.expect: dict[int, tuple[int, int]] | None = None
         self.gave_up = False
+        self.last_key: OpKey | None = None
+        self.mark_clusters_now: list[list[Comp]] = []
         self.mark_boxes: list[tuple] = []
         self.ghosts: dict[int, Comp] = {}  # movers merged into a same-coloured mark, at their place
         self.mode_presses = 0
@@ -431,6 +469,7 @@ class MarkerSolver:
                 self.confirmed = True
                 self.stats["levels"] += 1
                 self._remember_controls()
+                self._remember_slots(action, data)
             self.level = obs.levels_completed
             self.in_control = False
             self._new_level(grid)
@@ -459,6 +498,7 @@ class MarkerSolver:
                     moved[c.id] = moved[m.id]
                     break
         key = self.op_key(action, data)
+        self.last_key = key
         op = self.ops.setdefault(key, Op())
         op.tried += 1
         before = {c.id: c for c in self.comps}
@@ -536,6 +576,47 @@ class MarkerSolver:
                 return False
         return True
 
+    def _remember_slots(self, action, data) -> None:
+        """The last action completed the level: the marks were covered right after
+        it. Predict where the movers went and record, for each mark cluster a mover
+        covered, its pixels relative to the mover."""
+        if self.last_key is None or self.last_key not in self.ops:
+            return
+        op = self.ops[self.last_key]
+        groups, movers = self._groups()
+        placed = [(m, op.predict(m.shape, m.id, (m.x, m.y))) for m in movers]
+        for cl in self.mark_clusters_now:
+            pt = centre(cl)
+            for m, pos in placed:
+                if m.color == cl[0].color and covers(m.rel, pos, pt):
+                    pix = {(c.x + dx - pos[0], c.y + dy - pos[1]) for c in cl for dy, dx in c.rel}
+                    self.slot_patterns[(m.w, m.h)] = frozenset(pix)
+                    self.stats["slot_patterns"] += 1
+                    break
+
+    def _slots(self, color: int, w: int, h: int, static: set) -> list[tuple[tuple[int, int], set]]:
+        """Placements of a w x h piece around which a learned mark pattern is drawn in
+        ``color``: (top-left, mark pixels)."""
+        pat = self.slot_patterns.get((w, h))
+        if pat is None and self.slot_patterns:
+            (pw, ph), base = min(self.slot_patterns.items(), key=lambda kv: abs(kv[0][0] - w) + abs(kv[0][1] - h))
+            if pw and w % pw == 0 and h % ph == 0 and w // pw == h // ph:
+                k = w // pw  # the level is drawn k times larger: scale the pattern
+                pat = frozenset((dx * k + i, dy * k + j) for dx, dy in base for i in range(k) for j in range(k))
+            elif w and pw % w == 0 and ph % h == 0 and pw // w == ph // h:
+                k = pw // w  # drawn k times smaller
+                pat = frozenset((dx // k, dy // k) for dx, dy in base if dx % k == 0 and dy % k == 0)
+        if not pat:
+            return []
+        anchor = min(pat)
+        out = []
+        for (x, y) in static:
+            p = (x - anchor[0], y - anchor[1])
+            pix = {(p[0] + dx, p[1] + dy) for dx, dy in pat}
+            if pix <= static:
+                out.append((p, pix))
+        return out
+
     def _remember_controls(self) -> None:
         for key, op in self.ops.items():
             if not (op.movers & self.movers) or op.d is None:
@@ -580,14 +661,38 @@ class MarkerSolver:
         marks: dict[int, list[tuple[float, float]]] = {}
         static = [c for c in self.first if c.id not in self.movers and c.color in mover_colors]
         self.mark_boxes = []
-        for cl in mark_clusters(static):
-            if len(cl) == 1 and (cl[0].color, cl[0].shape) in self.mover_shapes:
-                continue  # looks like a piece that has not moved yet
-            marks.setdefault(cl[0].color, []).append(centre(cl))
-            self.mark_boxes.append((cl[0].color, min(c.x for c in cl), min(c.y for c in cl),
-                                    max(c.x + c.w - 1 for c in cl), max(c.y + c.h - 1 for c in cl)))
+        self.mark_clusters_now = []
+        slot_ids: set[int] = set()
+        if self.slot_patterns:
+            # A mark drawn the way earlier levels' marks were: one slot per placement,
+            # so marks drawn side by side on a lattice stay apart.
+            sizes = {(c.color, c.w, c.h) for c in self.comps if (c.color, c.shape) in self.mover_shapes}
+            for col in sorted(mover_colors):
+                pix_owner = {}
+                for c in static:
+                    if c.color == col:
+                        for dy, dx in c.rel:
+                            pix_owner[(c.x + dx, c.y + dy)] = c
+                for (scol, w, h) in sizes:
+                    if scol != col:
+                        continue
+                    for pos, pix in exact_cover(self._slots(col, w, h, set(pix_owner))):
+                        marks.setdefault(col, []).append((pos[0] + (w - 1) / 2.0, pos[1] + (h - 1) / 2.0))
+                        xs = [q[0] for q in pix]; ys = [q[1] for q in pix]
+                        self.mark_boxes.append((col, min(xs), min(ys), max(xs), max(ys)))
+                        owners = {pix_owner[q].id: pix_owner[q] for q in pix}
+                        slot_ids |= set(owners)
+                        self.mark_clusters_now.append(list(owners.values()))
+        if not marks:
+            for cl in mark_clusters(static):
+                if len(cl) == 1 and (cl[0].color, cl[0].shape) in self.mover_shapes:
+                    continue  # looks like a piece that has not moved yet
+                marks.setdefault(cl[0].color, []).append(centre(cl))
+                self.mark_clusters_now.append(cl)
+                self.mark_boxes.append((cl[0].color, min(c.x for c in cl), min(c.y for c in cl),
+                                        max(c.x + c.w - 1 for c in cl), max(c.y + c.h - 1 for c in cl)))
         groups = [(col, pts) for col, pts in sorted(marks.items())]
-        self.mark_ids = {c.id for cl in mark_clusters(static) for c in cl if c.color in marks}
+        self.mark_ids = {c.id for cl in self.mark_clusters_now for c in cl}
         colors = {col for col, _ in groups}
         # Movers of those colours: components seen moving, and look-alikes that have
         # not moved yet (a second goal tile on a ring not turned yet), but not the
@@ -647,10 +752,13 @@ class MarkerSolver:
         # marks a fixed piece already covers need nothing.
         needs: list[list[tuple[int, set]]] = []
         live_ids = {m.id for m in live}
-        for (col, pts), n in zip(groups, need):
+        wanted = need if isinstance(need, set) else None
+        for (col, pts), n in zip(groups, need if wanted is None else [True] * len(groups)):
             if not n:
                 continue
             for pt in pts:
+                if wanted is not None and (col, pt) not in wanted:
+                    continue
                 c = self._frame_covered(col, pt)
                 if c is not None and c.id not in live_ids:
                     continue  # covered by something no action moves
@@ -725,8 +833,9 @@ class MarkerSolver:
         groups, movers = self._groups()
         if not groups:
             return None
-        sat = [all(self._frame_covered(col, pt) is not None for pt in pts) for col, pts in groups]
-        if all(sat):
+        marks = [(col, pt) for col, pts in groups for pt in pts]
+        covered = {m for m in marks if self._frame_covered(*m) is not None}
+        if len(covered) == len(marks):
             return []
         everything = [True] * len(groups)
         plan = self._search(groups, movers, everything)
@@ -736,18 +845,27 @@ class MarkerSolver:
                 self.stats["optimistic_plans"] += 1
         if plan is not None:
             return plan
-        # A decoy colour, or a piece that is not selected yet, can make the joint
-        # goal impossible: satisfy groups one at a time, shortest first, keeping
-        # those already satisfied.
+        # Too much at once (several pieces, a decoy colour, a piece not selected
+        # yet): one more mark at a time, keeping the covered ones covered if that
+        # can be done, shortest first; else one mark alone.
         best = None
-        for i, done in enumerate(sat):
-            if done:
+        for m in marks:
+            if m in covered:
                 continue
-            p = self._search(groups, movers, [j == i or sat[j] for j in range(len(groups))])
+            p = self._search(groups, movers, covered | {m})
             if p is None:
-                p = self._search(groups, movers, [j == i for j in range(len(groups))])
+                p = self._search(groups, movers, covered | {m}, optimistic=True)
             if p is not None and (best is None or len(p) < len(best)):
                 best = p
+        if best is None:
+            for m in marks:
+                if m in covered:
+                    continue
+                p = self._search(groups, movers, {m})
+                if p is not None and (best is None or len(p) < len(best)):
+                    best = p
+        if best is not None:
+            self.stats["partial_plans"] += 1
         return best
 
     # -- probing ----------------------------------------------------------------
@@ -801,7 +919,9 @@ class MarkerSolver:
 
     # -- acting -----------------------------------------------------------------
 
-    def _give_up(self) -> None:
+    def _give_up(self, why: str = "") -> None:
+        if why:
+            self.stats["give_up_" + why] += 1
         self.gave_up = True
         self.in_control = False
         self.strikes += 1
@@ -818,7 +938,7 @@ class MarkerSolver:
             self.in_control = True
             self.stats["takeovers"] += 1
         if self.mismatches > MAX_MISMATCHES:
-            self._give_up()
+            self._give_up("mismatches")
             return None
         if not self.plan:
             if self._groups_cache is not None and self._no_plan:
@@ -858,7 +978,7 @@ class MarkerSolver:
                 self.mode_presses += 1
                 self.stats["mode_presses"] += 1
                 return self._action(modes[0])
-            self._give_up()
+            self._give_up("no_probe")
             return None
         self.probed.add(key)
         self.probes += 1

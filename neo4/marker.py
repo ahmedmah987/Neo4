@@ -511,17 +511,18 @@ class MarkerSolver:
                 op.mode = True
         # A relevant mover the model expected to move but which stayed: blocked here.
         if self.expect is not None:
+            wrong = False
             for cid, pos in self.expect.items():
                 b = before.get(cid) or self.ghosts.get(cid)
-                if b is None:
+                if b is None or now.get(cid) == pos:
                     continue
-                if now.get(cid) != pos:
-                    self.mismatches += 1
-                    self.stats["mismatches"] += 1
-                    if now.get(cid) == (b.x, b.y):
-                        op.block(b.shape, (b.x, b.y))
-                    self.plan = []
-                    break
+                wrong = True
+                if now.get(cid) == (b.x, b.y):
+                    op.block(b.shape, (b.x, b.y))  # it stayed: blocked here
+            if wrong:
+                self.mismatches += 1
+                self.stats["mismatches"] += 1
+                self.plan = []
             self.expect = None
         self.comps = after
 

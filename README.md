@@ -53,6 +53,7 @@ The project has two strands that share one codebase:
 | 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | done — no gain (4.52 with and without, `library-nonav` ablation): what loses navigation levels is each game's own mechanism (spells, ghosts, carried glyphs, enemies), not the walking |
 | 27 | **Hand-over discipline**: in a game the solver has not solved a level of, at most 15 probes and two selection presses a level; no strike when there is nothing to aim at yet; a take-over plans at once | done — no gain (4.52; `r11l` 1.02 → 1.22): the second no-gain phase in a row, loop stopped |
 | 28 | **Mechanics library, copy family**: a solver that recognises a canvas to be painted like a reference shown beside it, learns the cursor places, brushes (completed by simple shapes), palette and stamps from the frames, and plans the strokes by peeling the reference in reverse | done — official-style score 4.52 → **9.03**, levels 141 → 164; `cd82` every level on every seed, in about 152 actions a run against the humans' 171; nothing else changes |
+| 29 | **Diagnosis of the marker games' later levels**: for `re86`, `s5i5`, `r11l`, `vc33`, `ar25`, `su15`, where and why the marker solver stops, from each game's source and traces of the solver | done — five missing capabilities, none of them a tuning matter (see "Phase 29"); the next phases build them in order of expected gain |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1061,6 +1062,38 @@ The rest of the family is not covered, and the solver says why by staying silent
 `tr87` the output tiles cycle through glyphs by rules shown as pairs, in `sk48` a chain is
 extended and slid to pick up beads, in `sb26` a program frame is filled and run; none has a
 canvas that one action paints in one colour. Each would need its own solver.
+
+### Phase 29 — why the marker solver stops: a diagnosis
+
+Six games are in the marker family and the solver stops early in all of them: together
+they hold 46 levels, the agent completes about 7, and they contribute 0.27 of the mean
+where they could contribute about 27. Before building anything, each game was traced at
+the level where it stops and compared with its source. The finding is that no game is lost
+to tuning: each lacks a capability the solver's model cannot express.
+
+| Game | Where it stops | What the level needs | Root cause | Estimated gain on the mean |
+|---|---|---|---|---:|
+| `r11l` | level 2 (level 1 at 33–66 actions; 3 suffice) | click a handle to select it, click anywhere to send it there; the scored body sits at the centroid of its handles; hazards bounce it | action model: an effect set by the click's coordinates ("select, then point"), and a follower that moves by a fraction of its driver | +1.3 (levels 1–3) |
+| `vc33` | level 3 (levels 1–2 found by the explorer) | a token must end *level with* the patch of its colour; buttons pass height between columns, blocked when one is empty or full | goal (alignment, not cover) for levels 1–2; quantities as state for level 3 | +0.5 to +0.9 |
+| `su15` | level 2 (level 1 at 300–450 actions, human 22) | a click pulls every piece within 8 px to the click point; equal pieces merge into the next size; the goal is a region of another colour and a sample of the wanted piece | action model (a pointer field), goal of another colour, pieces that combine | +0.5 (levels 1–3) |
+| `re86` | level 2 (level 1 fails on 2 of 5 seeds) | nothing new: pieces drawn with diagonal strokes, overlapping each other | perception: a piece is a rigid set of pixels, even diagonal or partly hidden | +0.3 to +0.5 |
+| `s5i5` | level 2 | arms linked in a chain: lengthening one carries the rest, and a move is undone if any arm hits a wall | action model: linked bodies whose collisions depend on the whole configuration | +0.3, more if it extends |
+| `ar25` | level 1 at 1,600–2,500 actions (human 32) | the piece's *mirror image* must cover a target of its shape in another colour | goal (a silhouette of another colour) and a copy that moves with its own displacement | +0.1 to +0.4 |
+
+Three of the root causes recur. **Pointer operators** (an effect that depends on where the
+click lands, not on what is clicked) block `r11l` and `su15`. **Goals other than "cover a
+mark of the same colour"** — a silhouette in another colour (`ar25`, `su15`), alignment
+along a track (`vc33`) — block three games, and a throwaway prototype of each confirmed it:
+the silhouette goal with per-piece displacements solved `ar25`'s first level in 26–42
+actions on four seeds of five, and an alignment goal took `vc33`'s first two levels from 15
+and 85 actions to 4 and 39. **Robust pieces** (rigid pixel sets through overlaps and
+diagonal strokes) block `re86` and cause wrong marks in `r11l` and `su15`.
+
+The traces also found two defects that cost actions everywhere: a plan step that changes
+nothing is not counted as a misprediction, so the solver repeated the same useless click 95
+times on `r11l` and the same move 29 times on `s5i5`; and a stale operator's cached options
+survive the operator going stale. The estimates above assume the levels are then played at
+human cost; they are upper bounds, measured only where a prototype ran.
 
 ### Where the library stands
 

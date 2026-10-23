@@ -52,6 +52,7 @@ The project has two strands that share one codebase:
 | 25 | **Mechanics library, marker family**: a solver that learns what each action does to the pieces from the frames, finds the marks of each piece's colour, plans the shortest action sequence to cover them, and takes control from the model-guided agent only with a plan in hand | done — official-style score 0.44 → 4.52, levels 113 → 143; `lp85` every level on every seed; new default (`library`) |
 | 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | done — no gain (4.52 with and without, `library-nonav` ablation): what loses navigation levels is each game's own mechanism (spells, ghosts, carried glyphs, enemies), not the walking |
 | 27 | **Hand-over discipline**: in a game the solver has not solved a level of, at most 15 probes and two selection presses a level; no strike when there is nothing to aim at yet; a take-over plans at once | done — no gain (4.52; `r11l` 1.02 → 1.22): the second no-gain phase in a row, loop stopped |
+| 28 | **Mechanics library, copy family**: a solver that recognises a canvas to be painted like a reference shown beside it, learns the cursor places, brushes (completed by simple shapes), palette and stamps from the frames, and plans the strokes by peeling the reference in reverse | done — official-style score 4.52 → **9.03**, levels 141 → 164; `cd82` every level on every seed, in about 152 actions a run against the humans' 171; nothing else changes |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -155,6 +156,7 @@ neo4/
   planner.py      BFS path planning for the avatar through cells the model knows to be passable
   model_agent.py  the graph agent guided by the induced rules ("model"), plus a no-planning ablation
   marker.py       the marker-family solver: learned action maps, marks, search over piece positions
+  painter.py      the copy-family solver: canvas and reference, learned brushes, strokes by peeling
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -980,22 +982,106 @@ planning back-off at every take-over. The mean stays at **4.52** (`r11l` 1.02 �
 nothing else moves by more than a hundredth): the second phase in a row without a
 measured gain, so the loop stopped here.
 
+### Phase 28 — the copy family: paint the canvas until it matches the reference
+
+The marker solver pays where a game's goal is on screen. The copy family shows its goal
+even more plainly: a small picture, and elsewhere a blank canvas of the same size that
+the player must make into a copy of it. `neo4/painter.py` is a solver for that goal that
+learns the painting tools from the frames:
+
+* **Recognition.** Two isolated rectangles of the same size (no background inside,
+  background all round) with different content are a candidate picture and canvas; the
+  canvas is the one an action paints, i.e. turns a set of its pixels into a single
+  colour. Until something paints, the solver does nothing.
+* **The cursor and its places.** The largest non-background shape in a margin round the
+  canvas is the cursor; its outline relative to the canvas is a *cursor place*. Actions
+  that change it without painting are moves, learned as a graph over places, so they carry
+  over to every level where the canvas sits alike.
+* **Brushes, completed by shape.** An action that paints at a place is a brush. One use
+  shows the pixels it changed (inside its region) and the pixels it left although they had
+  another colour (outside); pixels that already had the colour stay unknown. The region is
+  completed with simple shapes — the axis-aligned rectangles and the corner triangles of a
+  square canvas that contain everything seen inside and nothing seen outside: what every
+  fitting shape covers is sure, what only some cover is uncertain. A second use in another
+  colour usually settles it.
+* **The palette.** A click that changes the frame (the status bar left out) but no canvas
+  pixel and no cursor place selects a colour, the clicked pixel's.
+* **Planning by peeling.** The stroke painted last is a brush whose sure region, among the
+  pixels not yet explained, is one colour in the picture (and whose uncertain pixels would
+  not spoil it); those pixels are explained, and the search goes on until what is left
+  already matches the canvas. Strokes that change nothing in the end are dropped; the
+  cursor is routed over the learned graph, colours are selected on the way, and the plan is
+  rebuilt after every action.
+* **Pixels the game does not check.** When no exact plan exists, a plan that leaves at most
+  a line's worth of pixels wrong is tried; if the canvas then matches all but those pixels
+  and the level goes on, they are marked as checked. Pixels that differed from the picture
+  when a level was completed are left out at later levels.
+* **What it does not know yet, it surveys.** On the first level it visits every cursor place
+  it can reach and tries every brush once, in the colour the canvas has least of, before
+  painting the picture: later levels need brushes the first does not, and a first-level
+  action costs the least weight. When a click next to the cursor paints for the first time
+  (a stamp), it looks for stamps at every place before planning.
+
+The library now gives the turn to the solver in control first, so a solver halfway through a
+plan is not interrupted by another that recognises something.
+
+**Results (Phase 28, `library`, 4,000 steps, 5 seeds): official-style mean 4.52 → 9.03.**
+`cd82` goes from 0.36 to **112.9**: all six levels on every seed (7 of 30 levels before),
+in 147–155 actions a run against the humans' 171. Every other game scores exactly as in
+Phase 27: the solver also recognised a canvas in `ft09`, where a clicked tile turns into
+one colour as if painted, found nothing to plan and gave the level back at once, at no
+measurable cost.
+
+| `cd82` level | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---:|---:|---:|---:|---:|---:|
+| human actions | 55 | 8 | 41 | 21 | 23 | 23 |
+| solver actions (mean of 5 seeds) | 65.6 | 7.0 | 34.0 | 15.2 | 14.6 | 16.0 |
+| level score | 70 | 115 | 115 | 115 | 115 | 115 |
+
+The first level is the only one above the human count, and on purpose: about 50 of its
+actions are the survey (eight cursor places, every move tried at each, every brush once).
+It is what makes the second level cost 7 actions where a human needs 8: the second picture
+needs a triangle brush the first never uses. The third level brings stamps (clicking the
+small shape beside the cursor paints a block); the first stamp that paints sends the solver
+round all eight places, and from then on every picture is planned outright.
+
+Three things the first version got wrong, kept as lessons:
+
+* **A use shows less than the brush.** Pixels that already had the colour do not change,
+  so the region a brush is seen to paint is smaller than the region it paints, and plans
+  built on it never converge. Completing the region with the shapes that fit, and painting
+  in the colour the canvas has least of while surveying, fixed it.
+* **The cursor must be read without the things that come and go next to it.** With the
+  whole margin as the cursor state, the stamps that appear at the third level made every
+  place look new, and nothing learned at the first two levels applied.
+* **A status bar changes at every action**, so "the frame changed" is not evidence that a
+  click did something; the bar is masked before asking.
+
+The rest of the family is not covered, and the solver says why by staying silent: in
+`tr87` the output tiles cycle through glyphs by rules shown as pairs, in `sk48` a chain is
+extended and slid to pick up beads, in `sb26` a program frame is filled and run; none has a
+canvas that one action paints in one colour. Each would need its own solver.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
 |---|---:|---:|
 | model-guided agent alone (Phase 23) | 113 | 0.44 |
 | library, marker family (Phase 25) | 143 | 4.52 |
-| library, + navigation and hand-over (Phases 26–27, default) | 141 | 4.52 |
+| library, + navigation and hand-over (Phases 26–27) | 141 | 4.52 |
+| library, + copy family (Phase 28, default) | 164 | **9.03** |
 
-All of the gain is the marker family: its share of the mean went from 0.24 to 4.33, and its
-cost on the levels it completes from 21.8 to 6.3 times the human count. `lp85` is solved
+All of the gain is two families. The marker family's share of the mean went from 0.24 to
+4.33, and its cost on the levels it completes from 21.8 to 6.3 times the human count; the
+copy family's went from 0.01 to 4.52, at 0.9 times the human count (all of it `cd82`).
+`lp85` is solved
 outright (every level, every seed, in about half the human actions); `re86` and `s5i5`
 open at human cost and stop at their second level; `vc33` and `r11l` keep what the
 model-guided agent already did. Two lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
-  rings, buttons and marks, and the solver finishes it. In every other game something
+  rings, buttons and marks, and `cd82` nothing but a canvas, brushes and a palette, and the
+  solvers finish both. In every other game something
   beyond the shared core decides the later levels — paint pots and benders (`re86`), arms
   that collide and carry children (`s5i5`), columns that run out and bridges that swap
   (`vc33`), handles that go wherever the player clicks (`r11l`), and in navigation each
@@ -1030,7 +1116,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phases 17–18 | 23 / 110 | 0.44 |
 | model, Phases 22–23 | 23 / 113 | 0.44 |
 | library, Phase 25 (marker solver) | 143 levels | **4.52** |
-| library, Phases 26–27 (default) | 141 levels | 4.52 |
+| library, Phases 26–27 | 141 levels | 4.52 |
+| library, Phase 28 (copy solver, default) | 164 levels | **9.03** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1076,18 +1163,19 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–27):** 141 levels, official-style
-score **4.52** — ten times Phase 23, all of it from the marker-family solver (see "Where the
-library stands" above). The reported top of the Kaggle leaderboard is in the fifties; the
-agent is not ready to submit.
+**Where it stands now (the `library` agent, Phases 24–28):** 164 levels, official-style
+score **9.03** — twenty times Phase 23, all of it from two family solvers: pieces onto the
+mark of their colour (4.33 of the mean, 4.06 of it `lp85`) and a canvas painted like its reference
+(`cd82`, 4.52). The reported top of the Kaggle leaderboard is in the fifties; the agent is
+not ready to submit.
 
-**What would move it next after the library** (Phases 24–27): the remaining points sit in
-each game's own mechanism, so the next families are the ones whose goal is *shown* on
-screen and checkable without knowing the mechanism — a canvas against a reference
-(`cd82`), an output row against rewrite rules (`tr87`), a chain against a template
-(`sk48`), a painted sequence against target boxes (`sb26`): a "reproduce the reference"
-solver that measures the difference between the two and searches for actions that shrink
-it. Before the library, the list read:
+**What would move it next after the library** (Phases 24–28): the remaining points sit in
+each game's own mechanism. The families whose goal is *shown* on screen pay best, because
+the goal need not be discovered: Phase 28 took the canvas-against-reference case (`cd82`)
+from 0.36 to 112.9. The other shown-goal games each need a solver of their own — an
+output row against rewrite rules (`tr87`), a chain against a template (`sk48`), a painted
+sequence against target boxes (`sb26`) — and the marker games stop at their second level
+on mechanisms beyond the shared core (`re86`, `s5i5`). Before the library, the list read:
 
 **What would move it next (as of Phase 23)**, in order of expected value:
 

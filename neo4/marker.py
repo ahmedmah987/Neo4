@@ -59,6 +59,7 @@ MAX_MOVE = 96  # no practical limit: a ring of tiles wraps around, a piece can t
 MARK_GAP = 4  # small static components this close together form one mark
 MARK_SIZE = 12  # a mark fits in this many pixels square
 MAX_PROBES = 60  # probes per level
+UNPROVEN_PROBES = 15  # probes per level in a game the solver has not solved a level of
 MAX_MISMATCHES = 20  # mispredicted actions per level before giving the level back
 MAX_EXPANSIONS = 150000  # predictions (actions x pieces) per search
 PLAN_BUDGET = 300000  # predictions over all the searches of one planning call
@@ -1172,7 +1173,7 @@ class MarkerSolver:
         """The next action to try. ``lookalike``: only click targets shaped like a
         control that has moved something (controls tend to come in families,
         such as the two arrows of a ring)."""
-        if self.probes >= MAX_PROBES:
+        if self.probes >= (MAX_PROBES if self.confirmed else UNPROVEN_PROBES):
             return None
         kinds = self._effective_kinds() if lookalike else set()
         if lookalike and not kinds:
@@ -1312,7 +1313,8 @@ class MarkerSolver:
             # the selected one. Change the selection (then re-probe the moves).
             modes = [k for k, op in self.ops.items() if op.mode]
             groups, _ = self._groups()
-            if modes and groups and self.mode_presses < 2 * len(groups) + 2:
+            limit = 2 * len(groups) + 2 if self.confirmed else 2
+            if modes and groups and self.mode_presses < limit:
                 self.mode_presses += 1
                 self.stats["mode_presses"] += 1
                 return self._action(modes[0])

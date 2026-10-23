@@ -411,6 +411,15 @@ class GraphAgent:
                 self.stats["back_to_start"] += 1
         self.stats["inconsistent"] = self.graph.inconsistent
 
+        forced, self.forced = self.forced, None
+        if forced is not None:
+            # Another agent chose this action (a family solver): record the
+            # transition under the matching candidate when there is one.
+            idx = next((i for i, c in enumerate(node.cands)
+                        if c.action == forced[0] and c.data == forced[1]), None)
+            self.last_key, self.last_idx = (key, idx) if idx is not None else (None, None)
+            self.since_reset += 1
+            return forced
         idx = self._choose(node)
         if idx is None and self.since_reset == 0 and node.cands:
             # A RESET as the first action of a level is a *full* reset back to
@@ -430,6 +439,7 @@ class GraphAgent:
         return self.rng.choice(local)
 
     curious = False  # walk towards frontier nodes with unknown-outcome candidates first
+    forced: tuple | None = None  # an action chosen by another agent for the next step
     max_replays = MAX_REPLAYS  # solution replays per level; 0 unless a variant turns them on
     best_first = False  # walk towards the frontier nodes closest to the learned goal relation
 

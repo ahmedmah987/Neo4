@@ -66,10 +66,13 @@ class LibraryAgent:
                     self.controller = s
                     break
         if chosen is None:
-            if self.controller is not None:
-                self._hand_back()
-                self.controller = None
+            self.controller = None
             chosen = self.fallback.act(obs)
+        else:
+            # The fallback still sees the step: it records the transition as if it
+            # had chosen the action, so its graph and its model stay whole.
+            self.fallback.forced = chosen
+            self.fallback.act(obs)
         self.pending = chosen
         self.stats = dict(self.fallback.stats)
         for s in self.solvers:

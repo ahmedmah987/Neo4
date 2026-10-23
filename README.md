@@ -54,6 +54,7 @@ The project has two strands that share one codebase:
 | 27 | **Hand-over discipline**: in a game the solver has not solved a level of, at most 15 probes and two selection presses a level; no strike when there is nothing to aim at yet; a take-over plans at once | done — no gain (4.52; `r11l` 1.02 → 1.22): the second no-gain phase in a row, loop stopped |
 | 28 | **Mechanics library, copy family**: a solver that recognises a canvas to be painted like a reference shown beside it, learns the cursor places, brushes (completed by simple shapes), palette and stamps from the frames, and plans the strokes by peeling the reference in reverse | done — official-style score 4.52 → **9.03**, levels 141 → 164; `cd82` every level on every seed, in about 152 actions a run against the humans' 171; nothing else changes |
 | 29 | **Diagnosis of the marker games' later levels**: for `re86`, `s5i5`, `r11l`, `vc33`, `ar25`, `su15`, where and why the marker solver stops, from each game's source and traces of the solver | done — five missing capabilities, none of them a tuning matter (see "Phase 29"); the next phases build them in order of expected gain |
+| 30 | **Goals beyond "cover a mark of your colour", and the solver's defects**: an outline of a moving piece's shape in another colour as its goal; a mark met by alignment, learned at a level-up; each moved component's own displacement; plan steps checked against the searched state; undo kept out of plans; partly hidden pieces; scrolls weighed by area; selection changes seen through unmarked colours | done — official-style score 9.03 → **9.56**, levels 164 → 168; `ar25`'s first level from ~2,000 actions to 26–130 (human 32); no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1095,6 +1096,52 @@ times on `r11l` and the same move 29 times on `s5i5`; and a stale operator's cac
 survive the operator going stale. The estimates above assume the levels are then played at
 human cost; they are upper bounds, measured only where a prototype ran.
 
+### Phase 30 — goals beyond "cover a mark of your colour", and the defects
+
+The first phase after the diagnosis takes its cheap, verified items: the two kinds of goal
+the solver could not see, and the defects that cost actions everywhere.
+
+* **An outline in another colour.** When no mark has the colour of anything that moves, a
+  still shape exactly like a moving piece's, drawn in a colour no piece has, is where that
+  piece goes. `ar25`'s target is the outline of the piece's *mirror image*. Two guards came
+  from a regression on `tu93`, where a still enemy drawn like the avatar was taken for its
+  goal: a plain block never counts, and neither does a copy of the whole sprite with its
+  small parts at the same places (a recoloured creature, not an outline).
+* **A mark met by alignment.** When a level ends with a mark far from every piece of its
+  colour but level with one along an axis (`vc33`'s token under the patch of its colour),
+  that relation is learned, and at later levels the goal is any place on that line.
+* **Each moved component's own displacement.** A mirror image moves opposite to its piece;
+  the operator keeps every component's displacement and carries it on beyond the places
+  seen, but only for a shape every observed place of which moved alike, so a ring of tiles
+  turning round its corners is never extrapolated.
+* **Defects.** A plan now carries the positions the search expects after each step, so a
+  step that changes nothing is a misprediction (the solver had repeated one useless click
+  95 times on `r11l`). Cached options follow an operator's binding. Marks are kept out of
+  what an action is learned to do. The look-alike filter uses only pieces the level began
+  with (a fragment of a hidden piece had made `re86`'s dots look like pieces). Undo is
+  never a plan step. A piece partly hidden under something drawn since the level began is
+  still there. A camera scroll must move most of the scene in pixels as well as in
+  components (a line carrying 21 small dots is not the scene). An action that has only
+  ever moved things of unmarked colours changes the selection, so the other actions are
+  tried again.
+
+**Results (Phase 30, `library`, 4,000 steps, 5 seeds): 9.03 → 9.56, levels 164 → 168, and
+no game loses more than a hundredth.**
+
+| game | Phase 28 | Phase 30 | what changed |
+|---|---:|---:|---|
+| `ar25` | 0.00 | 3.55 | level 1 in 26–130 actions instead of 1,600–2,500 (human 32); one seed also solves level 2 in 36 (human 50) |
+| `lp85` | 101.5 | 109.8 | every level on every seed still, 167 actions a run instead of 189 (level 4: 40 → 18, human 16) |
+| `r11l` | 1.22 | 2.12 | level 1 cheaper on four seeds of five (26–33 actions, human 22), dearer on one (76); level 2 on one seed, as before |
+| `vc33` | 2.41 | 2.66 | the alignment is learned and used at level 2, where a column then fills; one seed reaches level 3 |
+| `re86` | 1.50 | 1.75 | level 1 on three seeds of five at about the human cost (24–27 actions, human 26); a different seed fails it than before |
+
+Two items of the diagnosis did not pay here. `s5i5`'s expensive first level is unchanged
+(458 and 610 actions on two seeds): keeping marks out of the learned destinations does not
+remove its phantom move. `vc33`'s level 2 got dearer: the solver now plans towards the
+right line, but a column fills after two presses, and moving height between columns is the
+quantities mechanic the solver does not have.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1102,7 +1149,8 @@ human cost; they are upper bounds, measured only where a prototype ran.
 | model-guided agent alone (Phase 23) | 113 | 0.44 |
 | library, marker family (Phase 25) | 143 | 4.52 |
 | library, + navigation and hand-over (Phases 26–27) | 141 | 4.52 |
-| library, + copy family (Phase 28, default) | 164 | **9.03** |
+| library, + copy family (Phase 28) | 164 | 9.03 |
+| library, + outline and alignment goals, defects fixed (Phase 30, default) | 168 | **9.56** |
 
 All of the gain is two families. The marker family's share of the mean went from 0.24 to
 4.33, and its cost on the levels it completes from 21.8 to 6.3 times the human count; the
@@ -1150,7 +1198,8 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phases 22–23 | 23 / 113 | 0.44 |
 | library, Phase 25 (marker solver) | 143 levels | **4.52** |
 | library, Phases 26–27 | 141 levels | 4.52 |
-| library, Phase 28 (copy solver, default) | 164 levels | **9.03** |
+| library, Phase 28 (copy solver) | 164 levels | 9.03 |
+| library, Phase 30 (default) | 168 levels | **9.56** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1196,9 +1245,9 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–28):** 164 levels, official-style
-score **9.03** — twenty times Phase 23, all of it from two family solvers: pieces onto the
-mark of their colour (4.33 of the mean, 4.06 of it `lp85`) and a canvas painted like its reference
+**Where it stands now (the `library` agent, Phases 24–30):** 168 levels, official-style
+score **9.56** — twenty-two times Phase 23, all of it from two family solvers: pieces onto
+their goals (4.86 of the mean, 4.39 of it `lp85`) and a canvas painted like its reference
 (`cd82`, 4.52). The reported top of the Kaggle leaderboard is in the fifties; the agent is
 not ready to submit.
 

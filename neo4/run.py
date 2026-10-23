@@ -23,6 +23,7 @@ from typing import Any
 from arcengine import GameState
 
 from .graph_agent import AGENTS as _GRAPH_AGENTS
+from .library import LibraryAgent
 from .model_agent import (
     ModelAbstractAgent,
     ModelAdjacencyAgent,
@@ -40,6 +41,7 @@ AGENTS = {
     ModelCuriousAgent.name: ModelCuriousAgent,
     ModelExploreAgent.name: ModelExploreAgent,
     ModelAdjacencyAgent.name: ModelAdjacencyAgent,
+    LibraryAgent.name: LibraryAgent,
 }
 
 ROOT = Path(__file__).resolve().parent.parent

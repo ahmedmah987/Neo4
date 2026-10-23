@@ -22,7 +22,7 @@ PKG = ROOT / "neo4"
 OUT = ROOT / "kaggle" / "my_agent.py"
 
 # Dependency order: each module only imports the ones before it.
-MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "model_agent"]
+MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "model_agent", "library"]
 
 HEADER = '''"""Neo4 — ARC-AGI-3 agent for the ARC Prize 2026 Kaggle track (generated file).
 
@@ -69,7 +69,7 @@ def _materialise() -> None:
 
 _materialise()
 
-from neo4.model_agent import ModelAgent  # noqa: E402
+from neo4.library import LibraryAgent  # noqa: E402
 
 # -- the framework adapter ------------------------------------------------------
 # The ARC-AGI-3-Agents framework uses the engine's own types (the starter kit's
@@ -112,7 +112,7 @@ class MyAgent(Agent):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         seed = random.Random(f"{{self.game_id}}").randrange(1 << 30)
-        self._neo4 = ModelAgent(seed=seed)
+        self._neo4 = LibraryAgent(seed=seed)
         self._steps = 0
         self._started = time.monotonic()
 
@@ -137,6 +137,7 @@ class MyAgent(Agent):
             "nodes": self._neo4.stats.get("nodes", 0),
             "skipped": self._neo4.stats.get("skipped", 0),
             "plans": self._neo4.stats.get("plans", 0),
+            "solver": self._neo4.stats.get("solver", ""),
         }}
         return action
 '''

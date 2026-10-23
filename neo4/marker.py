@@ -62,7 +62,10 @@ MAX_PROBES = 60  # probes per level
 MAX_MISMATCHES = 20  # mispredicted actions per level before giving the level back
 MAX_EXPANSIONS = 20000
 LONG_PLAN = 3  # before running a longer plan, probe look-alike controls not yet tried
-SCENERY_COPIES = 6  # a component with this many identical copies on screen is scenery
+MAX_OPTIONS = 8  # candidate places beyond which an uncertain action is not enumerated
+SCROLL_SHARE = 0.6  # a transition moving this share of the screen's components alike is a camera scroll
+PLAN_EVERY = 5  # observations between planning attempts while another agent plays
+SCENERY_COPIES = 12  # a component with this many identical copies on screen is scenery (a floor of cells)
 MAX_DEATHS = 3  # lost attempts under the solver per level before giving the level back
 MAX_LEVEL_ACTIONS = 400  # actions the solver may spend on one level
 
@@ -116,14 +119,20 @@ def kind_of(c: fp.Component) -> str:
     return hashlib.blake2b(np.packbits(canon).tobytes() + bytes(canon.shape), digest_size=6).hexdigest()
 
 
+_KINDS: dict[str, str] = {}  # exact shape -> kind: the kind depends on the mask only
+
+
 def components(grid: np.ndarray, mask: np.ndarray | None) -> list[Comp]:
     out = []
     for c in fp.segment(fp.apply_mask(grid, mask)):
         if c.color == fp.MASK_COLOR or c.area > MAX_AREA:
             continue
         rel = frozenset(zip((c.pixels[:, 0] - c.y1).tolist(), (c.pixels[:, 1] - c.x1).tolist()))
-        out.append(Comp(c.color, exact_shape(c), kind_of(c), c.x1, c.y1, c.width, c.height,
-                        c.area, rel, c.click_point()))
+        shape = exact_shape(c)
+        kind = _KINDS.get(shape)
+        if kind is None:
+            kind = _KINDS[shape] = kind_of(c)
+        out.append(Comp(c.color, shape, kind, c.x1, c.y1, c.width, c.height, c.area, rel, c.click_point()))
     return out
 
 
@@ -150,7 +159,16 @@ def match(before: list[Comp], after: list[Comp]) -> dict[int, tuple[int, int]]:
     for b, a in groups.values():
         if not b or not a:
             continue
-        cost = np.array([[_step_cost(q.x - p.x, q.y - p.y) for q in a] for p in b], dtype=float)
+        if len(b) == len(a) and sorted((c.x, c.y) for c in b) == sorted((c.x, c.y) for c in a):
+            at = {(c.x, c.y): c.id for c in b}  # nothing of this kind changed place
+            for q in a:
+                q.id = at[(q.x, q.y)]
+            continue
+        px = np.array([c.x for c in b], dtype=float)[:, None]
+        py = np.array([c.y for c in b], dtype=float)[:, None]
+        dx = np.array([c.x for c in a], dtype=float)[None, :] - px
+        dy = np.array([c.y for c in a], dtype=float)[None, :] - py
+        cost = np.hypot(dx, dy) + 0.01 * (dx * dx + dy * dy)
         if linear_sum_assignment is not None:
             rows, cols = linear_sum_assignment(cost)
             pairs = list(zip(rows.tolist(), cols.tolist()))
@@ -189,6 +207,7 @@ class Op:
     best: dict[tuple, tuple[int, int]] = field(default_factory=dict)  # the current guess
     dirty: set[str] = field(default_factory=set)  # shapes whose guess must be recomputed
     _moving: set[str] | None = None
+    _options: dict = field(default_factory=dict)
     movers: set[int] = field(default_factory=set)  # ids it moved last time
     d: tuple[int, int] | None = None  # the displacement it gave most of them
     stale: bool = False  # a selection change since: re-bind on the next observed move
@@ -220,6 +239,7 @@ class Op:
                 self.cands[key] = set(both) if both else set(q)
             self.dirty.add(shape)
             self._moving = None
+            self._options = {}
 
     def _assign(self, shape: str) -> None:
         """The guess for every place of one shape: a one-to-one map into the
@@ -246,6 +266,7 @@ class Op:
 
     def block(self, shape: str, pos: tuple[int, int]) -> None:
         self._moving = None
+        self._options = {}
         self.cands[(shape, pos[0], pos[1])] = {pos}
         self.best[(shape, pos[0], pos[1])] = pos
 
@@ -266,13 +287,21 @@ class Op:
         return pos
 
     def options(self, c_shape: str, cid: int, pos: tuple[int, int], n: int = 3) -> list[tuple[int, int]]:
-        """The guess and the next nearest candidates: what the action may do here."""
+        """The guess and the next nearest candidates: what the action may do here.
+        A place with many candidates is not worth enumerating: the guess only."""
+        key = (c_shape, cid, pos)
+        hit = self._options.get(key)
+        if hit is not None:
+            return hit
         first = self.predict(c_shape, cid, pos)
         c = self.cands.get((c_shape, pos[0], pos[1]))
-        if not c:
-            return [first]
-        near = sorted(c, key=lambda q: ((q[0] - pos[0]) ** 2 + (q[1] - pos[1]) ** 2, q))
-        return [first] + [q for q in near if q != first][: n - 1]
+        if not c or len(c) > MAX_OPTIONS:
+            out = [first]
+        else:
+            near = sorted(c, key=lambda q: ((q[0] - pos[0]) ** 2 + (q[1] - pos[1]) ** 2, q))
+            out = [first] + [q for q in near if q != first][: n - 1]
+        self._options[key] = out
+        return out
 
     def moving_shapes(self) -> set[str]:
         """Shapes this action has been seen to move somewhere."""
@@ -439,6 +468,8 @@ class MarkerSolver:
         self.mode_presses = 0
         self._groups_cache = None
         self._failed_at: tuple | None = None
+        self._idle = 0
+        self._ops_seen = 0
         self.deaths = 0
         self.mark_ids: set[int] = set()
         if grid is not None:
@@ -501,6 +532,11 @@ class MarkerSolver:
         # A new component touching a moved one of the same colour is part of the
         # same piece whose outline changed (an arm drawn shorter where it passes
         # behind something): it moved with it.
+        if moved and len(after) >= 10:
+            common_d, n_common = Counter(moved.values()).most_common(1)[0]
+            if n_common >= SCROLL_SHARE * len(after):
+                moved = {}  # the camera scrolled: nothing moved relative to the scene
+                self.stats["scrolls"] += 1
         self._drop_occlusions(moved, after)
         moved_comps = [c for c in after if c.id in moved]
         for c in after:
@@ -1069,6 +1105,11 @@ class MarkerSolver:
             elif not self.confirmed:
                 # Not proven on this game yet: take over only with a plan in hand, so
                 # a game that merely looks like the family costs nothing.
+                self._idle += 1
+                if len(self.ops) == self._ops_seen and self._idle < PLAN_EVERY:
+                    return None
+                self._idle = 0
+                self._ops_seen = len(self.ops)
                 plan = self._plan_if_new()
                 if not plan:
                     return None

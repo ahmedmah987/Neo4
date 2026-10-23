@@ -1262,6 +1262,7 @@ class MarkerSolver:
                 self.plan = plan
                 self.stats["plans"] += 1
             self.in_control = True
+            self._fails = self._idle = 0  # a fresh take-over plans at once
             self.stats["takeovers"] += 1
         if self.mismatches > MAX_MISMATCHES:
             self._give_up("mismatches")
@@ -1308,6 +1309,12 @@ class MarkerSolver:
             self.stats["plan_steps"] += 1
             return self._action(key)
         key = self._probe(obs)
+        if key is None and not self.recognised():
+            # Nothing to aim at yet (no piece of a marked colour has moved): leave
+            # the turn to the other agent without a strike and look again later.
+            self.in_control = False
+            self.stats["yields"] += 1
+            return None
         if key is None:
             # Nothing left to probe and no plan: the piece that must move may not be
             # the selected one. Change the selection (then re-probe the moves).

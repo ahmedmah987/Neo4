@@ -50,7 +50,7 @@ The project has two strands that share one codebase:
 | 23 | **Clicks ordered by learned gain**: the kinds whose clicks have closed the goal gap go first at every node; relation kinds matched by size and shape when their colour changes between levels | done — levels 110 → 113 (`lp85` 8 → 14: two seeds reach its fifth level), score unchanged (0.44); new default; loop stopped by its rule |
 | 24 | **Game families**: the 25 public games grouped by mechanic, with each family's levels, human baselines, the agent's cost and its share of the official-style score (`scripts/families.py`) | done — navigation and marker games are worth 28 points each; the agent took 0.08 and 0.24 |
 | 25 | **Mechanics library, marker family**: a solver that learns what each action does to the pieces from the frames, finds the marks of each piece's colour, plans the shortest action sequence to cover them, and takes control from the model-guided agent only with a plan in hand | done — official-style score 0.44 → 4.52, levels 113 → 143; `lp85` every level on every seed; new default (`library`) |
-| 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | measured below |
+| 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | done — no gain (4.52 with and without, `library-nonav` ablation): what loses navigation levels is each game's own mechanism (spells, ghosts, carried glyphs, enemies), not the walking |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -925,6 +925,47 @@ and stops at the second, where the mechanics outgrow its model (`re86`'s pots re
 pieces; `s5i5`'s arms collide with walls and carry child arms). `r11l` is a loss: its
 handles move to wherever the player clicks, which a learned map of places cannot express,
 and the solver probes until the level's move budget runs out.
+
+### Phase 26 — navigation: the avatar as a piece
+
+The navigation family is worth as much as the marker family (seven games, 28 points) and
+the agent took 0.08 of it. Its games share an avatar but little else: what opens a door
+is a carried glyph in `ls20`, a spell in `sc25`, a recorded ghost on a plate in `g50t`, a
+panel button in `dc22`. Phase 26 does not try to model those; it extends the marker
+solver so that an avatar is one more piece, which is the part the family has in common.
+Three additions, all switched off in the `library-nonav` ablation:
+
+* **Goals of another colour.** When no mark of a moved piece's own colour explains how a
+  level ended, the small static object it overlapped most in the completed level's last
+  frame is taken as its goal (`tu93`'s exit under its avatar), and later levels look for
+  that object.
+* **Walkable and blocking colours.** For a piece moved by translation, the colours it has
+  stepped onto are walkable and the colours that stopped it are walls; the search routes
+  translations through walkable colours (and through colours not seen yet), and checks
+  the place half-way for pieces that jump a cell.
+* **Pieces that turn as they move** (an avatar that faces its way) are matched by colour
+  and kind when their exact shape changes.
+
+The phase also made the library safe to leave on everywhere. The model-guided agent now
+records the solver's actions as its own transitions, so a hand-over never leaves it with a
+broken state graph or move-budget count (on `ls20` a twelve-action take-over that failed
+had cost it a thousand actions). Planning while the other agent plays backs off after
+failures and is budgeted in predictions per call and per level, so no public game runs
+slower than about 20 ms a step.
+
+**Results (Phase 26, `library` against `library-nonav`, 4,000 steps, 5 seeds): no gain.**
+The official-style mean is 4.52 with and without the additions; every navigation game
+scores within a hundredth of the ablation. The additions fire — on `tu93` the exit is
+learned as a goal of another colour when the first level ends, and the solver walks the
+avatar to it on the second — but the second level is already cheap for the model-guided
+agent, and from the third level on its patrols and chargers kill the avatar (three lost
+attempts give the level back). On the six other navigation games the first level is never
+completed by walking alone: it needs a spell (`sc25`), a recorded ghost on a pressure
+plate (`g50t`), a carried glyph that matches the exit (`ls20`), panel buttons that remake
+the floor (`dc22`), digging and gravity switches (`bp35`), or two mirrored dots brought
+together (`m0r0`). The family's common part — an avatar walking to a goal — is not where
+its levels are lost; what is lost is each game's own mechanism, which a family solver
+cannot know in advance.
 
 ## The competition metric, and what it says about this agent
 

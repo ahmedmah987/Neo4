@@ -227,6 +227,11 @@ class Op:
     ``movers``/``d`` treat it as a translation of the components it moved last
     time (a selected piece, an arm tip), which carries on beyond the places
     seen, but only while every component it moved moved the same way.
+
+    ``d_by`` keeps each moved component's own displacement (a mirror image that
+    moves opposite to its piece), carried on beyond the places seen only for a
+    shape every one of whose observed places moved by that same displacement, so
+    a ring of tiles turning round its corners is never extrapolated.
     """
 
     cands: dict[tuple, set] = field(default_factory=dict)  # (shape, x, y) -> {(x, y)}
@@ -235,6 +240,9 @@ class Op:
     _moving: set[str] | None = None
     _options: dict = field(default_factory=dict)
     movers: set[int] = field(default_factory=set)  # ids it moved last time
+    d_by: dict[int, tuple[int, int]] = field(default_factory=dict)  # id -> its displacement last time
+    moved_colors: set[int] = field(default_factory=set)  # colours of everything it has ever moved
+    _offsets: dict[str, set] | None = None
     d: tuple[int, int] | None = None  # the displacement it gave most of them
     stale: bool = False  # a selection change since: re-bind on the next observed move
     uniform: bool = True  # every component it moved moved the same way (a translation)
@@ -265,6 +273,7 @@ class Op:
                 self.cands[key] = set(both) if both else set(q)
             self.dirty.add(shape)
             self._moving = None
+            self._offsets = None
             self._options = {}
 
     def _assign(self, shape: str) -> None:
@@ -292,6 +301,7 @@ class Op:
 
     def block(self, shape: str, pos: tuple[int, int]) -> None:
         self._moving = None
+        self._offsets = None
         self._options = {}
         self.cands[(shape, pos[0], pos[1])] = {pos}
         self.best[(shape, pos[0], pos[1])] = pos
@@ -310,12 +320,32 @@ class Op:
         # positions seen; a permutation (a ring of tiles) leaves unseen places alone.
         if self.uniform and not self.stale and self.d is not None and cid in self.movers:
             return (pos[0] + self.d[0], pos[1] + self.d[1])
+        d = self.d_by.get(cid)
+        if d is not None and not self.stale and self.shape_offset(c_shape) == d:
+            return (pos[0] + d[0], pos[1] + d[1])
         return pos
+
+    def shape_offset(self, shape: str) -> tuple[int, int] | None:
+        """The one displacement every observed place of ``shape`` moved by, if
+        there is exactly one."""
+        if self._offsets is None:
+            offs: dict[str, set] = {}
+            for k, v in self.cands.items():
+                if len(v) == 1:
+                    q = next(iter(v))
+                    d = (q[0] - k[1], q[1] - k[2])
+                    if d != (0, 0):
+                        offs.setdefault(k[0], set()).add(d)
+            self._offsets = offs
+        o = self._offsets.get(shape)
+        return next(iter(o)) if o and len(o) == 1 else None
 
     def options(self, c_shape: str, cid: int, pos: tuple[int, int], n: int = 3) -> list[tuple[int, int]]:
         """The guess and the next nearest candidates: what the action may do here.
         A place with many candidates is not worth enumerating: the guess only."""
-        key = (c_shape, cid, pos)
+        # keyed on the binding too: a translation that goes stale or is re-bound
+        # changes what the action does at a place
+        key = (c_shape, cid, pos, self.stale, self.d, self.uniform, cid in self.movers, self.d_by.get(cid))
         hit = self._options.get(key)
         if hit is not None:
             return hit
@@ -466,6 +496,10 @@ class MarkerSolver:
         # How the pixels of a mark sat around the piece that covered it when a level
         # ended, by the piece's size: (dx, dy) of each mark pixel from its top-left.
         self.slot_patterns: dict[tuple[int, int], tuple[frozenset, bool, int | None]] = {}
+        # A mark that sat level with the piece along one axis, far from it, when a level
+        # ended (a token beside its patch): by the piece's size, (axis, offset of the
+        # mark's centre from the piece's along that axis); axis 0 is x, 1 is y.
+        self.alignments: dict[tuple[int, int], tuple[int, float]] = {}
         # Colours a translated piece has stepped onto, and colours that stopped it.
         self.entered: dict[int, set[int]] = {}
         self.blocked: dict[int, set[int]] = {}
@@ -489,7 +523,7 @@ class MarkerSolver:
         self.probed: set[OpKey] = set()
         self.probes = 0
         self.mismatches = 0
-        self.plan: list[OpKey] = []
+        self.plan: list[tuple[OpKey, dict]] = []  # (action, where the search expects the pieces after it)
         self.expect: dict[int, tuple[int, int]] | None = None
         self.gave_up = False
         self.level_actions = 0
@@ -497,6 +531,7 @@ class MarkerSolver:
         self.last_key: OpKey | None = None
         self.mark_clusters_now: list[list[Comp]] = []
         self.exact_slots: dict[tuple, tuple[int, int, tuple[int, int]]] = {}
+        self.align_slots: dict[tuple, tuple[int, int, int, int]] = {}  # (colour, point) -> (w, h, axis, top-left coordinate)
         self.mark_boxes: list[tuple] = []
         self.ghosts: dict[int, Comp] = {}  # movers merged into a same-coloured mark, at their place
         self.mode_presses = 0
@@ -509,6 +544,8 @@ class MarkerSolver:
         self.deaths = 0
         self.mark_ids: set[int] = set()
         self.grid = grid
+        self.first_grid = grid
+        self.bg = int(np.bincount(grid.ravel()).argmax()) if grid is not None else -1
         if grid is not None:
             self.comps = components(grid, self.mask)
             for c in self.comps:
@@ -571,9 +608,13 @@ class MarkerSolver:
         # same piece whose outline changed (an arm drawn shorter where it passes
         # behind something): it moved with it.
         if moved and len(after) >= 10:
+            # The camera scrolled when most of the scene moved alike, counted in
+            # components and in pixels (a line carrying many small dots is not the scene).
             common_d, n_common = Counter(moved.values()).most_common(1)[0]
-            if n_common >= SCROLL_SHARE * len(after):
-                moved = {}  # the camera scrolled: nothing moved relative to the scene
+            area = {c.id: c.area for c in after}
+            alike = sum(area.get(cid, 0) for cid, d in moved.items() if d == common_d)
+            if n_common >= SCROLL_SHARE * len(after) and alike >= SCROLL_SHARE * sum(area.values()):
+                moved = {}  # nothing moved relative to the scene
                 self.stats["scrolls"] += 1
         self._drop_occlusions(moved, after)
         moved_comps = [c for c in after if c.id in moved]
@@ -591,7 +632,9 @@ class MarkerSolver:
         op.tried += 1
         before = {c.id: c for c in self.comps}
         after_by = {c.id: c for c in after}
-        op.learn(self.comps, after)
+        # A mark is never where a piece went (an arm tip merging into its mark leaves
+        # identical dots elsewhere that would read as its destination).
+        op.learn([c for c in self.comps if c.id not in self.mark_ids], [c for c in after if c.id not in self.mark_ids])
         if self.grid is not None and moved and len(moved) <= 4:
             # A piece translated onto a place: the colours it now covers are walkable for it.
             for cid, d in moved.items():
@@ -615,9 +658,21 @@ class MarkerSolver:
             for other in self.ops.values():
                 if other.stale and other.d is not None and other is not op:
                     other.movers = set(ids)  # the selection moved: re-bind
+                    other.d_by = {}
                     other.stale = False
             op.movers, op.d, op.stale = set(ids), common, False
+            op.d_by = dict(moved)
             op.uniform = op.uniform and len(alike) == 1
+            # An action that has only ever moved things of colours no mark asks for
+            # (selection dots passing from one piece to another) changes the selection:
+            # what the other actions do must be seen again.
+            op.moved_colors |= {(before.get(cid) or after_by[cid]).color for cid in moved}
+            mark_cols = {col for col, _ in self._groups()[0]}
+            if mark_cols and not op.moved_colors & mark_cols and not op.mode:
+                op.mode = True
+                for other in self.ops.values():
+                    if other is not op:
+                        other.stale = True
         # A mover that vanished where it was expected, its pixels still showing its
         # colour, has merged with a same-coloured mark (an arm tip entering a
         # cross): keep it there. A ghost whose pixels change colour is gone.
@@ -648,6 +703,8 @@ class MarkerSolver:
                     other.movers = (other.movers - lost) | same
                 else:
                     other.stale = True
+                for cid in lost:
+                    other.d_by.pop(cid, None)
             if not same:
                 op.mode = True
         # A relevant mover the model expected to move but which stayed: blocked here.
@@ -674,6 +731,7 @@ class MarkerSolver:
             self.expect = None
         self.comps = after
         self.grid = grid
+        self._groups_cache = None  # it may have been computed from the frame before
 
     def _drop_occlusions(self, moved: dict[int, tuple[int, int]], after: list[Comp]) -> None:
         """A piece walking over scenery hides the cell it steps on and uncovers the
@@ -745,15 +803,22 @@ class MarkerSolver:
                     return False
         return True
 
-    @staticmethod
-    def _shows(grid: np.ndarray, c: Comp, pos: tuple[int, int]) -> bool:
-        """Do the pixels of ``c`` placed at ``pos`` all show its colour?"""
+    def _shows(self, grid: np.ndarray, c: Comp, pos: tuple[int, int]) -> bool:
+        """Is ``c`` at ``pos``: do its pixels show its colour, but for pixels hidden
+        under something drawn there since the level began (a target outline or a
+        line drawn over the piece), and at least half of them?"""
         h, w = grid.shape
+        shown = 0
         for dy, dx in c.rel:
             y, x = pos[1] + dy, pos[0] + dx
-            if not (0 <= y < h and 0 <= x < w) or int(grid[y, x]) != c.color:
+            if not (0 <= y < h and 0 <= x < w):
                 return False
-        return True
+            v = int(grid[y, x])
+            if v == c.color:
+                shown += 1
+            elif self.first_grid is None or v != int(self.first_grid[y, x]) or v == self.bg:
+                return False
+        return 2 * shown >= len(c.rel)
 
     def _remember_slots(self, action, data) -> None:
         """The last action completed the level: the marks were covered right after
@@ -802,7 +867,16 @@ class MarkerSolver:
 
             m = min(near, key=gap)
             if gap(m) > max(m.w, m.h) + 6:
-                continue  # nothing of its colour near it: not a relation
+                # Nothing of its colour near it; but a piece level with it along one
+                # axis (a token beside the patch of its colour) is a relation too.
+                mc = (m.x + (m.w - 1) / 2, m.y + (m.h - 1) / 2)
+                for axis in (0, 1):
+                    if abs(mc[axis] - pt[axis]) <= 0.5:
+                        self.alignments[(m.w, m.h)] = (axis, pt[axis] - mc[axis])
+                        self.stats["alignments"] += 1
+                        learned = True
+                        break
+                continue
             pix = frozenset((c.x + dx - m.x, c.y + dy - m.y) for c in cl for dy, dx in c.rel)
             self.slot_patterns[(m.w, m.h)] = (pix, covers(m.rel, (m.x, m.y), pt), None)
             self.stats["relations"] += 1
@@ -916,6 +990,7 @@ class MarkerSolver:
         self.mark_boxes = []
         self.mark_clusters_now = []
         self.exact_slots = {}
+        self.align_slots = {}
         slot_ids: set[int] = set()
         if self.slot_patterns:
             # A mark drawn the way earlier levels' marks were: one slot per placement,
@@ -943,13 +1018,55 @@ class MarkerSolver:
                         slot_ids |= set(owners)
                         self.mark_clusters_now.append(list(owners.values()))
         if not marks:
+            # pieces the level began with that have moved (a fragment of a piece
+            # uncovered for a moment is not one)
+            first_movers = {(c.color, c.shape) for c in self.first if c.id in self.movers}
             for cl in mark_clusters(static):
-                if len(cl) == 1 and (cl[0].color, cl[0].shape) in self.mover_shapes:
+                if len(cl) == 1 and (cl[0].color, cl[0].shape) in first_movers:
                     continue  # looks like a piece that has not moved yet
                 marks.setdefault(cl[0].color, []).append(centre(cl))
                 self.mark_clusters_now.append(cl)
                 self.mark_boxes.append((cl[0].color, min(c.x for c in cl), min(c.y for c in cl),
                                         max(c.x + c.w - 1 for c in cl), max(c.y + c.h - 1 for c in cl)))
+        if marks and self.alignments:
+            # marks met by standing level with them along an axis
+            sizes: dict[int, set] = {}
+            for c in self.comps:
+                if (c.color, c.shape) in self.mover_shapes:
+                    sizes.setdefault(c.color, set()).add((c.w, c.h))
+            for col, pts in marks.items():
+                for w, h in sorted(sizes.get(col, ())):
+                    al = self.alignments.get((w, h))
+                    if al is None:
+                        continue
+                    axis, off = al
+                    for pt in pts:
+                        v = pt[axis] - off - ((w if axis == 0 else h) - 1) / 2
+                        if abs(v - round(v)) < 0.25:
+                            self.align_slots[(col, pt)] = (w, h, axis, int(round(v)))
+                    break
+        if not marks:
+            # No mark of a moving colour: a still shape exactly like a moving piece's,
+            # drawn in a colour no piece has, is where that piece goes (an outline of
+            # a piece, or of its mirror image, to be covered by it).
+            count = Counter((c.color, c.shape) for c in self.first)
+            by_shape: dict[str, list[Comp]] = {}
+            for c in self.comps:
+                if c.id in self.movers:
+                    by_shape.setdefault(c.shape, []).append(c)
+            for c in self.first:
+                if (c.id in self.movers or c.color in mover_colors or c.area < 4
+                        or count[(c.color, c.shape)] >= SCENERY_COPIES):
+                    continue
+                m = next(iter(by_shape.get(c.shape, [])), None)
+                if m is None:
+                    continue
+                pt = (c.x + (c.w - 1) / 2.0, c.y + (c.h - 1) / 2.0)
+                marks.setdefault(m.color, []).append(pt)
+                self.exact_slots[(m.color, pt)] = (m.w, m.h, (c.x, c.y))
+                self.mark_clusters_now.append([c])
+                self.mark_boxes.append((m.color, c.x, c.y, c.x + c.w - 1, c.y + c.h - 1))
+                self.stats["silhouettes"] += 1
         groups = [(col, pts) for col, pts in sorted(marks.items())]
         self.mark_ids = {c.id for cl in self.mark_clusters_now for c in cl}
         colors = {col for col, _ in groups}
@@ -969,6 +1086,13 @@ class MarkerSolver:
             w, h, pos = slot
             for c in list(self.comps) + list(self.ghosts.values()):
                 if c.color == col and (c.w, c.h) == (w, h) and (c.x, c.y) == pos and c.id not in self.mark_ids:
+                    return c
+            return None
+        al = self.align_slots.get((col, pt))
+        if al is not None:
+            w, h, axis, v = al
+            for c in list(self.comps) + list(self.ghosts.values()):
+                if c.color == col and (c.w, c.h) == (w, h) and (c.x, c.y)[axis] == v and c.id not in self.mark_ids:
                     return c
             return None
         for c in list(self.comps) + list(self.ghosts.values()):
@@ -993,16 +1117,19 @@ class MarkerSolver:
             out.append(all(any(covers(movers[i].rel, state[i], p) for i in idx) for p in pts))
         return out
 
-    def _search(self, groups, movers, need, optimistic: bool = False, limit: int | None = None) -> list[OpKey] | None:
+    def _search(self, groups, movers, need, optimistic: bool = False,
+                limit: int | None = None) -> list[tuple[OpKey, dict]] | None:
         """Shortest op sequence after which the groups flagged in ``need`` are
-        satisfied. ``optimistic``: where the model is still unsure what an action
-        does at a place, any of the nearest candidates may happen; running such a
-        plan is also how the uncertainty gets resolved."""
+        satisfied, each op with the piece positions the search expects after it.
+        ``optimistic``: where the model is still unsure what an action does at a
+        place, any of the nearest candidates may happen; running such a plan is
+        also how the uncertainty gets resolved."""
         live_shapes = {m.shape for m in movers}
         live_ids = {m.id for m in movers} | {m.id for m in self.ghosts.values()}
-        ops = [(k, op) for k, op in self.ops.items()
-               if (op.d is not None and not op.stale and op.uniform and op.movers & live_ids)
-               or op.moving_shapes() & live_shapes]
+        # Undo (ACTION7) depends on the history, not on where the pieces are: never a step.
+        ops = [(k, op) for k, op in self.ops.items() if k != ("k", 7)
+               and ((op.d is not None and not op.stale and op.uniform and op.movers & live_ids)
+                    or op.moving_shapes() & live_shapes)]
         # Pieces no action can move from where they are stay out of the search state.
         fixed = [m for m in movers if all(op.predict(m.shape, m.id, (m.x, m.y)) == (m.x, m.y)
                                           and (not optimistic or op.options(m.shape, m.id, (m.x, m.y)) == [(m.x, m.y)])
@@ -1032,9 +1159,14 @@ class MarkerSolver:
                 if c is not None and c.id not in live_ids:
                     continue  # covered by something no action moves
                 slot = self.exact_slots.get((col, pt))
+                al = self.align_slots.get((col, pt))
                 if slot is not None:
                     w, h, pos = slot
                     needs.append([(i, {pos}) for i, m in enumerate(live) if m.color == col and (m.w, m.h) == (w, h)])
+                elif al is not None:
+                    w, h, axis, v = al
+                    line = {(v, y) for y in range(-h + 1, fp.GRID)} if axis == 0 else {(x, v) for x in range(-w + 1, fp.GRID)}
+                    needs.append([(i, line) for i, m in enumerate(live) if m.color == col and (m.w, m.h) == (w, h)])
                 else:
                     needs.append([(i, cover_places(m.rel, pt)) for i, m in enumerate(live) if m.color == col])
         if any(not opts for opts in needs):
@@ -1104,21 +1236,23 @@ class MarkerSolver:
                         self._budget -= expansions
                         path = []
                         while nxt != start:
-                            nxt, k = parent[nxt]
-                            path.append(k)
-                        return path[::-1]
+                            prev, k = parent[nxt]
+                            path.append((k, nxt))
+                            nxt = prev
+                        stay = {m.id: (m.x, m.y) for m in fixed}
+                        return [(k, {**stay, **{m.id: q for m, q in zip(live, st)}}) for k, st in reversed(path)]
                     queue.append(nxt)
         self._budget -= expansions
         return None
 
-    def _make_plan(self) -> list[OpKey] | None:
+    def _make_plan(self) -> list[tuple[OpKey, dict]] | None:
         self._budget = PLAN_BUDGET
         try:
             return self._make_plan_inner()
         finally:
             self._level_work += PLAN_BUDGET - self._budget
 
-    def _make_plan_inner(self) -> list[OpKey] | None:
+    def _make_plan_inner(self) -> list[tuple[OpKey, dict]] | None:
         groups, movers = self._groups()
         if not groups:
             return None
@@ -1157,7 +1291,7 @@ class MarkerSolver:
             self.stats["partial_plans"] += 1
         return best
 
-    def _plan_if_new(self) -> list[OpKey] | None:
+    def _plan_if_new(self) -> list[tuple[OpKey, dict]] | None:
         """A plan, unless the search already failed on the same model and frame."""
         key = (self.version, self.level)
         if self._failed_at == key:
@@ -1302,10 +1436,10 @@ class MarkerSolver:
                 self.plan = plan
                 self.stats["plans"] += 1
         if self.plan:
-            key = self.plan.pop(0)
-            groups, movers = self._groups()
-            op = self.ops[key]
-            self.expect = {m.id: op.predict(m.shape, m.id, (m.x, m.y)) for m in movers}
+            # Every step of a plan changes the searched state: a step after which a
+            # piece is not where the search put it (moved otherwise, or not at all)
+            # is a misprediction.
+            key, self.expect = self.plan.pop(0)
             self.stats["plan_steps"] += 1
             return self._action(key)
         key = self._probe(obs)

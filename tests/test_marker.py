@@ -274,3 +274,141 @@ def test_cross_room_needs_the_selection_key_between_pieces():
     steps = play(agent, CrossRoom(), 600)
     assert len(steps) == 1, (steps, agent.stats)
     assert agent.stats.get("marker_mode_presses", 0) + agent.stats.get("marker_probes", 0) >= 1
+
+
+class LevelRoom:
+    """A token slides along a rail under two buttons (left, right, 3 px a click);
+    a level ends when the token stands level with the patch of its colour on
+    the wall above, which is never where the token can go. At a level-up the
+    frames show the finished level first, as the real games do."""
+
+    LAYOUTS = [(14, 26), (38, 20)]  # (token start x, patch x)
+
+    def __init__(self, levels: int = 2):
+        self.levels = levels
+        self.done = 0
+        self.state = GameState.NOT_PLAYED
+        self._place(0)
+
+    def _place(self, level: int) -> None:
+        self.x, self.patch = self.LAYOUTS[level % len(self.LAYOUTS)]
+
+    def _grid(self) -> np.ndarray:
+        g = blank()
+        g[20:24, self.patch:self.patch + 2] = 11  # the patch on the wall
+        g[24, 4:60] = 8  # the wall's foot
+        g[40 - 6 * self.done:46 - 6 * self.done, self.x:self.x + 2] = 11  # the token (its rail moves up a level)
+        g[52:57, 10:15] = 2  # left
+        g[52:57, 48:53] = 2  # right
+        g[54, 11:14] = 7
+        g[53:56, 50] = 7
+        return g
+
+    def _obs(self, frames=None) -> FrameDataRaw:
+        o = obs_of(self.state, self.done, self.levels, self._grid(), [6])
+        if frames is not None and self.state in (GameState.NOT_FINISHED, GameState.WIN):
+            o.frame = frames + o.frame
+        return o
+
+    def reset(self) -> FrameDataRaw:
+        self.state = GameState.NOT_FINISHED
+        self._place(self.done)
+        return self._obs()
+
+    def step(self, action: GameAction, data=None) -> FrameDataRaw:
+        if action is GameAction.RESET:
+            return self.reset()
+        if self.state != GameState.NOT_FINISHED or action is not GameAction.ACTION6 or data is None:
+            return self._obs()
+        x, y = data["x"], data["y"]
+        if 52 <= y <= 56 and 10 <= x <= 14:
+            self.x = max(self.x - 3, 5)
+        elif 52 <= y <= 56 and 48 <= x <= 52:
+            self.x = min(self.x + 3, 56)
+        else:
+            return self._obs()
+        if self.x == self.patch:
+            finished = self._grid()
+            self.done += 1
+            if self.done == self.levels:
+                self.state = GameState.WIN
+            else:
+                self._place(self.done)
+            return self._obs([finished])
+        return self._obs()
+
+
+class MirrorRoom:
+    """Arrow keys move an L-shaped piece on the right of a mirror line; its mirror
+    image (another colour) moves with it, opposite in x. The level ends when
+    the image covers the target, an outline of the image's shape drawn in a
+    third colour: no mark has the colour of anything that moves."""
+
+    def __init__(self):
+        self.levels = 1
+        self.done = 0
+        self.state = GameState.NOT_PLAYED
+        self.shape = np.zeros((9, 9), dtype=bool)
+        self.shape[:, 0:3] = True
+        self.shape[6:9, :] = True
+        self.target = (5, 34)
+        self._place()
+
+    def _place(self) -> None:
+        self.pos = (44, 10)
+
+    def _image_pos(self) -> tuple[int, int]:
+        return (64 - self.pos[0] - 9, self.pos[1])
+
+    def _grid(self) -> np.ndarray:
+        g = blank()
+        g[4:60, 31:33] = 10  # the mirror line
+        tx, ty = self.target
+        g[ty:ty + 9, tx:tx + 9][self.shape[:, ::-1]] = 11
+        x, y = self.pos
+        g[y:y + 9, x:x + 9][self.shape] = 5
+        ix, iy = self._image_pos()
+        g[iy:iy + 9, ix:ix + 9][self.shape[:, ::-1]] = 9
+        return g
+
+    def _obs(self) -> FrameDataRaw:
+        return obs_of(self.state, self.done, self.levels, self._grid(), [1, 2, 3, 4])
+
+    def reset(self) -> FrameDataRaw:
+        self.state = GameState.NOT_FINISHED
+        self._place()
+        return self._obs()
+
+    def step(self, action: GameAction, data=None) -> FrameDataRaw:
+        if action is GameAction.RESET:
+            return self.reset()
+        if self.state != GameState.NOT_FINISHED:
+            return self._obs()
+        d = {GameAction.ACTION1: (0, -3), GameAction.ACTION2: (0, 3),
+             GameAction.ACTION3: (-3, 0), GameAction.ACTION4: (3, 0)}.get(action)
+        if d is None:
+            return self._obs()
+        nx, ny = self.pos[0] + d[0], self.pos[1] + d[1]
+        if 35 <= nx <= 50 and 5 <= ny <= 50:
+            self.pos = (nx, ny)
+        if self._image_pos() == self.target:
+            self.done = 1
+            self.state = GameState.WIN
+        return self._obs()
+
+
+def test_level_room_learns_alignment_and_plans_the_next_level():
+    agent = LibraryAgent(seed=0)
+    steps = play(agent, LevelRoom(), 600)
+    assert len(steps) == 2, (steps, agent.stats)
+    assert agent.stats.get("marker_alignments", 0) >= 1
+    # level 2: 6 clicks to the left once both buttons are known
+    assert steps[1] - steps[0] <= 6 + 4, (steps, agent.stats)
+
+
+def test_mirror_room_covers_an_outline_of_another_colour_with_the_image():
+    agent = LibraryAgent(seed=0)
+    steps = play(agent, MirrorRoom(), 400)
+    assert len(steps) == 1, (steps, agent.stats)
+    assert agent.stats.get("marker_silhouettes", 0) >= 1
+    assert agent.stats.get("marker_plan_steps", 0) >= 5, agent.stats

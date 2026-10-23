@@ -51,6 +51,7 @@ The project has two strands that share one codebase:
 | 24 | **Game families**: the 25 public games grouped by mechanic, with each family's levels, human baselines, the agent's cost and its share of the official-style score (`scripts/families.py`) | done — navigation and marker games are worth 28 points each; the agent took 0.08 and 0.24 |
 | 25 | **Mechanics library, marker family**: a solver that learns what each action does to the pieces from the frames, finds the marks of each piece's colour, plans the shortest action sequence to cover them, and takes control from the model-guided agent only with a plan in hand | done — official-style score 0.44 → 4.52, levels 113 → 143; `lp85` every level on every seed; new default (`library`) |
 | 26 | **Mechanics library, navigation**: the avatar as a piece — goals of another colour learned from where it ended a level, walkable and blocking colours, pieces that turn as they move | done — no gain (4.52 with and without, `library-nonav` ablation): what loses navigation levels is each game's own mechanism (spells, ghosts, carried glyphs, enemies), not the walking |
+| 27 | **Hand-over discipline**: in a game the solver has not solved a level of, at most 15 probes and two selection presses a level; no strike when there is nothing to aim at yet; a take-over plans at once | done — no gain (4.52; `r11l` 1.02 → 1.22): the second no-gain phase in a row, loop stopped |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -967,6 +968,48 @@ together (`m0r0`). The family's common part — an avatar walking to a goal — 
 its levels are lost; what is lost is each game's own mechanism, which a family solver
 cannot know in advance.
 
+
+### Phase 27 — hand-over discipline
+
+Phase 25's one loss was `r11l`, where a take-over whose plan failed went on probing until
+the level's move budget ran out. Phase 27 caps the solver in games it has not solved a
+level of (15 probes and two selection presses a level), lets it hand the turn back without
+a strike when no piece of a marked colour has moved yet (at the start of `re86`'s second
+level it had given the level up a step before its marks became visible), and resets its
+planning back-off at every take-over. The mean stays at **4.52** (`r11l` 1.02 → 1.22,
+nothing else moves by more than a hundredth): the second phase in a row without a
+measured gain, so the loop stopped here.
+
+### Where the library stands
+
+| | levels (4,000 steps, 5 seeds) | official-style score |
+|---|---:|---:|
+| model-guided agent alone (Phase 23) | 113 | 0.44 |
+| library, marker family (Phase 25) | 143 | 4.52 |
+| library, + navigation and hand-over (Phases 26–27, default) | 141 | 4.52 |
+
+All of the gain is the marker family: its share of the mean went from 0.24 to 4.33, and its
+cost on the levels it completes from 21.8 to 6.3 times the human count. `lp85` is solved
+outright (every level, every seed, in about half the human actions); `re86` and `s5i5`
+open at human cost and stop at their second level; `vc33` and `r11l` keep what the
+model-guided agent already did. Two lessons:
+
+* **A family solver pays only where the family is the whole game.** `lp85` is nothing but
+  rings, buttons and marks, and the solver finishes it. In every other game something
+  beyond the shared core decides the later levels — paint pots and benders (`re86`), arms
+  that collide and carry children (`s5i5`), columns that run out and bridges that swap
+  (`vc33`), handles that go wherever the player clicks (`r11l`), and in navigation each
+  game's own spells, ghosts and glyphs.
+* **Learning from the completed level is the strongest generic signal.** The first frame of
+  a level-up still shows the finished level; the arrangement of piece and mark in it, and
+  the controls that moved the pieces, carry over to the next level of the same game. It is
+  what took `lp85` from five levels to eight.
+
+The evaluation games are different games, so these numbers are an upper bound on what the
+library transfers: it should help on a new game where pieces go onto marks of their colour
+and be inert elsewhere (it takes control only with a plan in hand, gives back after a few
+failures, and costs at most about 20 ms a step).
+
 ## The competition metric, and what it says about this agent
 
 The levels-per-budget numbers above are the right measure for the "beyond" strand (does
@@ -987,6 +1030,7 @@ over games. Every action between two level completions counts, exploration inclu
 | model, Phases 17–18 | 23 / 110 | 0.44 |
 | model, Phases 22–23 | 23 / 113 | 0.44 |
 | library, Phase 25 (marker solver) | 143 levels | **4.52** |
+| library, Phases 26–27 (default) | 141 levels | 4.52 |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1025,13 +1069,27 @@ Phases 11–12 fixed the world model under the planner (sweeps, death attributio
 worth +0.05 on the official score; Phases 13–14 were neutral and negative, and the loop
 stopped there by its own rule.
 
-**Where this stands (default agent, 4,000 steps, 5 seeds):** 23 median levels, 110 levels
-over all runs, official-style score 0.44 against 0.26 for the exploration baseline. The
-score is low in absolute terms because every public game's first level is found by
-exploration at tens of times the human action count, and because the games where later
-levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`) are few.
+**Where this stood after Phase 23 (model-guided agent, 4,000 steps, 5 seeds):** 23 median
+levels, 110 levels over all runs, official-style score 0.44 against 0.26 for the
+exploration baseline. The score was low in absolute terms because every public game's
+first level is found by exploration at tens of times the human action count, and because
+the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
+are few.
 
-**What would move it next**, in order of expected value:
+**Where it stands now (the `library` agent, Phases 24–27):** 141 levels, official-style
+score **4.52** — ten times Phase 23, all of it from the marker-family solver (see "Where the
+library stands" above). The reported top of the Kaggle leaderboard is in the fifties; the
+agent is not ready to submit.
+
+**What would move it next after the library** (Phases 24–27): the remaining points sit in
+each game's own mechanism, so the next families are the ones whose goal is *shown* on
+screen and checkable without knowing the mechanism — a canvas against a reference
+(`cd82`), an output row against rewrite rules (`tr87`), a chain against a template
+(`sk48`), a painted sequence against target boxes (`sb26`): a "reproduce the reference"
+solver that measures the difference between the two and searches for actions that shrink
+it. Before the library, the list read:
+
+**What would move it next (as of Phase 23)**, in order of expected value:
 
 1. *State preconditions on goals.* `ls20`'s box admits the avatar only when the pattern it
    carries matches; the pattern is cycled by floor tiles. The data to learn this is in the

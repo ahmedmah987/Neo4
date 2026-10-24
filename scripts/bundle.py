@@ -22,7 +22,7 @@ PKG = ROOT / "neo4"
 OUT = ROOT / "kaggle" / "my_agent.py"
 
 # Dependency order: each module only imports the ones before it.
-MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "model_agent", "marker", "painter", "pointer", "program", "translate", "board", "bits", "connect", "carry", "library"]
+MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "model_agent", "marker", "painter", "pointer", "program", "translate", "board", "bits", "connect", "carry", "meet", "library"]
 
 HEADER = '''"""Neo4 — ARC-AGI-3 agent for the ARC Prize 2026 Kaggle track (generated file).
 

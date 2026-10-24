@@ -56,6 +56,7 @@ The project has two strands that share one codebase:
 | 29 | **Diagnosis of the marker games' later levels**: for `re86`, `s5i5`, `r11l`, `vc33`, `ar25`, `su15`, where and why the marker solver stops, from each game's source and traces of the solver | done — five missing capabilities, none of them a tuning matter (see "Phase 29"); the next phases build them in order of expected gain |
 | 30 | **Goals beyond "cover a mark of your colour", and the solver's defects**: an outline of a moving piece's shape in another colour as its goal; a mark met by alignment, learned at a level-up; each moved component's own displacement; plan steps checked against the searched state; undo kept out of plans; partly hidden pieces; scrolls weighed by area; selection changes seen through unmarked colours | done — official-style score 9.03 → **9.56**, levels 164 → 168; `ar25`'s first level from ~2,000 actions to 26–130 (human 32); no game loses |
 | 31 | **Mechanics library, pointer family**: a solver that learns from the frames that a click sends the selected handle's centre to the clicked point, which bodies sit at the centroid of which handles, and where a body stood on its mark at a completed level, and plans the select-and-point clicks (one handle, two, or a gather of several) | done — official-style score 9.56 → **10.79**, levels 168 → 177; `r11l` 2.12 → 32.86, its first three levels on every seed in 14, 11 and 17 actions against the humans' 22, 33 and 51; no game loses |
+| 32 | **Pointer family: bodies of several colours, goals by colour, pots that paint**: a body is touching components of any colours, known by its handles once tied (so it survives a change of colours); its goal is the cluster whose colours are all its own; a still thing of a body's shape may give it colours, which is tried once and then planned through, never touching a pot the goal does not want | done — official-style score 10.79 → **14.07**, levels 177 → 192; `r11l` 32.86 → **115** (the cap): all six levels on every seed in 97 actions against the humans' 233; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1210,6 +1211,71 @@ the clicked point. `r11l` still takes 66–170 s per 4,000 steps (26 s before), 
 the marker solver's searches at level 4, which it now reaches; elsewhere times are as in
 Phase 30.
 
+### Phase 32 — bodies of several colours, goals by colour, pots that paint
+
+Phase 31 stopped at `r11l`'s fourth level, where the body is no longer one blob of one
+colour. Reading the game's levels 4–6 showed three things the solver's model lacked: a
+body drawn in several colours whose goal is the ring drawn in the same colours, among
+decoy rings that match nothing; at level 5, bodies that begin blank and take colours from
+*pots* (still discs of a body's shape) they land on, a pot vanishing as it gives its
+colours; and at level 6, pots of colours no goal wants, which spoil a body that touches
+them. `neo4/pointer.py` was rebuilt around a different notion of a body:
+
+* **A thing is touching components of any colours.** Handles, the background, the thin
+  lines drawn between handles and bodies, and the goals' own dots are left out; a handle
+  drawn into something of its colour that it touches (the game sets a level up that way)
+  is found by its shape, holes included, and cut out of it.
+* **A body is known by its handles.** It is tied to the set of handles whose mean centre
+  has been its centre in every frame; things of one look tied in one way (two identical
+  blank bodies are tied to two disjoint sets); a look first seen after the level began is
+  tied only once it has been seen at two places (a hazard cut into pieces by a line never
+  moves). Once tied, the body is whatever sits where its handles put it, whole or drawn
+  over in part by a line, so it stays the same body when its colours change; a tie whose
+  body stayed put while its handles moved is dropped.
+* **A body's goal is matched by colours.** Goals are clusters of small still things in the
+  level's first frame: parts of one colour within four pixels, of different colours a
+  pixel apart at most, so that a goal drawn in two halves is one goal and a goal two
+  pixels from a decoy is two. A body's goal is one whose colours are all among its own:
+  fewest of its own left over, then most matched. A body over its goal while the goal
+  looks different from when the level began (the game marks a met goal) is on it.
+* **Pots are tried, then planned through.** A still thing of a body's shape, where it was
+  when the level began and tied to nothing, may give a body its colours. When no goal
+  fits a body as it is, the bodies are assigned to different goals with the pots that
+  supply the missing colours and add none the goal lacks (at most three, in the order of
+  the shortest way). The first landing on a pot is the experiment: if the body's colours
+  change it is confirmed for the game; two landings that change nothing rule it out.
+* **Where a body may stand.** Over the background, lines, its own colours and handles
+  (nothing in these games stops a body crossing a handle), never on or against another
+  body or a pot it is not going to (touching, the two would read as one thing). A handle
+  never stops against a body or pot drawn in the selected handle's colour, for the same
+  reason.
+
+**Results (Phase 32, `library`, 4,000 steps, 5 seeds): 10.79 → 14.07, levels 177 → 192; no
+other game changes.**
+
+| game | Phase 31 | Phase 32 | what changed |
+|---|---:|---:|---|
+| `r11l` | 32.86 | 115.00 | every level on every seed, in 14, 10, 12, 14, 21 and 26 actions (humans 22, 33, 51, 26, 52, 49): 97 actions for the game against the humans' 233, every level at the 115 cap; a run now takes 6 s instead of 66–170 |
+
+The levels were reached one capability at a time, and each step exposed a defect of
+perception rather than of planning: a diagonal line is wide but one pixel thick; lines cut
+a hazard into pieces that look like new things; a handle stopped against a pot of its
+colour merges with it, and so does a body stopped against a pot or another body; the game
+redraws its lines over a painted body's pixels; a goal two pixels from a decoy is a
+different goal, a goal drawn in two halves a pixel apart is one. The toy test
+(`tests/test_pointer.py`, a blank body, two pots it needs, a decoy pot and a decoy ring)
+is played in 13 actions.
+
+Two guards came from the sweep. A reset may number fewer handles than before, so a handle
+set naming a handle no longer there stops fitting (`sp80` had raised an error). And in a
+game no level of which the solver has finished, it acts only on a body seen moving with
+its handles: in `lf52` a tie read from a single frame had made it take control for eight
+wasted clicks, which moved the exploration enough to lose a level on one seed.
+
+`su15` is still untouched: its clicks pull every piece within reach towards the click
+point, which is not a handle being sent; it is the next pointer mechanism, together with
+pieces that merge.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1219,25 +1285,25 @@ Phase 30.
 | library, + navigation and hand-over (Phases 26–27) | 141 | 4.52 |
 | library, + copy family (Phase 28) | 164 | 9.03 |
 | library, + outline and alignment goals, defects fixed (Phase 30) | 168 | 9.56 |
-| library, + pointer family (Phase 31, default) | 177 | **10.79** |
+| library, + pointer family (Phase 31) | 177 | 10.79 |
+| library, + bodies of several colours and pots (Phase 32, default) | 192 | **14.07** |
 
 All of the gain is two families, played by three solvers. The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
-0.24 to 6.09, and its cost on the levels it completes from 21.8 to 1.6 times the human
-count (2.3 in Phase 30; `r11l`'s levels under the pointer solver cost 0.4); the copy
-family's went from 0.01 to 4.52, at 0.9 times the human count (all of it `cd82`). `lp85`
-is solved outright (every level, every seed, in about half the human actions); `r11l`'s first three
-levels are played below human cost on every seed; `re86` and `s5i5` open at human cost and
-stop at their second level; `vc33` keeps what the model-guided agent already did. Two
+0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
+count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's went from 0.01 to 4.52, at 0.9
+times the human count (all of it `cd82`). `lp85` and `r11l` are solved outright (every
+level, every seed, in about half the human actions); `re86` and `s5i5` open at human cost
+and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
-  rings, buttons and marks, and `cd82` nothing but a canvas, brushes and a palette, and the
-  solvers finish both. In every other game something
-  beyond the shared core decides the later levels — paint pots and benders (`re86`), arms
-  that collide and carry children (`s5i5`), columns that run out and bridges that swap
-  (`vc33`), bodies and marks matched by a combination of colours (`r11l` from level 4),
-  and in navigation each game's own spells, ghosts and glyphs.
+  rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, and `r11l`
+  nothing but handles, bodies, goal rings and pots, and the solvers finish all three. In
+  every other game something beyond the shared core decides the later levels — paint pots
+  and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
+  and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
+  in navigation each game's own spells, ghosts and glyphs.
 * **Learning from the completed level is the strongest generic signal.** The first frame of
   a level-up still shows the finished level; the arrangement of piece and mark in it, and
   the controls that moved the pieces, carry over to the next level of the same game. It is
@@ -1271,7 +1337,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phases 26–27 | 141 levels | 4.52 |
 | library, Phase 28 (copy solver) | 164 levels | 9.03 |
 | library, Phase 30 | 168 levels | 9.56 |
-| library, Phase 31 (pointer solver, default) | 177 levels | **10.79** |
+| library, Phase 31 (pointer solver) | 177 levels | 10.79 |
+| library, Phase 32 (several colours, pots; default) | 192 levels | **14.07** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1317,12 +1384,13 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–31):** 177 levels, official-style
-score **10.79** — twenty-four times Phase 23, all of it from three family solvers: pieces
+**Where it stands now (the `library` agent, Phases 24–32):** 192 levels, official-style
+score **14.07** — thirty-two times Phase 23, all of it from three family solvers: pieces
 onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body
-between them lands on its mark (`r11l`, 1.31), and a canvas painted like its reference
-(`cd82`, 4.52). The reported top of the Kaggle leaderboard is in the fifties; the agent is not ready
-to submit.
+between them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level,
+in 97 actions against the humans' 233), and a canvas painted like its reference (`cd82`,
+4.52). Three of the 25 public games are now played at or near the cap; the reported top of
+the Kaggle leaderboard is in the fifties, and the agent is not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because
@@ -1350,8 +1418,8 @@ on mechanisms beyond the shared core (`re86`, `s5i5`). Before the library, the l
    to check — the plan's optional phase.
 
 The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
-the agent runs at about 25–250 engine steps per second on one CPU core depending on the
-game (`r11l` is the slowest), with no GPU and no network.
+the agent runs at about 20–400 engine steps per second on one CPU core depending on the
+game (the slowest, `m0r0`, takes about 200 s for 4,000 steps), with no GPU and no network.
 
 ## Attribution and licence
 

@@ -67,6 +67,7 @@ The project has two strands that share one codebase:
 | 40 | **Mechanics library, carry family**: a solver that reads goal zones (outlined rectangles), framed blocks, the player (a marked edge: its facing) and agents (cells that move on their own), learns by trying what stops the player and what stops a carried block, tells helpers from thieves by what they do with blocks, and plans every step: remove a thief it can catch, else carry the cheapest block to the deepest free goal cell, or where a helper will fetch it (the helper's own delivery counted, goal cells reserved), else wait out of the way; a replay of a lost level varies its choices | done — official-style score 37.05 → **40.38**, levels 353 → 394; `wa30` 0 → 83.4: levels 1–8 on every seed, the first three, the fifth to eighth at the cap; level 4 takes one to five attempts, level 9 (70 steps a try) was completed on one seed of five; no game loses |
 | 41 | **Diagnosis of eight more games** `sc25`, `g50t`, `ls20`, `m0r0`, `bp35`, `dc22`, `tu93`, `sp80`: mechanics from the sources, every level played (by hand or by search on a model), the first two levels and every whole game replayed here | done — all eight are deterministic and every level was won in no more actions than the humans took (54 of 56 at the cap); `m0r0` (+4.6, medium: a search over the joint positions of the bodies the keys move) first, then `sp80` (+4.5) and `tu93` (+4.3), then the first levels of `ls20` and `sc25`; `dc22`, `bp35` and `g50t` need a model of what clicks do to the whole board (large) (see "Phase 41") |
 | 42 | **Mechanics library, meet family**: a solver for grids on which every key moves two to four identical bodies, each its own way (a probe and every move show which axis is mirrored), until they meet; unknown cells are tried only when no plan is left — traps (everything back to the start) by look, switches that clear the cells of their colour, blocks that a click picks out and the keys then move; plans from a search over the bodies' joint positions, blocks parked out of the way, else a search over bodies, blocks and the selection together | done — official-style score 40.38 → **44.98**, levels 394 → 419; `m0r0` 0.01 → 115.0: every level on every seed, 217 actions against the humans' 1,107; no game loses |
+| 43 | **Mechanics library, pour family**: a solver for boards with spouts, cups, a floor and movable pieces (bars that water runs along, angles that turn it); the flow simulated cell by cell, a beam search over where the pieces go led by the simulated outcome and priced by keys and clicks, what stops a piece learned from keys that do not move it | done — official-style score 44.98 → **49.48**, levels 419 → 440; `sp80` 2.49 → 115.0: every level on every seed, each on its first pour, 104 actions against the humans' 518; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1776,6 +1777,56 @@ fifth give the sixth its gates and switches before a body has stood on one. The 
 never stepped on: plans do not enter unknown cells, and here none needs to. Played alone,
 from a fresh start, the fourth and sixth levels take one and four actions more.
 
+### Phase 43 — the pour family: place the pieces so that the poured water fills every cup
+
+`neo4/pour.py` is the second solver Phase 41 called for. `sp80` shows spouts with a drop of
+water under each, cups, a floor strip, and pieces: bars that water runs along and falls off
+at both ends, and from level 5 angles that turn it. A click picks a piece (the one picked is
+drawn in a colour of its own), the keys move it a cell, and the fifth key pours: the water
+falls from the spouts, spreads along whatever it lands on, turns where an angle sends it,
+and the level is done if every cup is filled and no water touched the floor. A pour that
+fails is wiped and counted (four are allowed), and every action spends a level budget of 30
+to 120 steps. Three of the six levels are drawn upside down (the water rises), and from
+level 5 cups also lie on their side against walls of floor.
+
+* **Reading the screen.** The drops are the solid squares that hang against a spout, with
+  open space beyond: their size is the cell, the spout-to-drop direction is the way water
+  falls, and these are read once, on a level's first frame (a spout riding on a piece can
+  look like a drop later on). The floor is the colour along the board's far end; cups are
+  U shapes of five cells round an opening; every other object is a piece: a bar, an angle
+  (three cells of a square), or a bar holding a spout of its own.
+* **The flow** is simulated cell by cell, as drops: a drop goes on into empty cells and into
+  water; on a bar, or on a cup's rim, it spreads to the cells beside it and goes on from
+  there; an angle turns it away from its arm; in a cup's opening it fills the cup; over the
+  board's edge it is gone; on the floor the pour fails. Checked against the game on 180
+  random placements of the six levels, it gave the game's water, cell for cell, on all but
+  one, where two pieces overlapped (which plans never do).
+* **The plan** is a beam search over where the pieces go: each step moves one piece to a
+  place where it catches water of the simulated pour, or out of the water's way; places
+  are scored by the simulated outcome (three for a cup filled, one off for each drop that
+  reaches the floor) and priced by the keys that take the piece there and a click to pick
+  it; past the first placement that wins, the search goes one step further for a cheaper
+  one. What stops a piece is learned from a key that does not move it: a margin round the
+  cups, rows next to the spouts' edge, or that one place. The piece picked out is read from
+  its colour once one key has shown it (before, the one piece drawn in a colour of its own
+  is taken, and the first key checks it); a pour that does not win is ruled out.
+
+It goes last in the library. Over 100 random steps of each public game a pour scene is read
+only in `sp80`. The toy test (`tests/test_pour.py`: other colours, a flow written apart from
+the solver's, water rising on the second level past a bar in its way) is played in 6 and 6
+actions.
+
+**Results (Phase 43, `library`, 4,000 steps, 5 seeds): 44.98 → 49.48, levels 419 → 440; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 42 | Phase 43 | what changed |
+|---|---:|---:|---|
+| `sp80` | 2.49 | 115.00 | every level on every seed, each on its first pour, in 4, 7, 16, 22, 24 and 31 actions (humans 39, 58, 25, 148, 96, 152): 104 against 518; a run takes 14 s instead of 27 |
+
+The first two levels take the fewest actions the diagnosis found, the fourth and fifth
+fewer than it found (22 and 24 against 25 and 26), the third and sixth more (16 and 31
+against 10 and 30); the third, the tightest (25 human actions), is still at the cap.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1793,20 +1844,21 @@ from a fresh start, the fourth and sixth levels take one and four actions more.
 | library, + bit-program family (Phase 38) | 323 | 32.45 |
 | library, + connector family (Phase 39) | 353 | 37.05 |
 | library, + carry family (Phase 40) | 394 | 40.38 |
-| library, + meet family (Phase 42, default) | 419 | **44.98** |
+| library, + meet family (Phase 42) | 419 | 44.98 |
+| library, + pour family (Phase 43, default) | 440 | **49.48** |
 
-All of the gain is six families, played by ten solvers. The navigation family's share (`ls20`,
+All of the gain is six families, played by eleven solvers. The navigation family's share (`ls20`,
 `tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 4.68, nearly all of it `m0r0`, at
 0.2 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
-went from 0 to 9.17 (`sb26` and `tn36`, at 0.46 times the human count). The marker family's share of
+went from 0.10 to 13.77 (`sb26`, `tn36` and `sp80`, at 0.33 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04` and `m0r0` are solved outright (every level, every seed, in half
+`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
 the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -1816,8 +1868,9 @@ lessons:
   nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
   frames and tiles, `tr87` nothing but rules and two rows of glyphs, `ft09` nothing
   but tiles and clues, `tn36` nothing but a board, a panel of bits and its demos, `cn04`
-  nothing but pieces and their connectors, and `m0r0` nothing but two bodies, walls, traps,
-  gates and blocks, and the solvers finish all nine. In
+  nothing but pieces and their connectors, `m0r0` nothing but two bodies, walls, traps,
+  gates and blocks, and `sp80` nothing but spouts, pieces and cups, and the solvers finish
+  all ten. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1863,7 +1916,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 38 (bit-program solver) | 323 levels | 32.45 |
 | library, Phase 39 (connector solver) | 353 levels | 37.05 |
 | library, Phase 40 (carry solver) | 394 levels | 40.38 |
-| library, Phase 42 (meet solver; default) | 419 levels | **44.98** |
+| library, Phase 42 (meet solver) | 419 levels | 44.98 |
+| library, Phase 43 (pour solver; default) | 440 levels | **49.48** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1909,28 +1963,29 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–42):** 419 levels, official-style
-score **44.98** — a hundred times Phase 23, all of it from ten family solvers: pieces onto
-their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
-them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
-actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
-(`tr87`, 4.60: every level, in 122 actions against 414), a program filled so that its run
-writes the target (`sb26`, 4.57: every level, in 124 actions against 213), and a canvas
-painted like its reference (`cd82`, 4.52), and the tiles of a board set so that every clue
-is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a program of bits
-set so that its run brings a piece onto its outline (`tn36`, 4.60: every level, in 122
-actions against 317), and pieces joined so that every connector meets another (`cn04`,
-4.60: every level, in 220 actions against 789), and blocks carried into goal zones with
-helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed), and two
-bodies moved by the same keys brought together past traps, gates and blocks (`m0r0`, 4.60:
-every level, in 217 actions against 1,107). Nine of the 25 public games are now played at
-or near the cap and a tenth at 72%; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
-not ready to submit.
+**Where it stands now (the `library` agent, Phases 24–43):** 440 levels, official-style
+score **49.48** — a hundred and twelve times Phase 23, all of it from eleven family
+solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
+that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
+every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
+the rules edited (`tr87`, 4.60: every level, in 122 actions against 414), a program filled
+so that its run writes the target (`sb26`, 4.57: every level, in 124 actions against 213),
+and a canvas painted like its reference (`cd82`, 4.52), and the tiles of a board set so
+that every clue is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a
+program of bits set so that its run brings a piece onto its outline (`tn36`, 4.60: every
+level, in 122 actions against 317), and pieces joined so that every connector meets another
+(`cn04`, 4.60: every level, in 220 actions against 789), and blocks carried into goal zones
+with helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed), and
+two bodies moved by the same keys brought together past traps, gates and blocks (`m0r0`,
+4.60: every level, in 217 actions against 1,107), and pieces placed so that the poured
+water fills every cup (`sp80`, 4.60: every level, in 104 actions against 518). Ten of the
+25 public games are now played at or near the cap and an eleventh at 72%; the reported top
+of the Kaggle leaderboard is in the fifties, and the agent is not ready to submit.
 
-**What would move it next (Phases 41–42):** the eight games that were near zero were all
+**What would move it next (Phases 41–43):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
-rules; the first of them, `m0r0`, is now played at the cap by the meet solver. Next come the
-pour of `sp80` (+4.5) and the maze of `tu93` (+4.3: one body to an exit past pieces whose
+rules; the first two of them, `m0r0` and `sp80`, are now played at the cap by the meet and
+pour solvers. Next comes the maze of `tu93` (+4.3: one body to an exit past pieces whose
 rules are learned by watching them), then the first levels of `ls20` and `sc25` (see
 "Phase 41").
 

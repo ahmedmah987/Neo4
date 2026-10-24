@@ -37,6 +37,7 @@ model keeps mispredicting or the marks are covered without the level ending.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections import Counter, deque
 from dataclasses import dataclass, field
@@ -123,9 +124,21 @@ def kind_of(c: fp.Component) -> str:
 
 
 _KINDS: dict[str, str] = {}  # exact shape -> kind: the kind depends on the mask only
+_RECENT: list[tuple[bytes, list[Comp]]] = []  # the last frames segmented: every solver segments each frame
 
 
 def components(grid: np.ndarray, mask: np.ndarray | None) -> list[Comp]:
+    key = bytes(str((grid.shape, grid.dtype.str)), "ascii") + grid.tobytes() + (b"" if mask is None else mask.tobytes())
+    for k, comps in _RECENT:
+        if k == key:
+            return [copy.copy(c) for c in comps]  # copies: callers number them
+    out = _segment(grid, mask)
+    _RECENT.insert(0, (key, out))
+    del _RECENT[2:]
+    return [copy.copy(c) for c in out]
+
+
+def _segment(grid: np.ndarray, mask: np.ndarray | None) -> list[Comp]:
     out = []
     for c in fp.segment(fp.apply_mask(grid, mask)):
         if c.color == fp.MASK_COLOR or c.area > MAX_AREA:

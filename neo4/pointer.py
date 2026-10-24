@@ -48,6 +48,7 @@ MAX_TIE = 4  # a body is tied to at most this many handles
 MAX_LEVEL_ACTIONS = 120  # actions the solver may spend on one level
 UNPROVEN_ACTIONS = 40  # ... in a game it has not completed a level of
 MAX_FAILS = 8  # clicks that did not do what was planned, per level
+UNPOINTED_CLICKS = 200  # clicks after which a game with no goto is not a pointer game
 LATTICE = 2  # spacing of the places tried for a handle moved out of the way
 MARK_SIZE = 12
 
@@ -83,6 +84,7 @@ class PointerSolver:
         self.offsets: dict[tuple, tuple[float, float]] = {}
         self.level = -1
         self.in_control = False
+        self.clicks = 0
         self._new_level(None)
 
     # -- per level -------------------------------------------------------------
@@ -125,6 +127,9 @@ class PointerSolver:
             if obs.state == GameState.GAME_OVER and self.in_control:
                 self.fails += 2
             return
+        if 6 not in obs.available_actions:
+            self.level = -1  # nothing to point with; start afresh if clicks appear
+            return
         grid = np.asarray(obs.frame[-1])
         if obs.levels_completed != self.level:
             if obs.levels_completed > self.level >= 0:
@@ -162,6 +167,11 @@ class PointerSolver:
             if (c.color, c.shape, c.x, c.y) not in before_keys:
                 self.moving_colors.add(c.color)
         if data is not None and action.is_complex():
+            self.clicks += 1
+            if self.clicks >= UNPOINTED_CLICKS and self._handle_kind() is None:
+                self.disabled = True  # nothing has ever gone where it was pointed
+                self.history = []
+                return
             pt = (int(data["x"]), int(data["y"]))
             gone = [c for c in prev if (c.color, c.shape, c.x, c.y) not in after_keys]
             new = [c for c in after if (c.color, c.shape, c.x, c.y) not in before_keys]

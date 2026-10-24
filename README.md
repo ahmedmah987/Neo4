@@ -181,6 +181,7 @@ neo4/
   carry.py        the carry solver: blocks into goal zones, helpers and thieves, barriers learned
   meet.py         the meet solver: bodies moved by the same keys brought together; traps, gates, blocks
   pour.py         the pour solver: spouts, cups and pieces read, the flow simulated, placements searched
+  maze.py         the maze solver: avatar to the exit on a lattice of nodes, watchers' rules learned
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)

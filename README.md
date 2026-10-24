@@ -65,6 +65,7 @@ The project has two strands that share one codebase:
 | 38 | **Mechanics library, bit-program family**: a solver that reads the bit panels (lattices of two-colour glyphs), the board over each, the piece and its outline (its ring at the target turn and size), marks, obstacles, the button and the demo tabs; learns what each column value does from the frames of every run, demos included; plans the cheapest program in bit flips, chaining runs through marks and keeping clear of what blinks during a run | done — official-style score 27.85 → **32.45**, levels 288 → 323; `tn36` 0 → 115: all seven levels on every seed in 122 actions against the humans' 317; no game loses |
 | 39 | **Mechanics library, connector family**: a solver that reads the cell lattice, the pieces and their connector cells (greyed-out pieces selected once to be seen), checks what the moves and the turn do, discovers stacks of variants and cycles through them end to end, and plans placements in which every connector meets exactly one other and no body overlaps anything (the two connector types are not shown), each joined group put where it costs the fewest actions | done — official-style score 32.45 → **37.05**, levels 323 → 353; `cn04` 0 → 115: all six levels on every seed in 220 actions against the humans' 789; no game loses |
 | 40 | **Mechanics library, carry family**: a solver that reads goal zones (outlined rectangles), framed blocks, the player (a marked edge: its facing) and agents (cells that move on their own), learns by trying what stops the player and what stops a carried block, tells helpers from thieves by what they do with blocks, and plans every step: remove a thief it can catch, else carry the cheapest block to the deepest free goal cell, or where a helper will fetch it (the helper's own delivery counted, goal cells reserved), else wait out of the way; a replay of a lost level varies its choices | done — official-style score 37.05 → **40.38**, levels 353 → 394; `wa30` 0 → 83.4: levels 1–8 on every seed, the first three, the fifth to eighth at the cap; level 4 takes one to five attempts, level 9 (70 steps a try) was completed on one seed of five; no game loses |
+| 41 | **Diagnosis of eight more games** `sc25`, `g50t`, `ls20`, `m0r0`, `bp35`, `dc22`, `tu93`, `sp80`: mechanics from the sources, every level played (by hand or by search on a model), the first two levels and every whole game replayed here | done — all eight are deterministic and every level was won in no more actions than the humans took (54 of 56 at the cap); `m0r0` (+4.6, medium: a search over the joint positions of the bodies the keys move) first, then `sp80` (+4.5) and `tu93` (+4.3), then the first levels of `ls20` and `sc25`; `dc22`, `bp35` and `g50t` need a model of what clicks do to the whole board (large) (see "Phase 41") |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1680,6 +1681,42 @@ each step, needs a little more, so only a varied replay that happens to be fast 
 completes it. Both would need a plan over several blocks at once, with the helpers'
 choices simulated, which is the macro search the diagnosis used on the game's own rules.
 
+### Phase 41 — eight more games: a diagnosis
+
+Eight games still scored almost nothing: `sc25`, `g50t`, `ls20`, `m0r0`, `bp35`, `dc22`,
+`tu93` and `sp80` (together 4.4 points on the per-game scale, 0.18 of the mean, nearly all
+of it `tu93` and `sp80`). As in Phase 36 each was read from its source, its levels rendered
+and played; four agents each took two games, and every first-level solution they reported
+(and the second, where given) was replayed here and completed its level, as did every
+game's whole sequence, chained from the reset to the win. None of the eight uses randomness
+(the seed changes nothing), and every level of every game was won in no more actions than
+the humans took: on 54 of the 56 levels the counts below score the cap (`tu93`'s first and
+seventh score 111 and 100). Six games show their whole level; `bp35` scrolls with the
+player and `ls20`'s last level is hidden in fog outside a disc round the player.
+
+| Game | What it is | Played (actions per level, against the humans') | What a solver needs | Gain on the mean | Effort |
+|---|---|---|---|---:|---|
+| `m0r0` (6 levels) | two players on one grid move together, one of them mirrored left to right; they must meet; checkered cells send everything back to the start; from level 3 blocks are selected by a click and moved by the keys, from level 5 bars open while a player stands on a switch of their colour | by search on a cell model: 15, 23, 53, 11, 39, 38 (30, 111, 203, 26, 500, 237) | the grid, the two players and what moves each (a probe per key); a search over both positions together; for blocks, moves that take a block out of the way first; switches learned by watching a bar vanish | **+4.6** (115 even at twice these counts) | medium |
+| `sp80` (6 levels) | pieces moved by keys (a click picks another) under spouts; one key pours, and the water must fill every cup without touching the floor; deflectors turn it, platforms split it; four failed pours allowed; some levels drawn upside down | by hand, checked by the game's pour: 4, 7, 10, 25, 26, 30 (39, 58, 25, 148, 96, 152) | pieces, spouts, cups and their openings, deflectors, floor strips; a flow simulator (the rules show in one pour); a search over where each piece goes, priced by its moves | +4.5 | medium |
+| `tu93` (9 levels) | a maze of nodes and edges, fully visible, the player to the exit in a step budget; sentries lunge at a player that stops in their gaze, patrollers walk and turn at dead ends, followers walk the player's trail; the player removes any of them by entering it from the side or behind | by search: 18, 10, 19, 17, 29, 28, 14, 21, 29 (19, 16, 34, 42, 123, 80, 14, 23, 111) | the maze graph and the eyed pieces; their rules learned from watching them and from a death each; a search over position and time; the first and seventh levels need the shortest route | +4.3 (levels 1, 2, 7 by avoiding gazes alone: +0.9) | medium |
+| `ls20` (7 levels) | a maze; the player carries a key (shape, colour, turn) shown in a corner; tiles each advance one of the three; a door admits only the key it shows; a step bar with refills, three lives; pushers throw the player to the next wall; from level 5 the tiles slide along tracks; fog on the last | by search: 13, 45, 39, 43, 44, 72, 53 (22, 123, 73, 84, 96, 192, 186) | walls, key, doors, tiles and refills on the 5-pixel grid; what each tile does to the key (watched; up to five visits for a cycle); a search over (cell, key, refills, steps left); the tracks predicted from watching; a map kept under the fog | +4.6 (levels 1–4: +1.6) | medium (levels 1–4), large |
+| `dc22` (6 levels) | a player walks a board; buttons on a side panel, each the colour of what it drives, open tiles, turn bridges, step bars through their states, teleport, drive a crane; keys on the board reveal buttons; a click that takes the floor from under the player costs 20 steps | by search over board states: 20, 42, 45, 62, 108, 139 (59, 102, 67, 98, 324, 578) | board and panel apart; walkable floor from colours and from moves that do nothing; each button's effect learned by one click; a search over (board state, position) with walking collapsed; levels 5 and 6 have thousands of board states, so effects must be simulated, not tried | +4.6 (levels 1–4: +2.2) | large |
+| `bp35` (9 levels) | a gravity platformer on a 6-pixel grid, left and right only; a click removes, toggles or flips a tile (gravity among them), or spawns new ones to climb on; spikes kill on landing; a rising ceiling on the first three; the view scrolls with the player and the gem is off screen | 15, 40, 34, 19, 30, 41 by search on a cell model checked against the game, 43, 41, 74 by hand (21, 48, 44, 38, 33, 87, 86, 131, 163) | tiles by colour, a map of the rows seen, falling under gravity known in advance, each tile's click learned by trying; plans that click a tile just before the move that needs it; the last two levels defeat a plain search | +4.6 (levels 1–6: +2.1) | large |
+| `sc25` (6 levels) | a player to an exit; spells cast by drawing a pattern on a 3×3 click pad (the allowed ones drawn beside it): shrink and grow (narrow gates), teleport to a marker, a fireball that clears barriers of its target's colour; a tight budget | 13, 5, 11, 21, 36, 35 (36, 6, 32, 83, 143, 50); the second level must be exactly 5 to reach the cap | the pad and its spell icons (the first three levels show where a pattern goes); each spell's effect from one cast; a search over (place, size, barriers, teleport); little room to explore on levels 2 and 6 | +4.6 (levels 1–3: +1.3) | medium (levels 1–3), large |
+| `g50t` (7 levels) | a player and a goal; plates open wired doors while something stands on them, toggles flip them, pads swap places; the fifth key sends the world back to the start and leaves a ghost that replays the player's moves (two ghosts from level 2); patrolling enemies from level 6 | 17, 31, 64, 31 by search over ghost plans, 52, 49, 43 by hand (78, 175, 179, 230, 96, 54, 67) | floor, plates, wires, doors, pads, ghost slots; what the fifth key does (learned by trying); a planner choosing a plate for each ghost and timing the last run over (cell, doors, time); the enemy's track from watching | +4.6 (levels 1–4: +1.6) | large |
+
+The order follows from the last two columns. `m0r0` comes first: it is worth the most,
+everything it needs is on screen, and its first levels are a plain search over the two
+players' positions once a probe per key has shown how each moves; a solver for a grid on
+which the keys move one or more bodies, learning by probing what each key does to each
+and searching their joint positions, is also the core of `tu93` and of `ls20`'s first
+levels. `sp80` follows (a deterministic pour, wide slack), then `tu93` (the same grid
+search, with pieces whose rules are learned), then the first levels of `ls20` and `sc25`;
+`dc22`, `bp35` and `g50t` need a model of what clicks or the fifth key do to the whole
+board, which the library does not have. Five of the eight (`m0r0`, `tu93`, `ls20`, `dc22`,
+`sc25`) are navigation games, the family that the evaluation games are most likely to
+share.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1823,6 +1860,12 @@ actions against 317), and pieces joined so that every connector meets another (`
 helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed). Eight of
 the 25 public games are now played at or near the cap and a ninth at 72%; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
+
+**What would move it next (Phase 41):** the eight games still near zero were all won, every
+level, in no more actions than the humans took, by searches on models of their rules; the
+next solver is one for a grid on which the keys move one or more bodies (`m0r0`, then
+`tu93` and the first levels of `ls20`), then the pour of `sp80`, worth up to 4.6 of the mean
+each (see "Phase 41").
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

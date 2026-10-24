@@ -201,6 +201,7 @@ class PointerSolver:
         self._seen_at: dict[tuple, set] = {}  # a thing's look -> places it was seen at
         self._sig_snaps: Counter = Counter()  # a thing's look -> frames it was seen in
         self._tied: dict[frozenset, Obj] = {}  # handle set -> its body, as last seen whole
+        self._tie_moved: set[frozenset] = set()  # ties whose body has been seen at two places
         self._ambiguous: dict[tuple, list[frozenset]] = {}  # a look -> handle sets that might hold it
         self.bad_points: set = set()  # (kind, x, y): a handle sent there did not go
         self.bad_places: set = set()  # (tie, x, y): a body placed there bounced or did not end the level
@@ -390,7 +391,7 @@ class PointerSolver:
             self.handle_colors |= {c.color for c in self.first + latest if c.kind == kind}
             self._ids, self._cur, self._snaps = {}, {}, 0
             self._fits_by, self._seen_at, self._sig_snaps = {}, {}, Counter()
-            self._tied, self._ambiguous = {}, {}
+            self._tied, self._ambiguous, self._tie_moved = {}, {}, set()
             start = self._start_handles()
             if not start:
                 return
@@ -516,6 +517,8 @@ class PointerSolver:
             m = mean(tie)
             hit = self._seen_body(objs, body, m)
             if hit is not None:
+                if hit.place != body.place:
+                    self._tie_moved.add(tie)
                 self._tied[tie] = replace(hit, tie=tie)  # its colours may have changed
             elif not _near(body, m) and any(o.sig == body.sig and o.place == body.place for o in objs):
                 del self._tied[tie]  # it stayed put while its handles moved: not tied after all
@@ -530,6 +533,8 @@ class PointerSolver:
             self._seen_at.setdefault(sig, set()).update(pts)
 
             def fits(sub):
+                if any(i not in self._ids for i in sub):
+                    return False  # numbered afresh after a reset, with fewer handles
                 m = mean(sub)
                 return any(abs(m[0] - p[0]) < 1 and abs(m[1] - p[1]) < 1 for p in pts)
             if sig not in self._fits_by:
@@ -769,7 +774,9 @@ class PointerSolver:
         return out
 
     def recognised(self) -> bool:
-        return self._handle_kind() is not None and bool(self._tied)
+        """Handles and a tied body; in a game no level of which the solver has
+        finished, a body seen to move with its handles."""
+        return self._handle_kind() is not None and bool(self._tied) and (self.confirmed or bool(self._tie_moved))
 
     # -- planning ---------------------------------------------------------------
 

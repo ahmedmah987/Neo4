@@ -62,6 +62,7 @@ The project has two strands that share one codebase:
 | 35 | **Mechanics library, translation family**: a solver that reads glyph tiles (a frame colour and a pattern up to a quarter turn), rules (two sequences joined by a line) and the input and output rows, computes the output as the first-match parse of the input (rewriting through an intermediate family where needed), learns each family's cycle from its turns, and edits the output, or the rules' sides when the cursor is on them (a search fixing each side's turn when the parse first needs it) | done — official-style score 18.65 → **23.25**, levels 232 → 262; `tr87` 0 → 115: all six levels on every seed in 122 actions against the humans' 414; no game loses |
 | 36 | **Diagnosis of six more puzzle games** `tn36`, `ft09`, `lf52`, `cn04`, `wa30`, `ka59`: mechanics from the sources, every level played (by hand or by search on a model), the first levels replayed here | done — all six are deterministic and playable well under the human counts; `ft09` (+4.6, small effort: a frame-only script already plays it at the minimum) first, then `tn36` and `cn04` (+4.6 each, medium), `wa30` (medium), `lf52` and `ka59` (large) (see "Phase 36") |
 | 37 | **Mechanics library, clue-board family**: a solver that reads a board of square blocks (tiles, marked tiles, clues) and the palette shown, learns what each clue mark means from the solved examples on screen and from completed levels, checks what every click turns, and plans the fewest clicks by a search over coupled tiles | done — official-style score 23.25 → **27.85**, levels 262 → 288; `ft09` 0 → 115: all six levels on every seed in 75 actions against the humans' 208, each at the minimum; no game loses |
+| 38 | **Mechanics library, bit-program family**: a solver that reads the bit panels (lattices of two-colour glyphs), the board over each, the piece and its outline (its ring at the target turn and size), marks, obstacles, the button and the demo tabs; learns what each column value does from the frames of every run, demos included; plans the cheapest program in bit flips, chaining runs through marks and keeping clear of what blinks during a run | done — official-style score 27.85 → **32.45**, levels 288 → 323; `tn36` 0 → 115: all seven levels on every seed in 122 actions against the humans' 317; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -170,6 +171,7 @@ neo4/
   program.py      the program-family solver: target row, frames and slots, a search over the run
   translate.py    the translation-family solver: glyphs, rules, rows and cursor; rule editing
   board.py        the clue-board solver: tiles and clues on a lattice, mark meanings, fewest clicks
+  bits.py         the bit-program solver: bit panels, piece and outline, values learned from runs
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1423,7 +1425,7 @@ was found for every level (but one), each well under the human count.
 | `ka59` (7 levels) | blocks selected by a click and moved by keys push others that slide over gulches; bombs on a timer push with a blast; blocks must fit outlines exactly | 11, 40, 33, 45, 20, 51, 100 (28, 109, 51, 51, 33, 132, 326) | pixel-exact physics of pushes, slides and blasts, and a search over regions joined by them | +4.6 (levels 1–4 without bombs: +1.6) | large |
 
 The order follows from the last two columns. `ft09` comes first (Phase 37): it is worth as much as any
-and a script that reads only the frames already plays it at the minimum. `tn36` and `cn04`
+and a script that reads only the frames already plays it at the minimum. `tn36` (Phase 38) and `cn04`
 follow, then `wa30`; `lf52` and `ka59` need a planner and a physics model the library does
 not have. As with every solver so far, these are family solvers built from public games:
 they encode what the family is (clues on a board, a program of bits) and learn the rest
@@ -1487,6 +1489,76 @@ diagnosis had already shown that the frames alone suffice, and the work was in w
 not drawn — which mark means what (learned from the tutorial's examples and kept), and
 what a click turns (predicted from the marks, checked on every click).
 
+### Phase 38 — the bit-program family: set the bits so that running the program brings the piece home
+
+`neo4/bits.py` is the second solver Phase 36 called for. `tn36` shows a board with a piece
+and the piece's outline, where it must end (in place, turned, sized and coloured as the
+outline shows), and under the board a panel of columns of bits. Each column is one
+instruction, its value the bits that are on, and the values are not additive (1 moves
+left, 2 right, 3 down, 33 up, 5 turns, 8 and 9 resize, 63 recolours, most values do
+nothing). A click flips a bit; a button runs the program, a column a frame; a piece that
+ends on its outline completes the level, any other goes back to its start. From level 2
+a second board shows demonstrations, each run by a tab under it; walls stand in the way
+from level 3, checkpoints (marks that a run ending on them makes the new start) from
+level 6, and lasers that blink during a run on level 7.
+
+* **Reading the screen.** A panel is a lattice of small glyphs of two colours (on and
+  off) on a ground of one colour, the same glyph in every column of a row (`tn36` draws
+  each bit row as its own glyph); the colour of most glyphs is "off". A panel's board is
+  the region its ground frames above it, or else the region of the colour just above it.
+  The board's floor is its two commonest colours that come in small cells (a
+  checkerboard), else its commonest colour; the rest are objects. The piece and its
+  target are the two objects one of which is the other's ring: every outline pixel within
+  s of the piece rendered turned k quarter turns at size s, none under it, most of the
+  ring drawn. Solid rectangles are never the piece (they show no turn), and the last
+  level's piece shape is tried first, also inside an object, since a piece standing on a
+  mark of its colour merges with it. Other objects of the piece's or target's colour are
+  marks; the rest are obstacles, kept as a pixel map. The button is the solid object off
+  the boards, panels and tabs nearest the panel; tabs are a row of equal square frames
+  under the other panel.
+* **What the values do** is learned from frames, not known. A run returns a frame before
+  the first column, one after each column and one after the end, so a run, a demo or the
+  solver's own, shows what each of its values did: the change of the piece's place, turn,
+  size or colour. An instruction is expected to do one thing, a change of two is taken
+  for a misreading, and a value seen doing something keeps it (seeing nothing may mean it
+  was stopped).
+* **The plan** is the cheapest program: per column, for each known effect the value with
+  the fewest bits to flip from what the column holds; a search over the columns from the
+  piece's start that keeps the piece on the board and off the obstacles. If no single run
+  reaches the outline, runs that end exactly on a mark come first (the panel then holds
+  that run's program, which prices the next), up to three runs. A run that ended on a mark
+  without moving the start there rules marks out for the game.
+* **What blinks.** Colours on the board that come and go during a run, other than the
+  piece's, the target's and the floor's, are hazards; where they are lit in each frame of
+  the last run is kept, and the plan keeps the piece clear of them frame by frame (a run's
+  rhythm is taken to be every run's). On `tn36`'s last level the first run dies in a
+  laser, and the next three, through two checkpoints, avoid it.
+* **What to learn first.** With no plan from the values known, the next unseen tab is
+  clicked (a demo costs one action and shows a whole program); with none left, what the
+  panel holds is run once. The table carries over from level to level.
+
+It goes fourth in the library, after the clue-board solver; it reads a level's first
+frame once and stands aside if it shows no panel, board, piece with outline and button.
+Over 120 random steps of each public game, a scene is read only in `tn36`. The toy test
+(`tests/test_bits.py`: three-bit columns, a piece of three pixels a side, other colours,
+an instruction table of its own) is played in 4, 8 and 5 actions: a probe run and two
+flips; two demos, five flips and a run; three flips and two runs through a mark.
+
+**Results (Phase 38, `library`, 4,000 steps, 5 seeds): 27.85 → 32.45, levels 288 → 323; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 37 | Phase 38 | what changed |
+|---|---:|---:|---|
+| `tn36` | 0.00 | 115.00 | every level on every seed, in 8, 11, 13, 16, 21, 19 and 34 actions (humans 32, 72, 26, 40, 30, 55, 62): 122 actions for the game against the humans' 317, every level at the cap; 15 of them are demos and one a run to see what the first panel holds, and the last level spends one run dying in a laser; a run takes about 4 s |
+
+The work was in the reading, as it was for the other solvers of shown goals: a piece that
+grows in place still covers its old drawing (so the piece is found by its exact shape
+first, by its pixels only when it has merged with a mark), walls as common as a floor
+colour (so the floor is the checkerboard's small cells), three walls that touch and
+whose joint bounding box covered the target (so obstacles are a pixel map), and square
+frames inside a panel's ground that passed for tabs (so tabs are looked for under the
+demo panel only).
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1500,17 +1572,18 @@ what a click turns (predicted from the marks, checked on every click).
 | library, + bodies of several colours and pots (Phase 32) | 192 | 14.07 |
 | library, + program family (Phase 34) | 232 | 18.65 |
 | library, + translation family (Phase 35) | 262 | 23.25 |
-| library, + clue-board family (Phase 37, default) | 288 | **27.85** |
+| library, + clue-board family (Phase 37) | 288 | 27.85 |
+| library, + bit-program family (Phase 38, default) | 323 | **32.45** |
 
-All of the gain is four families, played by six solvers. The board-rules family's share
+All of the gain is four families, played by seven solvers. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 4.60, all of it `ft09`, at 0.36 times the human
 count. The program family's share
-went from 0 to 4.67 (all of it `sb26`, at 0.6 times the human count). The marker family's share of
+went from 0 to 9.17 (`sb26` and `tn36`, at 0.46 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26`, `tr87` and `ft09` are solved outright (every level, every seed, in half
+`lp85`, `r11l`, `sb26`, `tr87`, `ft09` and `tn36` are solved outright (every level, every seed, in half
 the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -1518,8 +1591,9 @@ lessons:
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
   rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
   nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
-  frames and tiles, `tr87` nothing but rules and two rows of glyphs, and `ft09` nothing
-  but tiles and clues, and the solvers finish all six. In
+  frames and tiles, `tr87` nothing but rules and two rows of glyphs, `ft09` nothing
+  but tiles and clues, and `tn36` nothing but a board, a panel of bits and its demos, and
+  the solvers finish all seven. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1561,7 +1635,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 32 (several colours, pots) | 192 levels | 14.07 |
 | library, Phase 34 (program solver) | 232 levels | 18.65 |
 | library, Phase 35 (translation solver) | 262 levels | 23.25 |
-| library, Phase 37 (clue-board solver; default) | 288 levels | **27.85** |
+| library, Phase 37 (clue-board solver) | 288 levels | 27.85 |
+| library, Phase 38 (bit-program solver; default) | 323 levels | **32.45** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1607,16 +1682,17 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–37):** 288 levels, official-style
-score **27.85** — sixty-three times Phase 23, all of it from six family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–38):** 323 levels, official-style
+score **32.45** — seventy-four times Phase 23, all of it from seven family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
 actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
 (`tr87`, 4.60: every level, in 122 actions against 414), a program filled so that its run
 writes the target (`sb26`, 4.57: every level, in 124 actions against 213), and a canvas
 painted like its reference (`cd82`, 4.52), and the tiles of a board set so that every clue
-is satisfied (`ft09`, 4.60: every level, in 75 actions against 208). Six of the 25 public
-games are now played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a program of bits
+set so that its run brings a piece onto its outline (`tn36`, 4.60: every level, in 122
+actions against 317). Seven of the 25 public games are now played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in

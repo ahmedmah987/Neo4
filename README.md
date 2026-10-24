@@ -63,6 +63,7 @@ The project has two strands that share one codebase:
 | 36 | **Diagnosis of six more puzzle games** `tn36`, `ft09`, `lf52`, `cn04`, `wa30`, `ka59`: mechanics from the sources, every level played (by hand or by search on a model), the first levels replayed here | done — all six are deterministic and playable well under the human counts; `ft09` (+4.6, small effort: a frame-only script already plays it at the minimum) first, then `tn36` and `cn04` (+4.6 each, medium), `wa30` (medium), `lf52` and `ka59` (large) (see "Phase 36") |
 | 37 | **Mechanics library, clue-board family**: a solver that reads a board of square blocks (tiles, marked tiles, clues) and the palette shown, learns what each clue mark means from the solved examples on screen and from completed levels, checks what every click turns, and plans the fewest clicks by a search over coupled tiles | done — official-style score 23.25 → **27.85**, levels 262 → 288; `ft09` 0 → 115: all six levels on every seed in 75 actions against the humans' 208, each at the minimum; no game loses |
 | 38 | **Mechanics library, bit-program family**: a solver that reads the bit panels (lattices of two-colour glyphs), the board over each, the piece and its outline (its ring at the target turn and size), marks, obstacles, the button and the demo tabs; learns what each column value does from the frames of every run, demos included; plans the cheapest program in bit flips, chaining runs through marks and keeping clear of what blinks during a run | done — official-style score 27.85 → **32.45**, levels 288 → 323; `tn36` 0 → 115: all seven levels on every seed in 122 actions against the humans' 317; no game loses |
+| 39 | **Mechanics library, connector family**: a solver that reads the cell lattice, the pieces and their connector cells (greyed-out pieces selected once to be seen), checks what the moves and the turn do, discovers stacks of variants and cycles through them end to end, and plans placements in which every connector meets exactly one other and no body overlaps anything (the two connector types are not shown), each joined group put where it costs the fewest actions | done — official-style score 32.45 → **37.05**, levels 323 → 353; `cn04` 0 → 115: all six levels on every seed in 220 actions against the humans' 789; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -172,6 +173,7 @@ neo4/
   translate.py    the translation-family solver: glyphs, rules, rows and cursor; rule editing
   board.py        the clue-board solver: tiles and clues on a lattice, mark meanings, fewest clicks
   bits.py         the bit-program solver: bit panels, piece and outline, values learned from runs
+  connect.py      the connector solver: pieces on a lattice, connectors paired, stacks of variants
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1559,6 +1561,58 @@ whose joint bounding box covered the target (so obstacles are a pixel map), and 
 frames inside a panel's ground that passed for tabs (so tabs are looked for under the
 demo panel only).
 
+### Phase 39 — the connector family: join the pieces so that every connector meets another
+
+`neo4/connect.py` is the third solver Phase 36 called for. `cn04` shows pieces on a grid,
+each with connector cells sticking out of its body. A click selects a piece, four keys
+move it a cell, a fifth turns it a quarter; the level is done when every connector lies
+on exactly one connector of another piece, of its own type. There are two types and
+both are drawn in the same colour. From level 3 the pieces not selected are greyed
+out, connectors and all; from level 5 some pieces are stacks of variants, which the
+fifth key shows in turn (back and forth along the stack) instead of turning them.
+
+* **Reading the screen.** The grid is the largest cell size, and offset, at which every
+  drawn cell is of one colour (3 pixels in `cn04`). Pieces are the groups of drawn
+  cells; connectors are the cells of the colour every piece shows on the first level
+  that shows them all, and that colour is kept for the game. A piece drawn in one colour
+  shows its connectors once selected, so each is selected once before planning.
+* **What the keys do** is expected (the four moves, a quarter turn) and checked on every
+  use against the whole picture, the other pieces included (a connector that comes to
+  rest on another's is drawn differently). A key that moves the piece some other way is
+  learned; one that moves nothing means the piece was not selected (a click on the
+  selected piece lets it go, so the piece taken to be selected is never clicked). The
+  direction of a turn is learned from the first; a turn that does not give the piece
+  turned shows a stack, which is then cycled through until both ends of its line of
+  variants have been seen. Pieces showing an extra colour when selected are tried first.
+* **The plan.** Placements are found by matching the open connectors one at a time: a
+  connector still alone is put on a connector of a piece not yet placed, in each pose it
+  can take, and kept if no body overlaps anything and no cell holds more than two
+  connectors. The types are unseen and not needed: on every level the placements found
+  with bodies apart all pair the types correctly, but one of two on the last. Each group
+  of joined pieces then goes where it costs the fewest actions (a click to select a
+  piece, turns or variant steps, moves), inside the grid and apart from the others. A
+  plan played out without completing the level is ruled out, and the next is planned
+  from where the pieces stand.
+
+It goes fifth in the library, after the bit-program solver, and needs keys 1 to 6. Over
+100 random steps of each public game a connector scene is read only in `cn04`. The toy
+test (`tests/test_connect.py`: 4-pixel cells, other colours and shapes, a stack of three
+variants of which only the last has a connector) is played in 14 and 16 actions.
+
+**Results (Phase 39, `library`, 4,000 steps, 5 seeds): 32.45 → 37.05, levels 323 → 353; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 38 | Phase 39 | what changed |
+|---|---:|---:|---|
+| `cn04` | 0.00 | 115.00 | every level on every seed, in 13, 30, 22, 32, 63 and 60 actions (humans 29, 54, 85, 300, 208, 113): 220 actions for the game against the humans' 789, every level at the cap; the clicks that reveal greyed-out pieces and the turns that explore the stacks are included; a run takes under 4 s |
+
+What needed a second look was again what the screen does not say directly: a connector
+that comes to rest on another's is drawn in a third colour, so a move is checked against
+the whole picture rather than the piece's own cells; a click on the piece already
+selected lets it go, so that piece is never clicked; and a stack's variants run back and
+forth along a line whose direction the game keeps for all stacks at once, so a variant
+is reached by turning until it shows rather than by counting.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1573,17 +1627,18 @@ demo panel only).
 | library, + program family (Phase 34) | 232 | 18.65 |
 | library, + translation family (Phase 35) | 262 | 23.25 |
 | library, + clue-board family (Phase 37) | 288 | 27.85 |
-| library, + bit-program family (Phase 38, default) | 323 | **32.45** |
+| library, + bit-program family (Phase 38) | 323 | 32.45 |
+| library, + connector family (Phase 39, default) | 353 | **37.05** |
 
-All of the gain is four families, played by seven solvers. The board-rules family's share
-(`ft09`, `lf52`, `cn04`) went from 0 to 4.60, all of it `ft09`, at 0.36 times the human
+All of the gain is four families, played by eight solvers. The board-rules family's share
+(`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
 went from 0 to 9.17 (`sb26` and `tn36`, at 0.46 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26`, `tr87`, `ft09` and `tn36` are solved outright (every level, every seed, in half
+`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36` and `cn04` are solved outright (every level, every seed, in half
 the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -1592,8 +1647,8 @@ lessons:
   rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
   nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
   frames and tiles, `tr87` nothing but rules and two rows of glyphs, `ft09` nothing
-  but tiles and clues, and `tn36` nothing but a board, a panel of bits and its demos, and
-  the solvers finish all seven. In
+  but tiles and clues, `tn36` nothing but a board, a panel of bits and its demos, and `cn04`
+  nothing but pieces and their connectors, and the solvers finish all eight. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1636,7 +1691,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 34 (program solver) | 232 levels | 18.65 |
 | library, Phase 35 (translation solver) | 262 levels | 23.25 |
 | library, Phase 37 (clue-board solver) | 288 levels | 27.85 |
-| library, Phase 38 (bit-program solver; default) | 323 levels | **32.45** |
+| library, Phase 38 (bit-program solver) | 323 levels | 32.45 |
+| library, Phase 39 (connector solver; default) | 353 levels | **37.05** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1682,8 +1738,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–38):** 323 levels, official-style
-score **32.45** — seventy-four times Phase 23, all of it from seven family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–39):** 353 levels, official-style
+score **37.05** — eighty-four times Phase 23, all of it from eight family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
 actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
@@ -1692,7 +1748,9 @@ writes the target (`sb26`, 4.57: every level, in 124 actions against 213), and a
 painted like its reference (`cd82`, 4.52), and the tiles of a board set so that every clue
 is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a program of bits
 set so that its run brings a piece onto its outline (`tn36`, 4.60: every level, in 122
-actions against 317). Seven of the 25 public games are now played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+actions against 317), and pieces joined so that every connector meets another (`cn04`,
+4.60: every level, in 220 actions against 789). Eight of the 25 public games are now
+played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in

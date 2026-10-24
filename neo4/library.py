@@ -28,13 +28,14 @@ from .marker import MarkerSolver, MarkerSolverNoNav
 from .meet import MeetSolver
 from .painter import PainterSolver
 from .pointer import PointerSolver
+from .pour import PourSolver
 from .program import ProgramSolver
 from .translate import TranslateSolver
 from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
 
-FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, BitSolver, ConnectSolver, CarrySolver, PointerSolver, MarkerSolver, PainterSolver, MeetSolver]
+FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, BitSolver, ConnectSolver, CarrySolver, PointerSolver, MarkerSolver, PainterSolver, MeetSolver, PourSolver]
 
 
 class LibraryAgent:

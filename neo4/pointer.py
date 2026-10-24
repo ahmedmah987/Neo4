@@ -152,7 +152,7 @@ class PointerSolver:
             # a fresh attempt: the handles are back where the level began; what the
             # frames taught about the ties stays
             if self._track_kind is not None:
-                start = [c for c in self.first if c.kind == self._track_kind]
+                start = self._start_handles()
                 self._ids = {i: box_centre(c) for i, c in enumerate(start)}
                 self._cur = dict(enumerate(start))
             else:
@@ -254,8 +254,8 @@ class PointerSolver:
             self._track_kind = kind
             self._ids, self._cur, self._snaps = {}, {}, 0
             self._fits_by, self._seen_at = {}, {}
-            start = [c for c in self.first if c.kind == kind]
-            if not start or len(start) > MAX_HANDLES:
+            start = self._start_handles()
+            if not start:
                 return
             self._ids = {i: box_centre(c) for i, c in enumerate(start)}
             self._cur = dict(enumerate(start))
@@ -264,6 +264,11 @@ class PointerSolver:
             self.history = []
             return
         self._advance(latest)
+
+    def _start_handles(self) -> list[Comp]:
+        """The handles as the level began; none if there are too many to be handles."""
+        start = [c for c in self.first if c.kind == self._track_kind]
+        return start if len(start) <= MAX_HANDLES else []
 
     def _advance(self, frame: list[Comp]) -> None:
         if not self._ids:

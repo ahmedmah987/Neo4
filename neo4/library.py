@@ -22,11 +22,12 @@ from arcengine import FrameDataRaw, GameAction, GameState
 
 from .marker import MarkerSolver, MarkerSolverNoNav
 from .painter import PainterSolver
+from .pointer import PointerSolver
 from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
 
-FAMILIES: list[type] = [MarkerSolver, PainterSolver]
+FAMILIES: list[type] = [PointerSolver, MarkerSolver, PainterSolver]
 
 
 class LibraryAgent:

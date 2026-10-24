@@ -64,6 +64,7 @@ The project has two strands that share one codebase:
 | 37 | **Mechanics library, clue-board family**: a solver that reads a board of square blocks (tiles, marked tiles, clues) and the palette shown, learns what each clue mark means from the solved examples on screen and from completed levels, checks what every click turns, and plans the fewest clicks by a search over coupled tiles | done — official-style score 23.25 → **27.85**, levels 262 → 288; `ft09` 0 → 115: all six levels on every seed in 75 actions against the humans' 208, each at the minimum; no game loses |
 | 38 | **Mechanics library, bit-program family**: a solver that reads the bit panels (lattices of two-colour glyphs), the board over each, the piece and its outline (its ring at the target turn and size), marks, obstacles, the button and the demo tabs; learns what each column value does from the frames of every run, demos included; plans the cheapest program in bit flips, chaining runs through marks and keeping clear of what blinks during a run | done — official-style score 27.85 → **32.45**, levels 288 → 323; `tn36` 0 → 115: all seven levels on every seed in 122 actions against the humans' 317; no game loses |
 | 39 | **Mechanics library, connector family**: a solver that reads the cell lattice, the pieces and their connector cells (greyed-out pieces selected once to be seen), checks what the moves and the turn do, discovers stacks of variants and cycles through them end to end, and plans placements in which every connector meets exactly one other and no body overlaps anything (the two connector types are not shown), each joined group put where it costs the fewest actions | done — official-style score 32.45 → **37.05**, levels 323 → 353; `cn04` 0 → 115: all six levels on every seed in 220 actions against the humans' 789; no game loses |
+| 40 | **Mechanics library, carry family**: a solver that reads goal zones (outlined rectangles), framed blocks, the player (a marked edge: its facing) and agents (cells that move on their own), learns by trying what stops the player and what stops a carried block, tells helpers from thieves by what they do with blocks, and plans every step: remove a thief it can catch, else carry the cheapest block to the deepest free goal cell, or where a helper will fetch it (the helper's own delivery counted, goal cells reserved), else wait out of the way; a replay of a lost level varies its choices | done — official-style score 37.05 → **40.38**, levels 353 → 394; `wa30` 0 → 83.4: levels 1–8 on every seed, the first three, the fifth to eighth at the cap; level 4 takes one to five attempts, level 9 (70 steps a try) was completed on one seed of five; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -174,6 +175,7 @@ neo4/
   board.py        the clue-board solver: tiles and clues on a lattice, mark meanings, fewest clicks
   bits.py         the bit-program solver: bit panels, piece and outline, values learned from runs
   connect.py      the connector solver: pieces on a lattice, connectors paired, stacks of variants
+  carry.py        the carry solver: blocks into goal zones, helpers and thieves, barriers learned
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1613,6 +1615,71 @@ selected lets it go, so that piece is never clicked; and a stack's variants run 
 forth along a line whose direction the game keeps for all stacks at once, so a variant
 is reached by turning until it shows rather than by counting.
 
+### Phase 40 — the carry family: bring every block into a goal zone, with helpers and against thieves
+
+`neo4/carry.py` is the fourth solver Phase 36 called for. `wa30` shows a player on a grid
+of 4-pixel cells, blocks, and goal zones. The keys move the player a cell and turn it to
+face that way; the fifth picks up the block it faces or puts down the one it carries, which
+stays in front of it and moves with it. The level is done when every block lies in a goal
+zone, put down. From level 2 helpers share the grid and fetch free blocks into the goal
+zones; from level 3 dotted barriers stop walkers but not carried blocks (so blocks are
+handed over them); from level 6 others carry blocks away to zones of their own, and the
+fifth key removes one the player faces. Every level has its own step budget, lost when
+spent, and the last one is tight (70 steps).
+
+* **Reading the screen.** The cell size is the one most small square objects share. Goal
+  zones are cell-aligned rectangles outlined in one colour round another, learned from the
+  first whole outline and kept for the game; a goal is then the box of the cells holding
+  pieces of its outline (a block on a goal cell hides part of it), and solid regions of the
+  goals' inside colour are walkable zones with no goal. Blocks are framed squares round the
+  blocks' centre colour; the player is the cell drawn in one colour with one edge in
+  another, which is the side it faces; the floor is what the cells round the player are
+  made of (on one level the frame's commonest colour lies beyond the walls). Agents are
+  single solid cells that move without the player; once a level has run two steps, a lone
+  cell of a colour never seen moving is a wall. An agent drawn framed (as when the player
+  faces it) is still that agent.
+* **What stops what** is learned by trying. A solid cell stops the player; a patterned one
+  is assumed open until a move into it fails, and then every cell of the same make-up
+  (colours and counts, so a dotted pattern counts wherever it starts) stops it, the
+  player's step blamed before the carried block's. What lies under a block is remembered
+  from when it was seen, or guessed at the start from both sides when they match. For
+  what helpers can do, only what is known to be open counts.
+* **Who is who.** An agent that lets go of a block standing in a goal zone helps; one
+  that takes a block from the player or out of a goal zone is hostile, and stays so
+  across levels.
+* **The plan**, renewed every step (agents move every step, and the plan goes past those
+  not next to the player): remove a hostile agent when one can be caught (it moves just
+  after the player, so a diagonal one is waited for, an adjacent one faced); else the
+  cheapest block not on its way to a helper (a free helper heads for its nearest block):
+  walk to it, face it, pick it up, carry it to the deepest free goal cell, put it down;
+  or, for a block the player cannot bring in, carry it where a helper coming from its
+  nearest side can carry it to a goal cell no other helper's block will take, the player's
+  steps and the helper's counted together; else wait, off the goal zones and away from
+  the blocks, without touching anything. A replay of a lost level varies these choices.
+
+It goes sixth in the library, after the connector solver. Over 100 random steps of each
+public game a carry scene is read only in `wa30`. The toy test (`tests/test_carry.py`:
+other colours and layout, a dotted barrier learned by bumping into it, a helper on the
+far side) is played in 35 and 48 actions.
+
+**Results (Phase 40, `library`, 4,000 steps, 5 seeds): 37.05 → 40.38, levels 353 → 394; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 39 | Phase 40 | what changed |
+|---|---:|---:|---|
+| `wa30` | 0.00 | 83.36 | levels 1–8 on every seed: 27, 48, 79 actions for the first three (humans 71, 119, 183), then level 4 in 166 to 769 actions (one to five attempts; humans 98), 111, 49, 36 and 144 for levels 5–8 (humans 368, 68, 79, 442), all at the cap but level 4; level 9 (humans 415) completed on one seed, after 31 attempts |
+
+Two levels are not played well. On the fourth the player is shut in a room of barriers
+with the blocks and three helpers fetch what it puts on the barriers; a helper keeps the
+side it took a block from, and when the last free goal cell can only be reached from
+another side it stands holding the block until the level's budget runs out. The solver
+reserves goal cells for the blocks helpers hold, but predicts their choices only roughly,
+and on some seeds needs up to five attempts. The ninth gives 70 steps for nine blocks, a
+thief and a helper; the diagnosis's search did it in 68, and the greedy plan here, renewed
+each step, needs a little more, so only a varied replay that happens to be fast enough
+completes it. Both would need a plan over several blocks at once, with the helpers'
+choices simulated, which is the macro search the diagnosis used on the game's own rules.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1628,9 +1695,11 @@ is reached by turning until it shows rather than by counting.
 | library, + translation family (Phase 35) | 262 | 23.25 |
 | library, + clue-board family (Phase 37) | 288 | 27.85 |
 | library, + bit-program family (Phase 38) | 323 | 32.45 |
-| library, + connector family (Phase 39, default) | 353 | **37.05** |
+| library, + connector family (Phase 39) | 353 | 37.05 |
+| library, + carry family (Phase 40, default) | 394 | **40.38** |
 
-All of the gain is four families, played by eight solvers. The board-rules family's share
+All of the gain is five families, played by nine solvers. The carry family's share (`wa30`,
+`ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
 went from 0 to 9.17 (`sb26` and `tn36`, at 0.46 times the human count). The marker family's share of
@@ -1692,7 +1761,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 35 (translation solver) | 262 levels | 23.25 |
 | library, Phase 37 (clue-board solver) | 288 levels | 27.85 |
 | library, Phase 38 (bit-program solver) | 323 levels | 32.45 |
-| library, Phase 39 (connector solver; default) | 353 levels | **37.05** |
+| library, Phase 39 (connector solver) | 353 levels | 37.05 |
+| library, Phase 40 (carry solver; default) | 394 levels | **40.38** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1738,8 +1808,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–39):** 353 levels, official-style
-score **37.05** — eighty-four times Phase 23, all of it from eight family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–40):** 394 levels, official-style
+score **40.38** — ninety-two times Phase 23, all of it from nine family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
 actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
@@ -1749,8 +1819,9 @@ painted like its reference (`cd82`, 4.52), and the tiles of a board set so that 
 is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a program of bits
 set so that its run brings a piece onto its outline (`tn36`, 4.60: every level, in 122
 actions against 317), and pieces joined so that every connector meets another (`cn04`,
-4.60: every level, in 220 actions against 789). Eight of the 25 public games are now
-played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+4.60: every level, in 220 actions against 789), and blocks carried into goal zones with
+helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed). Eight of
+the 25 public games are now played at or near the cap and a ninth at 72%; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in

@@ -20,6 +20,7 @@ from typing import Any
 
 from arcengine import FrameDataRaw, GameAction, GameState
 
+from .bits import BitSolver
 from .board import ClueSolver
 from .marker import MarkerSolver, MarkerSolverNoNav
 from .painter import PainterSolver
@@ -30,7 +31,7 @@ from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
 
-FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, PointerSolver, MarkerSolver, PainterSolver]
+FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, BitSolver, PointerSolver, MarkerSolver, PainterSolver]
 
 
 class LibraryAgent:

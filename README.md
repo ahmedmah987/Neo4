@@ -66,6 +66,7 @@ The project has two strands that share one codebase:
 | 39 | **Mechanics library, connector family**: a solver that reads the cell lattice, the pieces and their connector cells (greyed-out pieces selected once to be seen), checks what the moves and the turn do, discovers stacks of variants and cycles through them end to end, and plans placements in which every connector meets exactly one other and no body overlaps anything (the two connector types are not shown), each joined group put where it costs the fewest actions | done — official-style score 32.45 → **37.05**, levels 323 → 353; `cn04` 0 → 115: all six levels on every seed in 220 actions against the humans' 789; no game loses |
 | 40 | **Mechanics library, carry family**: a solver that reads goal zones (outlined rectangles), framed blocks, the player (a marked edge: its facing) and agents (cells that move on their own), learns by trying what stops the player and what stops a carried block, tells helpers from thieves by what they do with blocks, and plans every step: remove a thief it can catch, else carry the cheapest block to the deepest free goal cell, or where a helper will fetch it (the helper's own delivery counted, goal cells reserved), else wait out of the way; a replay of a lost level varies its choices | done — official-style score 37.05 → **40.38**, levels 353 → 394; `wa30` 0 → 83.4: levels 1–8 on every seed, the first three, the fifth to eighth at the cap; level 4 takes one to five attempts, level 9 (70 steps a try) was completed on one seed of five; no game loses |
 | 41 | **Diagnosis of eight more games** `sc25`, `g50t`, `ls20`, `m0r0`, `bp35`, `dc22`, `tu93`, `sp80`: mechanics from the sources, every level played (by hand or by search on a model), the first two levels and every whole game replayed here | done — all eight are deterministic and every level was won in no more actions than the humans took (54 of 56 at the cap); `m0r0` (+4.6, medium: a search over the joint positions of the bodies the keys move) first, then `sp80` (+4.5) and `tu93` (+4.3), then the first levels of `ls20` and `sc25`; `dc22`, `bp35` and `g50t` need a model of what clicks do to the whole board (large) (see "Phase 41") |
+| 42 | **Mechanics library, meet family**: a solver for grids on which every key moves two to four identical bodies, each its own way (a probe and every move show which axis is mirrored), until they meet; unknown cells are tried only when no plan is left — traps (everything back to the start) by look, switches that clear the cells of their colour, blocks that a click picks out and the keys then move; plans from a search over the bodies' joint positions, blocks parked out of the way, else a search over bodies, blocks and the selection together | done — official-style score 40.38 → **44.98**, levels 394 → 419; `m0r0` 0.01 → 115.0: every level on every seed, 217 actions against the humans' 1,107; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1718,6 +1719,62 @@ board, which the library does not have. Five of the eight (`m0r0`, `tu93`, `ls20
 `sc25`) are navigation games, the family that the evaluation games are most likely to
 share.
 
+### Phase 42 — the meet family: bodies moved by the same keys must be brought together
+
+`neo4/meet.py` is the solver Phase 41 put first. `m0r0` shows two identical bodies on a
+grid; every key moves both a cell, the second one mirrored left to right, and the level is
+done when they land on one cell or cross. A wall stops one body and not the other, which is
+the only way their offset changes. From level 2 checkered cells send everything back to the
+start; from level 3 blocks are picked out by a click and moved by the keys (the bodies wait),
+and a click elsewhere lets them go; from level 5 bars open while a body stands on a lone
+cell of their colour. Every level has a budget of 150 actions.
+
+* **Reading the screen.** The bodies are the colour drawn only as two to four equal solid
+  squares on one grid, each with floor beside it and no untried solid cell touching it (a
+  colour already played in the game is taken again without that test, and if a first key
+  moves none of them the next such colour is tried). The square is the cell; the floor is
+  what lies next to the bodies (the margins' colours last); walls are cells made only of the
+  colours of the margins or of a large share of the screen. Every other cell is unknown, and
+  a plan never sends a body into one.
+* **What the keys do** is found by a probe: a horizontal key on a level's first frame, pressed
+  when it tells each body's way apart (it goes left, right, or stops where only one way is open);
+  up and down are assumed until a move says otherwise. Every move is then matched against
+  what each body could have done (stay, go its way, go the other way) and the gap is
+  learned: an axis that is mirrored, a cell that stops a body, a cell that does not.
+* **What cells do** is learned by trying them, when no plan is left: a body sent into an
+  unknown cell walks on, stays, or, if everything goes back to where the level started, it
+  was a trap, and so is every cell drawn like it (by its look, whatever the cell size, so the
+  knowledge carries over to later levels). A cell that, while a body stands on it, clears
+  the cells of its colour elsewhere is a switch, and those cells are its gates; on later
+  levels the lone cells of a switch colour are taken as switches and the others as gates. An
+  object of a kind not clicked yet is clicked; if it is drawn anew it was picked out, a key
+  tries to move it, and if it moves, every object drawn like it is a block.
+* **The plan** is the fewest keys that bring the bodies together, from a search over their
+  joint positions (gates open while a body stands on a switch; two bodies meet on one cell
+  or by crossing). When blocks are in the way, each is first moved to the nearest cell out of
+  the bodies' way. If that is not enough, as when a block is needed where it stops a body (on
+  the fourth level traps line the rows a body could stop against), a search over the bodies,
+  the blocks and the selection together, run on precomputed tables, finds the shortest plan
+  of keys and clicks.
+
+It goes last in the library. Over 100 random steps of each public game a meet scene is read
+only in `m0r0`. The toy test (`tests/test_meet.py`: other colours and layout, a mirrored
+pair, a gate in a wall with its switch, traps, a block in a corridor) is played in 13, 17
+and 9 actions.
+
+**Results (Phase 42, `library`, 4,000 steps, 5 seeds): 40.38 → 44.98, levels 394 → 419; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 40 | Phase 42 | what changed |
+|---|---:|---:|---|
+| `m0r0` | 0.01 | 115.00 | every level on every seed, in 15, 23, 59, 13, 67 and 40 actions (humans 30, 111, 203, 26, 500, 237): 217 against 1,107, the first and fourth at half the human count and the rest well under it; the fourth and sixth from the search over bodies and blocks together; a run takes 15 s instead of 184 |
+
+What it learns carries over: the block learned on the third level (drawn the same at
+another cell size) is known on the fourth and sixth, and the switch colours learned on the
+fifth give the sixth its gates and switches before a body has stood on one. The traps are
+never stepped on: plans do not enter unknown cells, and here none needs to. Played alone,
+from a fresh start, the fourth and sixth levels take one and four actions more.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1734,9 +1791,12 @@ share.
 | library, + clue-board family (Phase 37) | 288 | 27.85 |
 | library, + bit-program family (Phase 38) | 323 | 32.45 |
 | library, + connector family (Phase 39) | 353 | 37.05 |
-| library, + carry family (Phase 40, default) | 394 | **40.38** |
+| library, + carry family (Phase 40) | 394 | 40.38 |
+| library, + meet family (Phase 42, default) | 419 | **44.98** |
 
-All of the gain is five families, played by nine solvers. The carry family's share (`wa30`,
+All of the gain is six families, played by ten solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 4.68, nearly all of it `m0r0`, at
+0.2 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -1745,7 +1805,7 @@ the mean (pieces brought onto their goals by indirect control, `r11l` included) 
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36` and `cn04` are solved outright (every level, every seed, in half
+`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04` and `m0r0` are solved outright (every level, every seed, in half
 the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -1754,8 +1814,9 @@ lessons:
   rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
   nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
   frames and tiles, `tr87` nothing but rules and two rows of glyphs, `ft09` nothing
-  but tiles and clues, `tn36` nothing but a board, a panel of bits and its demos, and `cn04`
-  nothing but pieces and their connectors, and the solvers finish all eight. In
+  but tiles and clues, `tn36` nothing but a board, a panel of bits and its demos, `cn04`
+  nothing but pieces and their connectors, and `m0r0` nothing but two bodies, walls, traps,
+  gates and blocks, and the solvers finish all nine. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1800,7 +1861,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 37 (clue-board solver) | 288 levels | 27.85 |
 | library, Phase 38 (bit-program solver) | 323 levels | 32.45 |
 | library, Phase 39 (connector solver) | 353 levels | 37.05 |
-| library, Phase 40 (carry solver; default) | 394 levels | **40.38** |
+| library, Phase 40 (carry solver) | 394 levels | 40.38 |
+| library, Phase 42 (meet solver; default) | 419 levels | **44.98** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1846,8 +1908,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–40):** 394 levels, official-style
-score **40.38** — ninety-two times Phase 23, all of it from nine family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–42):** 419 levels, official-style
+score **44.98** — a hundred times Phase 23, all of it from ten family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
 actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
@@ -1858,15 +1920,18 @@ is satisfied (`ft09`, 4.60: every level, in 75 actions against 208), and a progr
 set so that its run brings a piece onto its outline (`tn36`, 4.60: every level, in 122
 actions against 317), and pieces joined so that every connector meets another (`cn04`,
 4.60: every level, in 220 actions against 789), and blocks carried into goal zones with
-helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed). Eight of
-the 25 public games are now played at or near the cap and a ninth at 72%; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed), and two
+bodies moved by the same keys brought together past traps, gates and blocks (`m0r0`, 4.60:
+every level, in 217 actions against 1,107). Nine of the 25 public games are now played at
+or near the cap and a tenth at 72%; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
 
-**What would move it next (Phase 41):** the eight games still near zero were all won, every
-level, in no more actions than the humans took, by searches on models of their rules; the
-next solver is one for a grid on which the keys move one or more bodies (`m0r0`, then
-`tu93` and the first levels of `ls20`), then the pour of `sp80`, worth up to 4.6 of the mean
-each (see "Phase 41").
+**What would move it next (Phases 41–42):** the eight games that were near zero were all
+won, every level, in no more actions than the humans took, by searches on models of their
+rules; the first of them, `m0r0`, is now played at the cap by the meet solver. Next come the
+pour of `sp80` (+4.5) and the maze of `tu93` (+4.3: one body to an exit past pieces whose
+rules are learned by watching them), then the first levels of `ls20` and `sc25` (see
+"Phase 41").
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because
@@ -1895,7 +1960,7 @@ on mechanisms beyond the shared core (`re86`, `s5i5`). Before the library, the l
 
 The step budget of the ARC Prize 2026 Kaggle track is not public at the time of writing;
 the agent runs at about 20–400 engine steps per second on one CPU core depending on the
-game (the slowest, `m0r0`, takes about 200 s for 4,000 steps), with no GPU and no network.
+game (the slowest, `wa30`, takes about 210 s for 4,000 steps), with no GPU and no network.
 
 ## Attribution and licence
 

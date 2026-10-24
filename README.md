@@ -68,6 +68,7 @@ The project has two strands that share one codebase:
 | 41 | **Diagnosis of eight more games** `sc25`, `g50t`, `ls20`, `m0r0`, `bp35`, `dc22`, `tu93`, `sp80`: mechanics from the sources, every level played (by hand or by search on a model), the first two levels and every whole game replayed here | done — all eight are deterministic and every level was won in no more actions than the humans took (54 of 56 at the cap); `m0r0` (+4.6, medium: a search over the joint positions of the bodies the keys move) first, then `sp80` (+4.5) and `tu93` (+4.3), then the first levels of `ls20` and `sc25`; `dc22`, `bp35` and `g50t` need a model of what clicks do to the whole board (large) (see "Phase 41") |
 | 42 | **Mechanics library, meet family**: a solver for grids on which every key moves two to four identical bodies, each its own way (a probe and every move show which axis is mirrored), until they meet; unknown cells are tried only when no plan is left — traps (everything back to the start) by look, switches that clear the cells of their colour, blocks that a click picks out and the keys then move; plans from a search over the bodies' joint positions, blocks parked out of the way, else a search over bodies, blocks and the selection together | done — official-style score 40.38 → **44.98**, levels 394 → 419; `m0r0` 0.01 → 115.0: every level on every seed, 217 actions against the humans' 1,107; no game loses |
 | 43 | **Mechanics library, pour family**: a solver for boards with spouts, cups, a floor and movable pieces (bars that water runs along, angles that turn it); the flow simulated cell by cell, a beam search over where the pieces go led by the simulated outcome and priced by keys and clicks, what stops a piece learned from keys that do not move it | done — official-style score 44.98 → **49.48**, levels 419 → 440; `sp80` 2.49 → 115.0: every level on every seed, each on its first pour, 104 actions against the humans' 518; no game loses |
+| 44 | **Mechanics library, maze family**: a solver for mazes of nodes and links on a lattice: the avatar an eyed block the keys move, the exit a block of a colour of its own, watchers other eyed blocks whose kind (walks, wakes and trails, lunges) is learned by watching them, the node in front of a watcher of a kind not known never stopped on; a search over the avatar's node and the watchers' states turn by turn, and a safe move to watch when there is no plan | done — official-style score 49.48 → **53.91**, levels 440 → 465; `tu93` 1.77 → 112.6: every level on every seed without a death, 185 actions against the humans' 462; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1828,6 +1829,53 @@ The first two levels take the fewest actions the diagnosis found, the fourth and
 fewer than it found (22 and 24 against 25 and 26), the third and sixth more (16 and 31
 against 10 and 30); the third, the tightest (25 human actions), is still at the cap.
 
+### Phase 44 — the maze family: walk the avatar to the exit past watchers with rules of their own
+
+`neo4/maze.py` is the third solver Phase 41 called for. `tu93` draws a maze as nodes joined
+by links on a 6-pixel lattice. The avatar is a block with an eye on the side it faces, the
+exit a block of a colour of its own; every key moves the avatar along a link (a key with no
+link spends a step and nothing else). Other eyed blocks, watchers, act each time the avatar
+moves: from level 2 some lunge at an avatar that stops right in front of them, from level 4
+some walk on and turn back at dead ends, from level 7 some wake when the avatar stands two
+nodes in front of them (their eye changes colour) and then walk its trail two moves behind.
+A watcher that lands on the avatar ends the game; the avatar that moves onto a watcher
+removes it. Every level has a budget of 20 to 60 steps.
+
+* **Reading the screen.** Eyed blocks are squares of one colour with one pixel of another in
+  the middle of a side, the way they face. The avatar is the one whose eye has a colour no
+  other eye has (or the look the keys moved before, kept for the game); the lattice has a
+  node every two block widths from it and a link where the block between two nodes is
+  drawn; the exit is the solid block of a colour of its own on a node.
+* **What the watchers do** is learned by watching them, by kind (their colour): a watcher
+  that moved on without waking walks; one whose eye changed and that then moved, or that
+  woke without moving, trails; one that landed on the avatar from the node in front of it
+  lunges. Until a kind is known, the node in front of its watchers is never stopped on,
+  which is also what keeps the avatar clear of a walker's first step and of a lunge. Two
+  watchers on one node are drawn as one, so the turn's prediction is kept when everything
+  seen was predicted and what was not seen shares a node.
+* **The plan** is a search over the avatar's node and the watchers' states (where each
+  stands and faces, which are awake, the move each trailer holds) turn by turn, for the
+  fewest keys to the exit, never ending a turn where a watcher lands; moving onto a watcher
+  is priced above a step until it has once been seen to remove one. When no plan exists
+  (a watcher of a kind not known stands in the only way), a safe move towards the exit is
+  made to watch the watchers act, and the plan is made again.
+
+It goes before the pointer and marker solvers in the library (the marker solver used to
+take `tu93` over). Over 100 random steps of each public game a maze scene is read only in
+`tu93`. The toy test (`tests/test_maze.py`: 5-pixel blocks, other colours, a lunger on the
+short way, a walker crossing the exit, a trailer) is played in 14, 10 and 6 actions.
+
+**Results (Phase 44, `library`, 4,000 steps, 5 seeds): 49.48 → 53.91, levels 440 → 465; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 43 | Phase 44 | what changed |
+|---|---:|---:|---|
+| `tu93` | 1.77 | 112.59 | every level on every seed, without a death, in 18, 10, 19, 17, 29, 28, 14, 21 and 29 actions (humans 19, 16, 34, 42, 123, 80, 14, 23, 111): 185 against 462, the fewest the diagnosis's search found on every level; the first and seventh take about the humans' count and score 111 and 100, the rest the cap; a run takes 3 s instead of 40 |
+
+One move is made only to watch (on the fourth level, where a walker of a kind not yet known
+stands in the only way up); the walkers are learned on that level and the trailers on the
+seventh, where one wakes as the avatar passes, and both are known from then on.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1846,11 +1894,12 @@ against 10 and 30); the third, the tightest (25 human actions), is still at the 
 | library, + connector family (Phase 39) | 353 | 37.05 |
 | library, + carry family (Phase 40) | 394 | 40.38 |
 | library, + meet family (Phase 42) | 419 | 44.98 |
-| library, + pour family (Phase 43, default) | 440 | **49.48** |
+| library, + pour family (Phase 43) | 440 | 49.48 |
+| library, + maze family (Phase 44, default) | 465 | **53.91** |
 
-All of the gain is six families, played by eleven solvers. The navigation family's share (`ls20`,
-`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 4.68, nearly all of it `m0r0`, at
-0.2 times the human count. The carry family's share (`wa30`,
+All of the gain is six families, played by twelve solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 9.11, nearly all of it `m0r0` and
+`tu93`, at 0.26 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -1860,7 +1909,8 @@ the mean (pieces brought onto their goals by indirect control, `r11l` included) 
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
 `lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
-the human actions or fewer); `re86` and `s5i5` open at human cost
+the human actions or fewer), and `tu93` on every level and seed in the fewest actions its
+mazes allow (on two levels the humans' count); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
 
@@ -1870,8 +1920,8 @@ lessons:
   frames and tiles, `tr87` nothing but rules and two rows of glyphs, `ft09` nothing
   but tiles and clues, `tn36` nothing but a board, a panel of bits and its demos, `cn04`
   nothing but pieces and their connectors, `m0r0` nothing but two bodies, walls, traps,
-  gates and blocks, and `sp80` nothing but spouts, pieces and cups, and the solvers finish
-  all ten. In
+  gates and blocks, `sp80` nothing but spouts, pieces and cups, and `tu93` nothing but a
+  maze, an exit and watchers, and the solvers finish all eleven. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1918,7 +1968,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 39 (connector solver) | 353 levels | 37.05 |
 | library, Phase 40 (carry solver) | 394 levels | 40.38 |
 | library, Phase 42 (meet solver) | 419 levels | 44.98 |
-| library, Phase 43 (pour solver; default) | 440 levels | **49.48** |
+| library, Phase 43 (pour solver) | 440 levels | 49.48 |
+| library, Phase 44 (maze solver; default) | 465 levels | **53.91** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1964,8 +2015,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–43):** 440 levels, official-style
-score **49.48** — a hundred and twelve times Phase 23, all of it from eleven family
+**Where it stands now (the `library` agent, Phases 24–44):** 465 levels, official-style
+score **53.91** — a hundred and twenty-two times Phase 23, all of it from twelve family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -1979,16 +2030,20 @@ level, in 122 actions against 317), and pieces joined so that every connector me
 with helpers and against thieves (`wa30`, 3.33: eight of nine levels on every seed), and
 two bodies moved by the same keys brought together past traps, gates and blocks (`m0r0`,
 4.60: every level, in 217 actions against 1,107), and pieces placed so that the poured
-water fills every cup (`sp80`, 4.60: every level, in 104 actions against 518). Ten of the
-25 public games are now played at or near the cap and an eleventh at 72%; the reported top
-of the Kaggle leaderboard is in the fifties, and the agent is not ready to submit.
+water fills every cup (`sp80`, 4.60: every level, in 104 actions against 518), and an
+avatar walked through a maze past watchers whose rules are learned by watching them
+(`tu93`, 4.50: every level, in 185 actions against 462). Eleven of the 25 public games are
+now played at or near the cap and a twelfth at 72%; the reported top of the Kaggle
+leaderboard is in the fifties, about where this score on the public games now stands; the
+evaluation games are other games, and the agent is not ready to submit.
 
-**What would move it next (Phases 41–43):** the eight games that were near zero were all
+**What would move it next (Phases 41–44):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
-rules; the first two of them, `m0r0` and `sp80`, are now played at the cap by the meet and
-pour solvers. Next comes the maze of `tu93` (+4.3: one body to an exit past pieces whose
-rules are learned by watching them), then the first levels of `ls20` and `sc25` (see
-"Phase 41").
+rules; the first three of them, `m0r0`, `sp80` and `tu93`, are now played at the cap by the
+meet, pour and maze solvers. Next come the first levels of `ls20` (+1.6: a maze where tiles
+change the key the avatar carries and a door takes only its own) and of `sc25` (+1.3:
+spells drawn on a click pad), then `dc22`, `bp35` and `g50t`, which need a model of what
+clicks or a key do to the whole board (see "Phase 41").
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

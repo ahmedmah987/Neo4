@@ -57,6 +57,7 @@ The project has two strands that share one codebase:
 | 30 | **Goals beyond "cover a mark of your colour", and the solver's defects**: an outline of a moving piece's shape in another colour as its goal; a mark met by alignment, learned at a level-up; each moved component's own displacement; plan steps checked against the searched state; undo kept out of plans; partly hidden pieces; scrolls weighed by area; selection changes seen through unmarked colours | done — official-style score 9.03 → **9.56**, levels 164 → 168; `ar25`'s first level from ~2,000 actions to 26–130 (human 32); no game loses |
 | 31 | **Mechanics library, pointer family**: a solver that learns from the frames that a click sends the selected handle's centre to the clicked point, which bodies sit at the centroid of which handles, and where a body stood on its mark at a completed level, and plans the select-and-point clicks (one handle, two, or a gather of several) | done — official-style score 9.56 → **10.79**, levels 168 → 177; `r11l` 2.12 → 32.86, its first three levels on every seed in 14, 11 and 17 actions against the humans' 22, 33 and 51; no game loses |
 | 32 | **Pointer family: bodies of several colours, goals by colour, pots that paint**: a body is touching components of any colours, known by its handles once tied (so it survives a change of colours); its goal is the cluster whose colours are all its own; a still thing of a body's shape may give it colours, which is tried once and then planned through, never touching a pot the goal does not want | done — official-style score 10.79 → **14.07**, levels 177 → 192; `r11l` 32.86 → **115** (the cap): all six levels on every seed in 97 actions against the humans' 233; no game loses |
+| 33 | **Diagnosis of the shown-goal games** `tr87`, `sk48`, `sb26`: their mechanics from the sources, each first level played by hand, what a solver needs | done — `sb26` (a program of coloured tiles against a target row) is worth up to +4.6 and needs the smallest search; `tr87` (translate a row of glyphs by rules) up to +4.6, +1.3 from its first three levels; `sk48` (an arm that pushes blocks into a template's order) needs a pushing model; next: `sb26`, then `tr87` (see "Phase 33") |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1275,6 +1276,27 @@ wasted clicks, which moved the exploration enough to lose a level on one seed.
 `su15` is still untouched: its clicks pull every piece within reach towards the click
 point, which is not a handle being sent; it is the next pointer mechanism, together with
 pieces that merge.
+
+### Phase 33 — the shown-goal games: a diagnosis
+
+Three public games show their goal on screen and score nothing: the model-guided agent
+never completes a level of `tr87`, `sk48` or `sb26` in 4,000 steps. As in Phase 29, each
+was read from its source, its levels rendered, and its first level played by hand to
+check the reading.
+
+| Game | What the screen shows | What the controls do | Where it is lost | What a solver needs | Gain on the mean (upper bound) |
+|---|---|---|---|---|---:|
+| `sb26` (8 levels, humans 18–58 actions) | a target row of colours; frames with empty slots; a palette of colour tiles, and hollow tiles of a frame's colour | click a tile, then a slot, to place it; action 5 runs the program, which reads the main frame's slots in order, a hollow tile running the frame of its colour like a subroutine, each colour read checked against the next target; action 7 undoes; 64 actions an attempt | placing the right tiles in the right order is a search the explorer never finishes | perception of frames, slots, palette and calls; a search for an assignment of tiles to slots whose execution is the target (small: at most nine slots); call semantics learned from the first failed run or assumed | **+3.5 to +4.6** — level 1 by hand: 9 actions against the humans' 18, and every level's direct solution is shorter than its human count |
+| `tr87` (6 levels, humans 40–146) | rules (a sequence of glyphs → a sequence of glyphs), an input row and an editable output row; every glyph drawn at a random rotation | left/right moves a cursor along the output; up/down cycles the selected glyph through its family of seven; the output must be the input translated rule by rule; 128 actions an attempt (256 at level 6) | the explorer cannot find a 5–7 glyph sequence among 7^n by trial | glyphs recognised up to rotation (each family's seven variants are distinct under rotation); the rules read; the target computed by parsing the input; the cycle of each family learned by pressing through it once | +1.3 for levels 1–3 (level 1 by hand: 14 actions against 54); up to +4.6 with level 4 (two translations chained through an intermediate family), 5 (the rules themselves are edited) and 6 (all of it) |
+| `sk48` (8 levels, humans 61–230) | an arm (a head and segments) on a track, coloured blocks, and below the line a template arm carrying blocks in an order | keys extend and retract the selected arm or slide it along its track, pushing and dragging blocks; a click selects another arm; action 7 undoes; 196 actions an attempt | a Sokoban-like search through pushes the explorer does not plan | a model of the arm's moves with the blocks it pushes and carries, and a planner over it towards the template's order | up to +4.6 at human cost, realistically little before such a planner exists |
+
+`sb26` and `tr87` share what makes them tractable: the goal is a sequence shown on the
+screen, the structure that produces it (slots and calls, rules) is shown too, and the
+controls change one element at a time; what is missing is a solver that reads the
+structure and searches over it, the way the copy solver reads a canvas and a reference.
+`sb26` comes first: it is worth the most, its search is the smallest and its first level
+needs no new perception beyond tiles and slots. `tr87` follows. `sk48` needs a model of
+pushing the library does not have and is left for later.
 
 ### Where the library stands
 

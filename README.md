@@ -59,6 +59,7 @@ The project has two strands that share one codebase:
 | 32 | **Pointer family: bodies of several colours, goals by colour, pots that paint**: a body is touching components of any colours, known by its handles once tied (so it survives a change of colours); its goal is the cluster whose colours are all its own; a still thing of a body's shape may give it colours, which is tried once and then planned through, never touching a pot the goal does not want | done — official-style score 10.79 → **14.07**, levels 177 → 192; `r11l` 32.86 → **115** (the cap): all six levels on every seed in 97 actions against the humans' 233; no game loses |
 | 33 | **Diagnosis of the shown-goal games** `tr87`, `sk48`, `sb26`: their mechanics from the sources, each first level played by hand, what a solver needs | done — `sb26` (a program of coloured tiles against a target row) is worth up to +4.6 and needs the smallest search; `tr87` (translate a row of glyphs by rules) up to +4.6, +1.3 from its first three levels; `sk48` (an arm that pushes blocks into a template's order) needs a pushing model; next: `sb26`, then `tr87` (see "Phase 33") |
 | 34 | **Mechanics library, program family**: a solver that reads a target row, frames with their slots (by pixel pattern: empty marks, tiles, calls) and a palette, searches the program's run for the fewest tiles that make it write the target (a call running the frame of its colour), places them and runs | done — official-style score 14.07 → **18.65**, levels 192 → 232; `sb26` 0 → 114.4: all eight levels on every seed in 124 actions against the humans' 213; no game loses |
+| 35 | **Mechanics library, translation family**: a solver that reads glyph tiles (a frame colour and a pattern up to a quarter turn), rules (two sequences joined by a line) and the input and output rows, computes the output as the first-match parse of the input (rewriting through an intermediate family where needed), learns each family's cycle from its turns, and edits the output, or the rules' sides when the cursor is on them (a search fixing each side's turn when the parse first needs it) | done — official-style score 18.65 → **23.25**, levels 232 → 262; `tr87` 0 → 115: all six levels on every seed in 122 actions against the humans' 414; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1343,6 +1344,60 @@ mostly of the colour); a tile of a frame's own colour placed inside it (so a fra
 by its sides, not by an empty inside); the target strip, itself a rectangle, whose hollow
 boxes hold a 4×4 of the strip's colour (so a tile must stand on the background).
 
+### Phase 35 — the translation family: rewrite a row of glyphs by the rules shown
+
+`neo4/translate.py` is the second solver Phase 33 called for. `tr87` shows rules (a
+sequence of glyphs, an arrow, another sequence), an input row and an output row with a
+cursor; two keys move the cursor and two turn the glyph under it through its family of
+seven. At its last two levels the cursor is on the rules instead: the rows are fixed and the
+rules' sides must be turned until they rewrite the one as the other.
+
+* **Glyphs.** A glyph is a 7×7 tile: a ring of one colour (its family) round a pattern of
+  exactly one other, known by its pattern up to a quarter turn (every glyph of `tr87` is
+  drawn turned at random, and each family's seven patterns stay distinct under turning).
+  A ring of the colour round it (the background holding something) is no tile.
+* **Rules and rows.** Tiles side by side form sequences; two sequences on one row with a
+  line across the gap are a rule, read in reading order. The two other sequences are the
+  rows; the cursor is marks just above and just below one tile, in a colour no tile has and
+  the band round it is not mostly of; the row it is on is edited, the other is the input.
+* **The target.** The input read left to right, at each place the first rule whose left
+  side is there giving its right side; a right side of another family than the output's is
+  rewritten again, as a whole by the rule whose left side it is (`tr87`'s fourth level: A to
+  B, then B to C), or glyph by glyph.
+* **The cycles.** What the keys do is learned from what they did: each turn records a link
+  in its family's cycle, and with six of the seven links known the seventh closes it. The
+  cursor goes to the nearest wrong glyph; a glyph turns the shorter way round when the way is
+  known, forward otherwise (which is how the cycle is learned in the first place).
+* **Editing the rules.** With the cursor on a rule's side, a search finds how far to turn
+  each side: the parse runs on, and a side's turn is fixed the first time the parse needs it
+  — to match the input there, or the output for a right side — while a rule passed over
+  keeps the turn that would have made it match ruled out (the first matching rule applies).
+  A right side of another family is rewritten glyph by glyph by the first rule whose left
+  side begins with the glyph, and when a glyph has none the next rule is tried, as the game
+  does. The cheapest solution (turns, then cursor travel round the sides) is kept as the
+  goal and walked to.
+
+It goes second in the library, after the program solver; it looks at a level's first frame
+once and stands aside if it shows no rules, rows and cursor. The toy test
+(`tests/test_translate.py`: glyphs of random patterns at random turns, one-to-one rules,
+then a rule giving two glyphs and one taking two) is played in 17 and 13 actions.
+
+**Results (Phase 35, `library`, 4,000 steps, 5 seeds): 18.65 → 23.25, levels 232 → 262; no
+other game changes.**
+
+| game | Phase 34 | Phase 35 | what changed |
+|---|---:|---:|---|
+| `tr87` | 0.00 | 115.00 | every level on every seed, in 15, 26, 22, 21, 14 and 24 actions (humans 54, 58, 40, 45, 71, 146): 122 actions for the game against the humans' 414, every level at the cap, the two rule-editing levels included; a run takes under 5 s |
+
+The readings that needed a second look were again of the screen, not of the puzzle: a ring
+of the background round something (a cursor mark, the space between rules) passed for a
+tile until a tile had to differ from what lies above and below it, and a single pixel taken
+as the background beside a row turned out to be the next row's frame (the cursor is now
+marks above *and* below a tile, in a colour that is not the band's own). The sweep took
+about 1.6 times as long as the last one in every game alike, `sb26` included, where this
+solver never reads the screen; timed one game at a time with and without the solver, the
+cost is the same, so the difference is the machine.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1354,22 +1409,25 @@ boxes hold a 4×4 of the strip's colour (so a tile must stand on the background)
 | library, + outline and alignment goals, defects fixed (Phase 30) | 168 | 9.56 |
 | library, + pointer family (Phase 31) | 177 | 10.79 |
 | library, + bodies of several colours and pots (Phase 32) | 192 | 14.07 |
-| library, + program family (Phase 34, default) | 232 | **18.65** |
+| library, + program family (Phase 34) | 232 | 18.65 |
+| library, + translation family (Phase 35, default) | 262 | **23.25** |
 
-All of the gain is three families, played by four solvers. The program family's share
+All of the gain is three families, played by five solvers. The program family's share
 went from 0 to 4.67 (all of it `sb26`, at 0.6 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
-count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's went from 0.01 to 4.52, at 0.9
-times the human count (all of it `cd82`). `lp85` and `r11l` are solved outright (every
-level, every seed, in about half the human actions); `re86` and `s5i5` open at human cost
+count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
+reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
+`lp85`, `r11l`, `sb26` and `tr87` are solved outright (every level, every seed, in half
+the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
   rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
-  nothing but handles, bodies, goal rings and pots, and `sb26` nothing but a target row,
-  frames and tiles, and the solvers finish all four. In
+  nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
+  frames and tiles, and `tr87` nothing but rules and two rows of glyphs, and the solvers
+  finish all five. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1409,7 +1467,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 30 | 168 levels | 9.56 |
 | library, Phase 31 (pointer solver) | 177 levels | 10.79 |
 | library, Phase 32 (several colours, pots) | 192 levels | 14.07 |
-| library, Phase 34 (program solver; default) | 232 levels | **18.65** |
+| library, Phase 34 (program solver) | 232 levels | 18.65 |
+| library, Phase 35 (translation solver; default) | 262 levels | **23.25** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1455,15 +1514,16 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–34):** 232 levels, official-style
-score **18.65** — forty-two times Phase 23, all of it from four family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–35):** 262 levels, official-style
+score **23.25** — fifty-three times Phase 23, all of it from five family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
-actions against the humans' 233), a program filled so that its run writes the target
-(`sb26`, 4.57: every level, in 124 actions against 213), and a canvas painted like its
-reference (`cd82`, 4.52). Four of the 25 public games are now played at or near the cap;
-the reported top of the Kaggle leaderboard is in the fifties, and the agent is not ready to
-submit.
+actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
+(`tr87`, 4.60: every level, in 122 actions against 414), a program filled so that its run
+writes the target (`sb26`, 4.57: every level, in 124 actions against 213), and a canvas
+painted like its reference (`cd82`, 4.52). Five of the 25 public games are now played at or
+near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

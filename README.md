@@ -60,6 +60,7 @@ The project has two strands that share one codebase:
 | 33 | **Diagnosis of the shown-goal games** `tr87`, `sk48`, `sb26`: their mechanics from the sources, each first level played by hand, what a solver needs | done — `sb26` (a program of coloured tiles against a target row) is worth up to +4.6 and needs the smallest search; `tr87` (translate a row of glyphs by rules) up to +4.6, +1.3 from its first three levels; `sk48` (an arm that pushes blocks into a template's order) needs a pushing model; next: `sb26`, then `tr87` (see "Phase 33") |
 | 34 | **Mechanics library, program family**: a solver that reads a target row, frames with their slots (by pixel pattern: empty marks, tiles, calls) and a palette, searches the program's run for the fewest tiles that make it write the target (a call running the frame of its colour), places them and runs | done — official-style score 14.07 → **18.65**, levels 192 → 232; `sb26` 0 → 114.4: all eight levels on every seed in 124 actions against the humans' 213; no game loses |
 | 35 | **Mechanics library, translation family**: a solver that reads glyph tiles (a frame colour and a pattern up to a quarter turn), rules (two sequences joined by a line) and the input and output rows, computes the output as the first-match parse of the input (rewriting through an intermediate family where needed), learns each family's cycle from its turns, and edits the output, or the rules' sides when the cursor is on them (a search fixing each side's turn when the parse first needs it) | done — official-style score 18.65 → **23.25**, levels 232 → 262; `tr87` 0 → 115: all six levels on every seed in 122 actions against the humans' 414; no game loses |
+| 36 | **Diagnosis of six more puzzle games** `tn36`, `ft09`, `lf52`, `cn04`, `wa30`, `ka59`: mechanics from the sources, every level played (by hand or by search on a model), the first levels replayed here | done — all six are deterministic and playable well under the human counts; `ft09` (+4.6, small effort: a frame-only script already plays it at the minimum) first, then `tn36` and `cn04` (+4.6 each, medium), `wa30` (medium), `lf52` and `ka59` (large) (see "Phase 36") |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1397,6 +1398,32 @@ marks above *and* below a tile, in a colour that is not the band's own). The swe
 about 1.6 times as long as the last one in every game alike, `sb26` included, where this
 solver never reads the screen; timed one game at a time with and without the solver, the
 cost is the same, so the difference is the machine.
+
+### Phase 36 — six more puzzle games: a diagnosis
+
+Six games scored nothing or almost nothing: `tn36` (the program family), `ft09`, `lf52`
+and `cn04` (rules on a board), `wa30` and `ka59` (pushing blocks). As in Phases 29 and 33
+each was read from its source, its levels rendered and played; this time three agents each
+took two games, and every first-level solution they reported was replayed here and
+completed its level. None of the six uses randomness, and for every one a winning sequence
+was found for every level (but one), each well under the human count.
+
+| Game | What it is | Played (actions per level, against the humans') | What a solver needs | Gain on the mean | Effort |
+|---|---|---|---|---:|---|
+| `ft09` (6 levels) | clue squares say what colour the tiles around them must be (the same, different, or none); a click turns a tile to the next colour of the palette shown; from level 5, marked tiles also turn their neighbours | a script reading only the frames: 4, 7, 14, 16, 21, 13 (43, 12, 23, 28, 65, 37) — the minimum | tiles, clues and palette on the 8-pixel grid; the clue rules (level 1 shows three solved examples); the neighbour marks from a probe click; a search over small groups of coupled tiles | **+4.6** | small |
+| `tn36` (7 levels) | a program panel of columns of bits, each column's value an instruction (move, turn, scale, recolour) for a piece on a board, which must end on a target outline; a Run button; demo programs from level 2; walls, scale, checkpoints, timed lasers later | by hand: 7, 9, 9, 12, 16, 17, 21 (32, 72, 26, 40, 30, 55, 62) | the board and the bits; the table of instruction values (not additive: learned from the demos or from runs); a search over at most six instructions | +4.6 (levels 1–5: +2.5) | medium |
+| `cn04` (6 levels) | pieces with connector cells, selected by a click, moved by keys, turned by action 5 (stacks of variants from level 5); every connector must meet one of its type; unselected pieces are greyed from level 3 | 13, 29 by hand; 20, 29, 44, 38 by a solver using the game's state (29, 54, 85, 300, 208, 113) | pieces and connectors (revealed by selecting them); a search over placements in which no two bodies overlap (two connector types share a colour, and that rule tells them apart) | +4.6 (levels 1–2: +0.7) | medium |
+| `wa30` (9 levels) | a player carries blocks into goal zones; helpers deliver free blocks, enemies steal them, both by a fixed rule | 26, 52, 74, 73, 113, 48, 37, 142, 68 (71, 119, 183, 98, 368, 68, 79, 442, 415) | the grid, carrying and barrier rules, and a model of helpers and enemies; search over block-delivery orders where plain search runs out | +4.6 (levels 1–4: +1.0) | medium |
+| `lf52` (10 levels) | peg solitaire on islands joined by moving platforms; a board wider than the screen from level 3 | 8, 34, 45, 50, 83, 85, —, 68, 100, 43 (32, 81, 60, 71, 205, 148, 244, 109, 164, 225); level 7 unsolved | the pieces and platforms, the scrolling (a map kept of what has been seen), a planner over up to millions of states | +4.0 to +4.6 | large |
+| `ka59` (7 levels) | blocks selected by a click and moved by keys push others that slide over gulches; bombs on a timer push with a blast; blocks must fit outlines exactly | 11, 40, 33, 45, 20, 51, 100 (28, 109, 51, 51, 33, 132, 326) | pixel-exact physics of pushes, slides and blasts, and a search over regions joined by them | +4.6 (levels 1–4 without bombs: +1.6) | large |
+
+The order follows from the last two columns. `ft09` comes first: it is worth as much as any
+and a script that reads only the frames already plays it at the minimum. `tn36` and `cn04`
+follow, then `wa30`; `lf52` and `ka59` need a planner and a physics model the library does
+not have. As with every solver so far, these are family solvers built from public games:
+they encode what the family is (clues on a board, a program of bits) and learn the rest
+from the frames, and what they are worth on the evaluation games depends on how much of
+each family recurs there.
 
 ### Where the library stands
 

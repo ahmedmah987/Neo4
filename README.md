@@ -61,6 +61,7 @@ The project has two strands that share one codebase:
 | 34 | **Mechanics library, program family**: a solver that reads a target row, frames with their slots (by pixel pattern: empty marks, tiles, calls) and a palette, searches the program's run for the fewest tiles that make it write the target (a call running the frame of its colour), places them and runs | done — official-style score 14.07 → **18.65**, levels 192 → 232; `sb26` 0 → 114.4: all eight levels on every seed in 124 actions against the humans' 213; no game loses |
 | 35 | **Mechanics library, translation family**: a solver that reads glyph tiles (a frame colour and a pattern up to a quarter turn), rules (two sequences joined by a line) and the input and output rows, computes the output as the first-match parse of the input (rewriting through an intermediate family where needed), learns each family's cycle from its turns, and edits the output, or the rules' sides when the cursor is on them (a search fixing each side's turn when the parse first needs it) | done — official-style score 18.65 → **23.25**, levels 232 → 262; `tr87` 0 → 115: all six levels on every seed in 122 actions against the humans' 414; no game loses |
 | 36 | **Diagnosis of six more puzzle games** `tn36`, `ft09`, `lf52`, `cn04`, `wa30`, `ka59`: mechanics from the sources, every level played (by hand or by search on a model), the first levels replayed here | done — all six are deterministic and playable well under the human counts; `ft09` (+4.6, small effort: a frame-only script already plays it at the minimum) first, then `tn36` and `cn04` (+4.6 each, medium), `wa30` (medium), `lf52` and `ka59` (large) (see "Phase 36") |
+| 37 | **Mechanics library, clue-board family**: a solver that reads a board of square blocks (tiles, marked tiles, clues) and the palette shown, learns what each clue mark means from the solved examples on screen and from completed levels, checks what every click turns, and plans the fewest clicks by a search over coupled tiles | done — official-style score 23.25 → **27.85**, levels 262 → 288; `ft09` 0 → 115: all six levels on every seed in 75 actions against the humans' 208, each at the minimum; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -165,6 +166,10 @@ neo4/
   model_agent.py  the graph agent guided by the induced rules ("model"), plus a no-planning ablation
   marker.py       the marker-family solver: learned action maps, marks, search over piece positions
   painter.py      the copy-family solver: canvas and reference, learned brushes, strokes by peeling
+  pointer.py      the pointer-family solver: handles, the bodies tied to them, goals and paint pots
+  program.py      the program-family solver: target row, frames and slots, a search over the run
+  translate.py    the translation-family solver: glyphs, rules, rows and cursor; rule editing
+  board.py        the clue-board solver: tiles and clues on a lattice, mark meanings, fewest clicks
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1417,13 +1422,70 @@ was found for every level (but one), each well under the human count.
 | `lf52` (10 levels) | peg solitaire on islands joined by moving platforms; a board wider than the screen from level 3 | 8, 34, 45, 50, 83, 85, —, 68, 100, 43 (32, 81, 60, 71, 205, 148, 244, 109, 164, 225); level 7 unsolved | the pieces and platforms, the scrolling (a map kept of what has been seen), a planner over up to millions of states | +4.0 to +4.6 | large |
 | `ka59` (7 levels) | blocks selected by a click and moved by keys push others that slide over gulches; bombs on a timer push with a blast; blocks must fit outlines exactly | 11, 40, 33, 45, 20, 51, 100 (28, 109, 51, 51, 33, 132, 326) | pixel-exact physics of pushes, slides and blasts, and a search over regions joined by them | +4.6 (levels 1–4 without bombs: +1.6) | large |
 
-The order follows from the last two columns. `ft09` comes first: it is worth as much as any
+The order follows from the last two columns. `ft09` comes first (Phase 37): it is worth as much as any
 and a script that reads only the frames already plays it at the minimum. `tn36` and `cn04`
 follow, then `wa30`; `lf52` and `ka59` need a planner and a physics model the library does
 not have. As with every solver so far, these are family solvers built from public games:
 they encode what the family is (clues on a board, a program of bits) and learn the rest
 from the frames, and what they are worth on the evaluation games depends on how much of
 each family recurs there.
+
+### Phase 37 — the clue-board family: set the tiles so that every clue is satisfied
+
+`neo4/board.py` is the solver Phase 36 put first. `ft09` is a board of equal square blocks
+on a lattice: tiles, which a click turns to the next colour of the palette, and clues, whose
+centre is a colour and whose ring says, one cell per neighbour, whether that neighbour must
+be the clue's colour or another. From the fifth level some tiles carry marks, and a click on
+one also turns the neighbours its marks point at. The first level is a tutorial: three
+solved examples (drawings, which no click turns) beside the one real clue.
+
+* **Reading the board.** A block is a square of 3×3 equal cells (2×2 pixels in `ft09`; 1 to
+  4 are tried) with a one-pixel ring of a colour found nowhere in it. One of a single colour,
+  or of a single colour with marks of a second, is a tile; one whose centre colour is nowhere
+  in its ring is a clue, and its ring's colours must be no tile's. The lattice step is the
+  commonest distance between neighbouring blocks. The palette is a row or column of small
+  squares off the board that holds the tiles' colours, read in order; without one, the
+  tiles' and clues' colours in reading order.
+* **What the marks mean** is not given. Each mark colour that points at a tile is "the
+  clue's colour" or "another"; the hypotheses are ranked by how many of them disagree with
+  the meanings that completed earlier levels, then by how many clues the level's first
+  frame already shows satisfied (the tutorial's examples: three under the right meanings,
+  one at most under any other), then by cost. One that would have the level already over
+  is impossible; one played to the end without completing the level is ruled out, and the
+  next is planned from where the board stands. The meanings that completed a level are
+  kept. A mark that points at no tile (`ft09`'s third mark colour, from level 5) never
+  needs a meaning.
+* **What a click does** is predicted, then checked. The prediction is the palette's next
+  colour, for the tile and for the neighbours its marks point at; every click is compared
+  with it, and what a click actually turned is learned for every tile with the same marks,
+  as is the colour that followed (the order shown can be overridden by the clicks). A tile
+  that a click does not turn is a drawing of one and leaves the board; before the solver
+  has completed a level in a game, such a click makes it stand aside instead.
+* **The plan** is the fewest clicks. A tile's constraint is the intersection of what its
+  clues want; tiles coupled by what their clicks turn are grouped, and each group is solved
+  by a depth-first search over click counts (0 to the palette's size less one) with a
+  branch-and-bound on the total, a tile's constraint checked as soon as every click that
+  turns it has been chosen. The plan is recomputed after every click.
+
+It goes third in the library, after the program and translation solvers; it looks at a
+level's first frame once and stands aside if it shows no board. Over 150 random steps of
+each of the 25 public games, a board is read only in `ft09` and on 13 frames of `ka59`,
+none of them a level's first. The toy test (`tests/test_board.py`) has a tutorial level
+with two solved examples in other colours (the meanings must be learned from them, and
+their tiles are drawings) and a level with a three-colour palette shown out of numeric
+order and a marked tile; it is played in 3 and 7 actions, the minimum.
+
+**Results (Phase 37, `library`, 4,000 steps, 5 seeds): 23.25 → 27.85, levels 262 → 288; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 35 | Phase 37 | what changed |
+|---|---:|---:|---|
+| `ft09` | 0.00 | 115.00 | every level on every seed, in 4, 7, 14, 16, 21 and 13 actions (humans 43, 12, 23, 28, 65, 37): 75 actions for the game against the humans' 208, each level at its minimum and at the cap; a run takes about 3 s |
+
+Unlike the last three solvers, this one needed no second reading of the screen: the
+diagnosis had already shown that the frames alone suffice, and the work was in what is
+not drawn — which mark means what (learned from the tutorial's examples and kept), and
+what a click turns (predicted from the marks, checked on every click).
 
 ### Where the library stands
 
@@ -1437,15 +1499,18 @@ each family recurs there.
 | library, + pointer family (Phase 31) | 177 | 10.79 |
 | library, + bodies of several colours and pots (Phase 32) | 192 | 14.07 |
 | library, + program family (Phase 34) | 232 | 18.65 |
-| library, + translation family (Phase 35, default) | 262 | **23.25** |
+| library, + translation family (Phase 35) | 262 | 23.25 |
+| library, + clue-board family (Phase 37, default) | 288 | **27.85** |
 
-All of the gain is three families, played by five solvers. The program family's share
+All of the gain is four families, played by six solvers. The board-rules family's share
+(`ft09`, `lf52`, `cn04`) went from 0 to 4.60, all of it `ft09`, at 0.36 times the human
+count. The program family's share
 went from 0 to 4.67 (all of it `sb26`, at 0.6 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26` and `tr87` are solved outright (every level, every seed, in half
+`lp85`, `r11l`, `sb26`, `tr87` and `ft09` are solved outright (every level, every seed, in half
 the human actions or fewer); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -1453,8 +1518,8 @@ lessons:
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
   rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
   nothing but handles, bodies, goal rings and pots, `sb26` nothing but a target row,
-  frames and tiles, and `tr87` nothing but rules and two rows of glyphs, and the solvers
-  finish all five. In
+  frames and tiles, `tr87` nothing but rules and two rows of glyphs, and `ft09` nothing
+  but tiles and clues, and the solvers finish all six. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1495,7 +1560,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 31 (pointer solver) | 177 levels | 10.79 |
 | library, Phase 32 (several colours, pots) | 192 levels | 14.07 |
 | library, Phase 34 (program solver) | 232 levels | 18.65 |
-| library, Phase 35 (translation solver; default) | 262 levels | **23.25** |
+| library, Phase 35 (translation solver) | 262 levels | 23.25 |
+| library, Phase 37 (clue-board solver; default) | 288 levels | **27.85** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1541,15 +1607,16 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–35):** 262 levels, official-style
-score **23.25** — fifty-three times Phase 23, all of it from five family solvers: pieces onto
+**Where it stands now (the `library` agent, Phases 24–37):** 288 levels, official-style
+score **27.85** — sixty-three times Phase 23, all of it from six family solvers: pieces onto
 their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
 them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
 actions against the humans' 233), a row of glyphs rewritten by rules, or the rules edited
 (`tr87`, 4.60: every level, in 122 actions against 414), a program filled so that its run
 writes the target (`sb26`, 4.57: every level, in 124 actions against 213), and a canvas
-painted like its reference (`cd82`, 4.52). Five of the 25 public games are now played at or
-near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
+painted like its reference (`cd82`, 4.52), and the tiles of a board set so that every clue
+is satisfied (`ft09`, 4.60: every level, in 75 actions against 208). Six of the 25 public
+games are now played at or near the cap; the reported top of the Kaggle leaderboard is in the fifties, and the agent is
 not ready to submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in

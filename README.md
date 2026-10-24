@@ -58,6 +58,7 @@ The project has two strands that share one codebase:
 | 31 | **Mechanics library, pointer family**: a solver that learns from the frames that a click sends the selected handle's centre to the clicked point, which bodies sit at the centroid of which handles, and where a body stood on its mark at a completed level, and plans the select-and-point clicks (one handle, two, or a gather of several) | done — official-style score 9.56 → **10.79**, levels 168 → 177; `r11l` 2.12 → 32.86, its first three levels on every seed in 14, 11 and 17 actions against the humans' 22, 33 and 51; no game loses |
 | 32 | **Pointer family: bodies of several colours, goals by colour, pots that paint**: a body is touching components of any colours, known by its handles once tied (so it survives a change of colours); its goal is the cluster whose colours are all its own; a still thing of a body's shape may give it colours, which is tried once and then planned through, never touching a pot the goal does not want | done — official-style score 10.79 → **14.07**, levels 177 → 192; `r11l` 32.86 → **115** (the cap): all six levels on every seed in 97 actions against the humans' 233; no game loses |
 | 33 | **Diagnosis of the shown-goal games** `tr87`, `sk48`, `sb26`: their mechanics from the sources, each first level played by hand, what a solver needs | done — `sb26` (a program of coloured tiles against a target row) is worth up to +4.6 and needs the smallest search; `tr87` (translate a row of glyphs by rules) up to +4.6, +1.3 from its first three levels; `sk48` (an arm that pushes blocks into a template's order) needs a pushing model; next: `sb26`, then `tr87` (see "Phase 33") |
+| 34 | **Mechanics library, program family**: a solver that reads a target row, frames with their slots (by pixel pattern: empty marks, tiles, calls) and a palette, searches the program's run for the fewest tiles that make it write the target (a call running the frame of its colour), places them and runs | done — official-style score 14.07 → **18.65**, levels 192 → 232; `sb26` 0 → 114.4: all eight levels on every seed in 124 actions against the humans' 213; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -1298,6 +1299,50 @@ structure and searches over it, the way the copy solver reads a canvas and a ref
 needs no new perception beyond tiles and slots. `tr87` follows. `sk48` needs a model of
 pushing the library does not have and is left for later.
 
+### Phase 34 — the program family: fill the slots so that running writes the target
+
+`neo4/program.py` is the solver Phase 33 called for. It reads the screen as a program and
+searches for the fewest tiles that make the program's run write the target:
+
+* **Reading the screen.** The target is a row (or rows, read in order) of equal hollow
+  squares above the frames. A frame is a rectangle of one colour: a long run of it with
+  another below, joined by sides of the colour (something of another colour may cross a
+  side). Inside a frame the slots are read by their pixels rather than as components, since
+  a tile placed in a frame may touch a line of its colour: a solid 4×4 square on the
+  background is a tile, a 4×4 ring round the background a call, a 2×2 square on the
+  background an empty slot. The palette is every tile outside the frames, below them; the
+  first frame is the topmost.
+* **What a run does** (the family's prior, checked by the outcome of the run): the first
+  frame's slots in order; a tile writes its colour, which must be the target's next; a
+  call runs the frame of its colour and comes back to the slot after it; an empty slot, a
+  wrong colour, or the first frame ending early stops the run; the target written, the
+  level is done (a frame may call itself or another that calls it back, the run ending as
+  the target completes).
+* **The search.** The run is simulated; at each empty slot it reaches, every palette tile
+  that could go there is tried (the colour the target wants next, or a call to an existing
+  frame; one of each kind and colour), depth first, keeping the solution with the fewest
+  placements. Tiles are placed two clicks each and the program is run; a placement that
+  does not show up in its slot counts as a failure, and a run that does not complete the
+  level gives the level back. The solver looks at a level's first frame once and stands
+  aside for the level if it is not a program.
+
+It goes first in the library. The toy test (`tests/test_program.py`) has a level with one
+frame and a level with a subroutine, a call already in place and a second one in the
+palette.
+
+**Results (Phase 34, `library`, 4,000 steps, 5 seeds): 14.07 → 18.65, levels 192 → 232; no
+other game changes.**
+
+| game | Phase 32 | Phase 34 | what changed |
+|---|---:|---:|---|
+| `sb26` | 0.00 | 114.36 | every level on every seed, in 9, 15, 15, 15, 17, 19, 17 and 17 actions (humans 18, 28, 18, 19, 31, 23, 58, 18): 124 actions for the game against the humans' 213; only the last level is short of the cap (17 against 18 scores 112); a run takes under 2 s |
+
+Three things had to be read differently from the first attempt, each found on a level of
+`sb26`: a connector of another colour crossing a frame's side (so the side need only be
+mostly of the colour); a tile of a frame's own colour placed inside it (so a frame is known
+by its sides, not by an empty inside); the target strip, itself a rectangle, whose hollow
+boxes hold a 4×4 of the strip's colour (so a tile must stand on the background).
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1308,9 +1353,11 @@ pushing the library does not have and is left for later.
 | library, + copy family (Phase 28) | 164 | 9.03 |
 | library, + outline and alignment goals, defects fixed (Phase 30) | 168 | 9.56 |
 | library, + pointer family (Phase 31) | 177 | 10.79 |
-| library, + bodies of several colours and pots (Phase 32, default) | 192 | **14.07** |
+| library, + bodies of several colours and pots (Phase 32) | 192 | 14.07 |
+| library, + program family (Phase 34, default) | 232 | **18.65** |
 
-All of the gain is two families, played by three solvers. The marker family's share of
+All of the gain is three families, played by four solvers. The program family's share
+went from 0 to 4.67 (all of it `sb26`, at 0.6 times the human count). The marker family's share of
 the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
 0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
 count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's went from 0.01 to 4.52, at 0.9
@@ -1320,8 +1367,9 @@ and stop at their second level; `vc33` keeps what the model-guided agent already
 lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
-  rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, and `r11l`
-  nothing but handles, bodies, goal rings and pots, and the solvers finish all three. In
+  rings, buttons and marks, `cd82` nothing but a canvas, brushes and a palette, `r11l`
+  nothing but handles, bodies, goal rings and pots, and `sb26` nothing but a target row,
+  frames and tiles, and the solvers finish all four. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -1360,7 +1408,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 28 (copy solver) | 164 levels | 9.03 |
 | library, Phase 30 | 168 levels | 9.56 |
 | library, Phase 31 (pointer solver) | 177 levels | 10.79 |
-| library, Phase 32 (several colours, pots; default) | 192 levels | **14.07** |
+| library, Phase 32 (several colours, pots) | 192 levels | 14.07 |
+| library, Phase 34 (program solver; default) | 232 levels | **18.65** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -1406,13 +1455,15 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–32):** 192 levels, official-style
-score **14.07** — thirty-two times Phase 23, all of it from three family solvers: pieces
-onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body
-between them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level,
-in 97 actions against the humans' 233), and a canvas painted like its reference (`cd82`,
-4.52). Three of the 25 public games are now played at or near the cap; the reported top of
-the Kaggle leaderboard is in the fifties, and the agent is not ready to submit.
+**Where it stands now (the `library` agent, Phases 24–34):** 232 levels, official-style
+score **18.65** — forty-two times Phase 23, all of it from four family solvers: pieces onto
+their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so that the body between
+them, painted from pots if need be, lands on its goal (`r11l`, 4.60: every level, in 97
+actions against the humans' 233), a program filled so that its run writes the target
+(`sb26`, 4.57: every level, in 124 actions against 213), and a canvas painted like its
+reference (`cd82`, 4.52). Four of the 25 public games are now played at or near the cap;
+the reported top of the Kaggle leaderboard is in the fifties, and the agent is not ready to
+submit.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

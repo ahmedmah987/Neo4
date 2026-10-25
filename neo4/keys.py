@@ -6,30 +6,40 @@ change the key when the avatar steps on them: one turns it a quarter, one gives 
 colour, one the next shape. The door takes the avatar only when the key's glyph is the
 door's; the level is done when every door has been entered. A bar counts the steps left
 (each move spends one or two); a refill fills it again; when it runs out a life is lost
-and the level starts over. Some cells hold a pusher, a bar on one edge, which throws the
-avatar along until something stops it.
+and the level starts over. A wall with a line along one edge throws the avatar that enters
+the cell in front of that edge away from it, to the last cell before a wall. On later
+levels some tiles slide to and fro along tracks.
 
 From the frames alone:
 
 * the avatar is the square drawn as two bands of colour (its size is the cell); the floor
   is what lies round it, walls are cells of one other colour;
 * items are cells of floor with a small icon in the middle; doors are cells of another
-  colour with a glyph in the middle; pushers are floor cells with a line along one edge;
+  colour with a glyph in the middle; a wall cell with a line of a third colour along one
+  edge makes the floor cell that edge faces a pusher;
 * the key is the glyph drawn at twice the size in a box of background (read once a level);
   the steps left are the length of the bar along the bottom;
 * what a tile does is learned when the avatar steps on it, from the key before and after:
   a quarter turn, a colour change (which colour follows which), a new shape (which follows
   which, carried across turns); a refill fills the bar; a pusher's landing cell is learned
-  when it throws the avatar.
+  when it throws the avatar;
+* a tile seen in another cell moves: its cells are kept move by move until they repeat,
+  and the moves before that are spent on safe steps to watch it.
 
-The plan: a search over the avatar's cell, the key, the refills taken and the steps left,
-for the fewest moves into every door with the right key. When it needs what a tile does to
-a key not seen yet, the tile is visited (and again) to see it.
+The plan: an A* search over the avatar's cell, the key, the refills taken, the steps left
+and the phase of the moving tiles, for the fewest moves into every door with the right key.
+The estimate is the most of the walk to the door, the tile steps the key needs, and the
+walk by way of any tile that every way of making the door's glyph needs; doors left are
+chained in the cheapest order. While some door's glyph is out of reach of the tiles known,
+the plan goes into a door that is not; when none is, the nearest step whose outcome is not
+known is taken to see it.
 """
 
 from __future__ import annotations
 
+import heapq
 from collections import Counter, deque
+from itertools import permutations
 
 import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
@@ -37,7 +47,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 Action = tuple[GameAction, dict[str, int] | None]
 
 KEYS = {GameAction.ACTION1: (0, -1), GameAction.ACTION2: (0, 1), GameAction.ACTION3: (-1, 0), GameAction.ACTION4: (1, 0)}
-MAX_STATES = 400_000
+MAX_STATES = 1_000_000
 MAX_LEVEL_ACTIONS = 400
 MAX_FAILS = 8
 
@@ -49,9 +59,13 @@ def add(a, b):
 Glyph = tuple  # a 3x3 glyph as a tuple of 9 colours, row by row
 
 
+TURN = (6, 3, 0, 7, 4, 1, 8, 5, 2)  # a 3x3 glyph a quarter turn clockwise
+
+
 def rot(g: Glyph, k: int = 1) -> Glyph:
-    a = np.array(g).reshape(3, 3)
-    return tuple(int(v) for v in np.rot90(a, -k).ravel())  # k quarter turns clockwise
+    for _ in range(k % 4):  # k quarter turns clockwise
+        g = tuple(g[i] for i in TURN)
+    return g
 
 
 def mask(g: Glyph, bg: int) -> tuple:
@@ -269,6 +283,7 @@ class KeySolver:
         self.look: tuple | None = None
         # what each tile (by its icon) does to the key, learned for the game
         self.effects: dict = {}
+        self.applied: dict = {}  # (icon, key) -> the key after it, by the effects known
         self.cost: int | None = None  # steps a move spends
         self._new_level()
 
@@ -312,6 +327,7 @@ class KeySolver:
             key = find_key(grid, bg)
             if key is not None:
                 self.bg = bg
+                self.applied = {}
                 break
         if key is None:
             return False
@@ -357,6 +373,11 @@ class KeySolver:
 
     def _apply(self, icon, key: Glyph):
         """The key after a tile with this icon, or None if not known."""
+        if (icon, key) not in self.applied:
+            self.applied[(icon, key)] = self._apply_now(icon, key)
+        return self.applied[(icon, key)]
+
+    def _apply_now(self, icon, key: Glyph):
         eff = self.effects.get(icon)
         if eff is None:
             return None
@@ -414,7 +435,7 @@ class KeySolver:
             n = n * per // np.gcd(n, per)
         return n
 
-    def _move(self, cell, t, key, used, pips, left, tick: int = 0):
+    def _move(self, cell, t, key, used, pips, left, tick: int = 0, items=None):
         """The state after a move from cell into t: a tuple, None if it cannot be (or loses
         a life), or "explore" if what happens there is not known yet."""
         b = self.board
@@ -429,7 +450,8 @@ class KeySolver:
         if t in b.pushers and t not in self.landing:
             land = self._slide(t, b.pushers[t])
         refilled = False
-        items = self._items_at(tick + 1)
+        if items is None:
+            items = self._items_at(tick + 1)
         if land in items and land not in used:
             icon = items[land]
             eff = self.effects.get(icon)
@@ -449,11 +471,11 @@ class KeySolver:
                 return None
         return (land, key, used, pips, left)
 
-    def _apps(self, key: Glyph, goal: Glyph, memo: dict) -> int:
+    def _apps(self, key: Glyph, goal: Glyph, memo: dict, without=None) -> int:
         """The fewest tile steps that turn the key into the goal (by the effects known)."""
-        if (key, goal) in memo:
-            return memo[(key, goal)]
-        icons = [i for i, e in self.effects.items() if e[0] in ("turn", "colour", "shape")]
+        if (key, goal, without) in memo:
+            return memo[(key, goal, without)]
+        icons = [i for i, e in self.effects.items() if e[0] in ("turn", "colour", "shape") and i != without]
         seen = {key: 0}
         q = deque([key])
         out = 99
@@ -469,7 +491,7 @@ class KeySolver:
                 if n is not None and n not in seen:
                     seen[n] = seen[g] + 1
                     q.append(n)
-        memo[(key, goal)] = out
+        memo[(key, goal, without)] = out
         return out
 
     def _distances(self) -> dict:
@@ -489,10 +511,28 @@ class KeySolver:
             out[door] = dist
         return out
 
+    def _via(self, cells, dist: dict) -> dict:
+        """Steps from every cell to the door by way of one of the cells."""
+        out: dict = {}
+        heap = [(dist[c], c) for c in cells if c in dist]
+        heapq.heapify(heap)
+        while heap:
+            n, c = heapq.heappop(heap)
+            if c in out:
+                continue
+            out[c] = n
+            for d in KEYS.values():
+                t = add(c, d)
+                if t not in out and self._passable(t):
+                    heapq.heappush(heap, (n + 1, t))
+        return out
+
     def _search(self):
-        """Moves into every door with the right key: (moves, expected states, exploring)."""
-        import heapq
+        """Moves into every door with the right key (or, while some door's glyph is out of
+        reach of the tiles known, into one door that is not): (moves, expected states,
+        exploring)."""
         period = self._period()
+        at = [self._items_at(ph + 1) for ph in range(period)]
         start = (self.cell, self.key, frozenset(self.used), self.pips, frozenset(self.left), self.tick % period)
         prev = {start: None}
         best: dict = {}
@@ -500,17 +540,57 @@ class KeySolver:
         memo: dict = {}
         b = self.board
 
+        tiles: dict = {}
+        for ph in range(period):
+            for c, i in self._items_at(ph).items():
+                if self.effects.get(i, ("",))[0] in ("turn", "colour", "shape"):
+                    tiles.setdefault(i, set()).add(c)
+        via = {(i, d): self._via(cs, dists[d]) for i, cs in tiles.items() for d in b.doors}
+        costs: dict = {}
+
+        def cost(cell, key, d) -> int:
+            """Moves at least, from the cell with the key, into door d."""
+            if (cell, key, d) in costs:
+                return costs[(cell, key, d)]
+            out = dists[d].get(cell, 99)
+            apps = self._apps(key, b.doors[d], memo)
+            if apps < 99:
+                out = max(out, apps)
+                for i in tiles:
+                    # a tile no transform can do without is on the way
+                    if apps and self._apps(key, b.doors[d], memo, i) >= 99:
+                        out = max(out, via[(i, d)].get(cell, 99))
+            costs[(cell, key, d)] = out
+            return out
+
+        reach = {d for d in self.left if self._apps(self.key, b.doors[d], memo) < 99}
+        if not reach:
+            # no door's glyph is in reach of what is known: see a tile do something new
+            return self._explore(start, period)
+        whole = reach == self.left
+        target = 0 if whole else len(self.left) - 1  # doors still shut when the plan ends
+        hs: dict = {}
+
         def h(st) -> int:
             cell, key, _, _, left, _ = st
+            if (cell, key, left) in hs:
+                return hs[(cell, key, left)]
             if not left:
-                return 0
-            far = min(dists[d].get(cell, 99) for d in left)
-            apps = min(self._apps(key, b.doors[d], memo) for d in left)
-            return max(far, apps if apps < 99 else 0)
+                out = 0
+            elif not whole:
+                out = min(cost(cell, key, d) for d in left & reach)
+            elif len(left) > 3:
+                out = min(cost(cell, key, d) for d in left)
+            else:
+                out = 1 << 30
+                for order in permutations(left):
+                    n = cost(cell, key, order[0])
+                    for a, z in zip(order, order[1:]):
+                        n += cost(a, b.doors[a], z)
+                    out = min(out, n)
+            hs[(cell, key, left)] = out
+            return out
 
-        if any(self._apps(self.key, b.doors[d], memo) >= 99 for d in self.left):
-            # a door's glyph is out of reach of what is known: see a tile do something new
-            return self._explore(start, period)
         heap = [(h(start), 0, 0, start)]
         tick = 0
         explore = None
@@ -535,7 +615,7 @@ class KeySolver:
             cell, key, used, pips, left, ph = st
             for k, d in KEYS.items():
                 t = add(cell, d)
-                r = self._move(cell, t, key, used, pips, left, ph)
+                r = self._move(cell, t, key, used, pips, left, ph, at[ph])
                 if r is None:
                     continue
                 if r == "explore":
@@ -543,7 +623,7 @@ class KeySolver:
                         explore = (st, k, g)
                     continue
                 r = r + ((ph + 1) % period,)
-                if not r[4]:
+                if len(r[4]) <= target:
                     m, s = path(st, (k, r))
                     return m, s, False
                 sig = (r[0], r[1], r[2], r[4], r[5])
@@ -567,6 +647,7 @@ class KeySolver:
 
     def _explore(self, start, period: int):
         """The fewest moves to a step whose outcome is not known."""
+        at = [self._items_at(ph + 1) for ph in range(period)]
         prev = {start: None}
         best: dict = {}
         q = deque([start])
@@ -574,7 +655,7 @@ class KeySolver:
             st = q.popleft()
             cell, key, used, pips, left, ph = st
             for k, d in KEYS.items():
-                r = self._move(cell, add(cell, d), key, used, pips, left, ph)
+                r = self._move(cell, add(cell, d), key, used, pips, left, ph, at[ph])
                 if r is None:
                     continue
                 if r == "explore":
@@ -599,6 +680,7 @@ class KeySolver:
     # --- learning from a step --------------------------------------------------------
 
     def _learn_item(self, icon, before: Glyph, after: Glyph, pips_before: int, pips_after: int, gone: bool) -> None:
+        self.applied = {}
         if icon in self.effects and self.effects[icon][0] not in ("colour", "shape"):
             return
         if after == before:

@@ -5,10 +5,10 @@ the glyph of the key the avatar carries (drawn at twice the size). Tiles on the 
 change the key when the avatar steps on them: one turns it a quarter, one gives it the next
 colour, one the next shape. The door takes the avatar only when the key's glyph is the
 door's; the level is done when every door has been entered. A bar counts the steps left
-(each move spends one or two); a refill fills it again; when it runs out a life is lost
-and the level starts over. A wall with a line along one edge throws the avatar that enters
-the cell in front of that edge away from it, to the last cell before a wall. On later
-levels some tiles slide to and fro along tracks.
+(what a move spends differs by level); a refill fills it again; when it runs out a life is
+lost and the level starts over. A wall with a line along one edge throws the avatar that
+enters the cell in front of that edge away from it, to the last cell before a wall. On
+later levels some tiles slide to and fro along tracks.
 
 From the frames alone:
 

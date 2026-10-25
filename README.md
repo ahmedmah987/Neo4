@@ -69,6 +69,7 @@ The project has two strands that share one codebase:
 | 42 | **Mechanics library, meet family**: a solver for grids on which every key moves two to four identical bodies, each its own way (a probe and every move show which axis is mirrored), until they meet; unknown cells are tried only when no plan is left — traps (everything back to the start) by look, switches that clear the cells of their colour, blocks that a click picks out and the keys then move; plans from a search over the bodies' joint positions, blocks parked out of the way, else a search over bodies, blocks and the selection together | done — official-style score 40.38 → **44.98**, levels 394 → 419; `m0r0` 0.01 → 115.0: every level on every seed, 217 actions against the humans' 1,107; no game loses |
 | 43 | **Mechanics library, pour family**: a solver for boards with spouts, cups, a floor and movable pieces (bars that water runs along, angles that turn it); the flow simulated cell by cell, a beam search over where the pieces go led by the simulated outcome and priced by keys and clicks, what stops a piece learned from keys that do not move it | done — official-style score 44.98 → **49.48**, levels 419 → 440; `sp80` 2.49 → 115.0: every level on every seed, each on its first pour, 104 actions against the humans' 518; no game loses |
 | 44 | **Mechanics library, maze family**: a solver for mazes of nodes and links on a lattice: the avatar an eyed block the keys move, the exit a block of a colour of its own, watchers other eyed blocks whose kind (walks, wakes and trails, lunges) is learned by watching them, the node in front of a watcher of a kind not known never stopped on; a search over the avatar's node and the watchers' states turn by turn, and a safe move to watch when there is no plan | done — official-style score 49.48 → **53.91**, levels 440 → 465; `tu93` 1.77 → 112.6: every level on every seed without a death, 185 actions against the humans' 462; no game loses |
+| 45 | **Mechanics library, key family**: a solver for mazes where the avatar carries a key (a glyph shown at twice the size in a box) that tiles turn, recolour and reshape, and a door takes the avatar only when the key is its glyph; what each tile does, the move cost, pushers' landings and the tracks of sliding tiles learned by watching; an A* search over cell, key, refills, steps left and the tiles' phase, into a door in reach first while another door's glyph is not | done — official-style score 53.91 → **57.36**, levels 465 → 490; `ls20` 0.02 → 86.25: levels 1–6 on every seed, at the cap, 300 actions against the humans' 590; the seventh (fog) is left to the model-guided agent; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -183,6 +184,7 @@ neo4/
   meet.py         the meet solver: bodies moved by the same keys brought together; traps, gates, blocks
   pour.py         the pour solver: spouts, cups and pieces read, the flow simulated, placements searched
   maze.py         the maze solver: avatar to the exit on a lattice of nodes, watchers' rules learned
+  keys.py         the key solver: the key turned, recoloured and reshaped on tiles into every door
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1876,6 +1878,65 @@ One move is made only to watch (on the fourth level, where a walker of a kind no
 stands in the only way up); the walkers are learned on that level and the trailers on the
 seventh, where one wakes as the avatar passes, and both are known from then on.
 
+### Phase 45 — the key family: carry the key the door shows, made on tiles
+
+`neo4/keys.py` is the fourth solver Phase 41 called for. `ls20` draws a maze on a 5-pixel
+grid. The avatar is a square drawn as two bands of colour; in a box apart the key it
+carries is shown, a 3x3 glyph at twice the size; each door is a cell of the box's colour
+with a glyph in it and takes the avatar only when the key is that glyph, and the level is
+done when every door has been entered. Tiles on the floor change the key when the avatar
+steps on them: one turns it a quarter, one gives it the next colour, one the next shape. A
+bar along the bottom counts the steps left (what a move spends differs by level); a refill
+drawn in the bar's colour fills it again, and when it runs out a life is lost and the level
+starts over. From level 3 a wall with a line along one edge throws an avatar that enters the
+cell in front of that edge to the last cell before the next wall; from level 5 tiles slide
+to and fro along tracks; the seventh level is hidden in fog outside a disc round the avatar.
+
+* **Reading the screen.** The avatar is the one two-band square whose colours stop at its
+  edges; its size is the cell, the floor is the colour round it, walls the commonest other
+  uniform cell. Items are floor cells with an icon in the middle, doors uniform cells of
+  another colour with a glyph in the middle, and a line of a third colour along one edge of
+  a wall makes the floor cell it faces a pusher. The key is the glyph drawn at twice the
+  size inside a ring of the doors' colour; the steps left are the length of the bar, the
+  longest run of one colour in the bottom rows.
+* **What the tiles do** is learned when the avatar steps on them, from the key before and
+  after: a quarter turn (once, for every key), a colour change (which colour follows
+  which), a new shape (which follows which, carried across turns and colours); a tile
+  drawn in the bar's colour is taken for a refill. A move's cost is read again on every
+  level, a pusher's landing when it throws the avatar. A tile seen in another cell after a
+  move is a mover: its cells are kept move by move until they repeat, and until then the
+  moves are safe steps that watch it.
+* **The plan** is an A* search over the avatar's cell, the key, the refills taken, the
+  steps left and the phase of the movers, for the fewest moves into every door with its
+  key. The estimate is the most of the walk to the door, the tile steps the key still
+  needs, and the walk by way of any tile that every way of making the door's glyph needs,
+  the doors left chained in their cheapest order; on the sixth level (two doors whose
+  glyphs are six tile steps away, through three moving tiles) it keeps the search under a
+  million states, about 9 s. While some door's glyph is out of reach of the tiles known,
+  the plan goes into a door whose glyph is in reach; when none is, the nearest step whose
+  outcome is not known is taken.
+
+It goes before the pointer and marker solvers in the library (the marker solver used to
+take `ls20` over). Over 100 random steps of each public game a key scene is read only in
+`ls20`. The toy test (`tests/test_keys.py`: 6-pixel cells, other colours and shapes, a turn,
+a colour and a shape tile, a refill that is needed, a pusher that is the only way to the
+second door, a sliding colour tile) is played in 18, 37 and 22 actions; the first two are
+the fewest possible, the third spends four moves watching the tile slide.
+
+**Results (Phase 45, `library`, 4,000 steps, 5 seeds): 53.91 → 57.36, levels 465 → 490; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 44 | Phase 45 | what changed |
+|---|---:|---:|---|
+| `ls20` | 0.02 | 86.25 | levels 1–6 on every seed, without a life lost, in 13, 45, 39, 65, 56 and 82 actions (humans 22, 123, 73, 84, 96, 192): 300 against 590, every one at the cap; the seventh is hidden in fog, the solver reads no doors there and leaves it to the model-guided agent, which does not finish it; a run takes 34 s instead of 15 (the sixth level's search, 9 s) |
+
+The tiles are learned as they are met: the turn on the first level, the colours from the
+third on, the shapes from the fourth on. Each visit to a colour or shape tile shows one step
+of its cycle, so while one door's glyph is still out of reach the plan goes into a door that
+is in reach rather than first exploring (on the sixth level that is 82 actions instead of
+108). The sliding tiles of levels 5 and 6 are watched for four and eight moves before their
+cycles are known.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1895,11 +1956,12 @@ seventh, where one wakes as the avatar passes, and both are known from then on.
 | library, + carry family (Phase 40) | 394 | 40.38 |
 | library, + meet family (Phase 42) | 419 | 44.98 |
 | library, + pour family (Phase 43) | 440 | 49.48 |
-| library, + maze family (Phase 44, default) | 465 | **53.91** |
+| library, + maze family (Phase 44) | 465 | 53.91 |
+| library, + key family (Phase 45, default) | 490 | **57.36** |
 
-All of the gain is six families, played by twelve solvers. The navigation family's share (`ls20`,
-`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 9.11, nearly all of it `m0r0` and
-`tu93`, at 0.26 times the human count. The carry family's share (`wa30`,
+All of the gain is six families, played by thirteen solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 12.56, nearly all of it `m0r0`,
+`tu93` and `ls20`, at 0.33 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -1910,7 +1972,8 @@ count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
 `lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
 the human actions or fewer), and `tu93` on every level and seed in the fewest actions its
-mazes allow (on two levels the humans' count); `re86` and `s5i5` open at human cost
+mazes allow (on two levels the humans' count), and `ls20` on six of its seven levels at the
+cap (the seventh is in fog); `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
 
@@ -1969,7 +2032,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 40 (carry solver) | 394 levels | 40.38 |
 | library, Phase 42 (meet solver) | 419 levels | 44.98 |
 | library, Phase 43 (pour solver) | 440 levels | 49.48 |
-| library, Phase 44 (maze solver; default) | 465 levels | **53.91** |
+| library, Phase 44 (maze solver) | 465 levels | 53.91 |
+| library, Phase 45 (key solver; default) | 490 levels | **57.36** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -2015,8 +2079,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–44):** 465 levels, official-style
-score **53.91** — a hundred and twenty-two times Phase 23, all of it from twelve family
+**Where it stands now (the `library` agent, Phases 24–45):** 490 levels, official-style
+score **57.36** — a hundred and thirty times Phase 23, all of it from thirteen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -2032,17 +2096,20 @@ two bodies moved by the same keys brought together past traps, gates and blocks 
 4.60: every level, in 217 actions against 1,107), and pieces placed so that the poured
 water fills every cup (`sp80`, 4.60: every level, in 104 actions against 518), and an
 avatar walked through a maze past watchers whose rules are learned by watching them
-(`tu93`, 4.50: every level, in 185 actions against 462). Eleven of the 25 public games are
-now played at or near the cap and a twelfth at 72%; the reported top of the Kaggle
-leaderboard is in the fifties, about where this score on the public games now stands; the
-evaluation games are other games, and the agent is not ready to submit.
+(`tu93`, 4.50: every level, in 185 actions against 462), and a key carried through a maze,
+turned, recoloured and reshaped on tiles until it is the door's glyph (`ls20`, 3.45: six of
+seven levels, in 300 actions against 590). Eleven of the 25 public games are now played at
+or near the cap and two more at three-quarters of it (`ls20` and `wa30`); the reported top
+of the Kaggle leaderboard is in the fifties, about where this score on the public games now
+stands; the evaluation games are other games, and the agent is not ready to submit.
 
-**What would move it next (Phases 41–44):** the eight games that were near zero were all
+**What would move it next (Phases 41–45):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
-rules; the first three of them, `m0r0`, `sp80` and `tu93`, are now played at the cap by the
-meet, pour and maze solvers. Next come the first levels of `ls20` (+1.6: a maze where tiles
-change the key the avatar carries and a door takes only its own) and of `sc25` (+1.3:
-spells drawn on a click pad), then `dc22`, `bp35` and `g50t`, which need a model of what
+rules; four of them, `m0r0`, `sp80`, `tu93` and `ls20` (six of its seven levels), are now
+played at the cap by the meet, pour, maze and key solvers. Next come the first levels of
+`sc25` (+1.3: spells drawn on a click pad) and the last level of `ls20` (+1.2: the same
+maze hidden in fog outside a disc round the avatar, so the map must be kept of what has
+been seen and the doors found), then `dc22`, `bp35` and `g50t`, which need a model of what
 clicks or a key do to the whole board (see "Phase 41").
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in

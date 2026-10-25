@@ -76,6 +76,7 @@ The project has two strands that share one codebase:
 | 49 | **Mechanics library, panel family**: a solver for boards of floor pieces with a panel of buttons beside them; the avatar (the square that moves under the arrow keys, told from the goal by a first move), the board (the box of the background round it), the buttons (the panel's solid shapes) and the goal (a square of the avatar's size in a colour of its own) read from the frames; each button pressed round its cycle to learn the pixels it changes in each state; keys that show buttons, pads that move the avatar, colours it is refused on and presses that drop it learned from what is seen; a breadth-first search over the avatar's cell and every group's state | done — official-style score 63.11 → **65.30**, levels 525 → 535; `dc22` 0.05 → 54.76: levels 1–4 on every seed, at the cap, 206 actions against the humans' 326; levels 5 and 6, where buttons drive a crane, are left to the model-guided agent; no game loses |
 | 50 | **Panel family, a driven piece**: a button whose presses move one piece by the same step until a press moves nothing drives it, a press that moves nothing elsewhere ends its track there, and a press that changes it in place makes it grip what the next step shows it carrying; presses that did nothing tried again with the piece elsewhere; falls told from shakes by the avatar in the frames between; the search over the avatar's cell, the groups' states and the piece's place and grip, a group pressed only with the avatar near it | done — official-style score 65.30 → **66.40**, levels 535 → 540; `dc22` 54.76 → 82.14: level 5 (a crane carries a bridge) on every seed in 182 actions against the humans' 324, at the cap; level 6 is left to the model-guided agent; no game loses |
 | 51 | **Mechanics library, replay family**: a solver for mazes whose plates hold doors open while something stands on them (or turn them, or swap two pads), and whose fifth key undoes the run and leaves a ghost that walks it again; the avatar and its cells, the devices by their shapes and what each colour's regions join, the exit and the runs read from the frames; doors that turn learned by stepping on and off a plate; enemies that walk their way, press plates and catch the avatar, their heading and track learned from their steps; for each choice of where the ghosts end, a breadth-first search over the avatar, ghosts, doors, enemies and time, a run that will be undone kept to what the undo restores | done — official-style score 66.40 → **71.00**, levels 540 → 575; `g50t` 0 → 115.0: every level on every seed, at the cap, 287 actions against the humans' 879; no game loses |
+| 52 | **Mechanics library, gravity family**: a solver for a shaft taller than the screen, walked left and right and fallen down the way gravity pulls, whose clicks clear blocks, turn toggles and turn gravity; the avatar and its step from a first move, the cells on the lattice with the fewest kinds of cell, a map of the shaft from the view's shifts, and what each look is (open, solid, deadly, the gem) and does when clicked learned from the frames; a cheapest-first search over the avatar's cell, gravity and the tiles changed, each click made just before the step that needs it, and while the gem is unseen a search for a view of rows not yet seen or a fall into them; outside the family, the solver whose go ended keeps the turn through the restart, and the marker solver's search is bounded | done — official-style score 71.00 → **73.10**, levels 575 → 604; `bp35` 0.05 → 52.71: levels 1–6 on every seed, 197 actions against the humans' 271, all at the cap but the fifth; levels 7–9 are left to the model-guided agent; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -194,6 +195,7 @@ neo4/
   spells.py       the spell solver: spells drawn on a click pad, their effects, targets and marks learned
   panel.py        the panel solver: buttons beside the board learned round their cycles, a crane driven and gripping
   replay.py       the replay solver: plates, doors and pads, ghosts that walk a run again, enemies on their way
+  gravity.py      the gravity solver: a shaft that scrolls, gravity, and the tiles that clicks change
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -2331,6 +2333,120 @@ states found, and the last three as many as its hand solutions.
   through that door to the plate that swaps the right-hand pads. The avatar stands on one of
   them and is carried to the exit's side.
 
+### Phase 52 — the gravity family: a shaft taller than the screen, tiles that clicks change
+
+`neo4/gravity.py` is the family for `bp35`'s first six levels. The avatar walks left and
+right along a shaft of 6-pixel cells and falls, the way gravity pulls, until something stops
+it; at first gravity pulls up. A click clears a block, turns a toggle tile from solid to open
+and back, or clears a gravity tile and turns gravity round. A fall that ends on spikes ends
+the go, and so does a bar of 64 steps along the bottom row. On levels 1 to 3 a ceiling of
+spikes rises behind the avatar, a row every two moves (the solver has no model of it; its
+plans keep ahead). The view follows the avatar, so about ten of the shaft's 36 to 50 rows are
+in sight, and the gem is out of view at the start. The solver reads it all from the frames:
+
+* **The avatar and the step.** The avatar is the small shape in colours drawn nowhere else,
+  the one a first move moves; how far it moved is the step. Later it is found by its main
+  colour's patch, as large as it was then, because spikes share its other colour.
+* **The cells** lie on the lattice where the frame shows the fewest kinds of cell; a cell's
+  look is what is drawn inside it.
+* **The map.** How far the view moved is summed over the frames of each action (two or three
+  pixels a frame as the avatar falls). Every cell seen keeps its place in a map of the shaft,
+  kept when the level is begun again.
+* **What looks do.** A look drawn mostly in the background's colour is taken to be open,
+  others solid, until a move or a fall shows otherwise. What a look does when clicked is seen
+  the first time one is clicked. A tile that went out of view as the avatar fell is taken to
+  have vanished, and a click made out of view changes the map as the click's look does. A
+  look the avatar has rested on is safe, one it died on is deadly.
+* **Gravity** is the way the avatar rests. Where both or neither of its sides are solid, the
+  view decides: it leaves more room the way the avatar falls. A click that turns gravity
+  shows as the avatar resting elsewhere on screen.
+* **The gem** is the look that ended a level. On the first level, a look seen only once is
+  tried.
+
+The plan is the search Phase 41's diagnosis used, cheapest first, over the avatar's cell,
+gravity and the tiles changed. Its steps are moves and clicks made just before the step that
+needs them: a tile on the way cleared, the one the avatar stands on cleared, one turned solid
+to stop a fall, gravity turned. While the gem is not in the map, the search is for a view of
+rows not yet seen, else for a fall on into them. Two rules come from the shaft's traps, since
+nothing done can be undone:
+* a landing on a look not yet rested on costs ten actions more;
+* a view is not taken from a place the avatar could leave only by such a landing.
+
+The second rule is for `bp35`'s second level. There the cheapest new view lies up a column
+that ends under spikes two rows higher, between walls, and the way on is a tunnel of blocks one
+row lower. With no plan, a look whose click has not been seen is clicked once, and with none of
+those, the level is begun again.
+
+Two lessons came from bugs:
+* The game draws its next frames over the arrays of the last observation, so a frame kept to
+  measure the next action's first shift must be copied. Uncopied, it read the next action's
+  last frame, and after a gravity turn the first shift came out as 8 pixels where there were
+  none.
+* What a click changes is no evidence about a fall through it. A block clicked away under the
+  avatar was counted among the looks it fell through, and blocks were taken to be open from
+  the fourth level to the fifth.
+
+The toy test (`tests/test_gravity.py`) uses another game written apart from the solver: 5-pixel
+cells, gravity down at first, other colours and tiles, the view moving 5 pixels a frame. Its
+four levels are played in 22, 13, 9 and 7 actions:
+1. A shaft of blocks, the gem far below the first view.
+2. The cheapest way on is a fall into rows not yet seen, onto spikes; the level is begun again
+   with the map kept, and the other way taken.
+3. The only way down falls through an open gate onto spikes; the gate, clicked to see what
+   it does, shuts, and the fall stops on it.
+4. The gem is above, and a turner sends gravity the other way.
+
+Only `bp35` among the public games has the solver's keys (left, right and click, no up or
+down), and inside the library the solver takes no turn anywhere else.
+
+Two changes outside the family came from playing `bp35` inside the library:
+* **A restart keeps its solver.** When a go ends (a death, or the bar run out), the fallback
+  begins the level again, and the solvers used to be asked in their order. On `bp35`'s third
+  level the marker solver, earlier in the order, took the restart with a plan of its own. Its
+  clicks changed the board, the gravity solver stood back until the bar ran out, and the level
+  cost 96 actions instead of 41. The solver whose go ended is now asked first after the
+  restart (`tests/test_library.py`).
+* **The marker solver's search is bounded.** From the seventh level on, `bp35` is left to the
+  model-guided agent, and while it plays, the marker solver keeps looking for a plan. With
+  about 170 pieces and 100 actions on screen, the first of its 150 searches a plan worked out
+  the reach of every piece, two million predictions and about ten seconds a plan, and the cap
+  on a level's searching never stopped it, because that work was not counted. A piece's reach
+  is now worked out once a plan and counted towards the cap. No plan changes, and a 4,000-step
+  run of `bp35` takes about four minutes where it took hours.
+
+**Results (Phase 52, `library`, 4,000 steps, 5 seeds): 71.00 → 73.10, levels 575 → 604; no
+other game changes, and the solver reads a scene and acts only in `bp35`.**
+
+| game | Phase 51 | Phase 52 | what changed |
+|---|---:|---:|---|
+| `bp35` | 0.05 | 52.71 | levels 1–6 on every seed, in 17, 43, 41, 23, 32 and 41 actions (humans 21, 48, 44, 38, 33, 87): 197 against 271, all at the cap but the fifth (106) |
+
+What each level teaches:
+1. A first move shows the avatar and its step. The block under it is clicked to see what it
+   does (it clears), and a look seen only once is tried as the gem and is the gem.
+2. The second level is played with no death: the view up the column under the spikes is
+   passed over, and the way on is the tunnel of blocks.
+3. The third level brings new looks. Two are clicked to see what they do: they are toggle
+   tiles, turning between solid and open. One fall ends on spikes, so their look becomes
+   deadly, and the level is begun again with the map kept. From there, each toggle is
+   clicked just before the step that needs it.
+4. On the fourth level a click on a new look turns gravity, which shows as the avatar resting
+   at the other end of the screen, and the plan turns it twice more.
+5. The fifth level's gem is above the start and out of view, and the cheapest new views lie
+   below. So the shaft is explored downwards first and climbed back: 32 actions against the
+   humans' 33, the one level below the cap.
+6. The sixth level needs nothing new.
+
+The seventh level has 31 toggles and 23 tiles that turn gravity, all alike, set in the left
+wall. One turn of gravity brings the gem into the map, but each tile clicked away makes a state
+of its own, and the search runs out of its 40,000 states before it reaches the gem. The solver
+begins the level again, finds no plan again, and gives the level back. The model is not at
+fault: played beside the game, it follows the diagnosis's 43-action solution step for step to
+the gem. With the tiles sealed in a wall left out of the state, as the diagnosis's own search
+did, the search reaches the gem in about 3,200 states. The eighth and ninth levels add tiles
+whose click grows a tile into every empty neighbour. Levels 7 to 9 are left to the model-guided
+agent for now.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -2357,11 +2473,12 @@ states found, and the last three as many as its hand solutions.
 | library, + the key family in fog (Phase 48) | 525 | 63.11 |
 | library, + panel family (Phase 49) | 535 | 65.30 |
 | library, + a driven piece that grips (Phase 50) | 540 | 66.40 |
-| library, + replay family (Phase 51, default) | 575 | **71.00** |
+| library, + replay family (Phase 51) | 575 | 71.00 |
+| library, + gravity family (Phase 52, default) | 604 | **73.10** |
 
-All of the gain is six families, played by sixteen solvers. The navigation family's share (`ls20`,
-`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 26.19, nearly all of it `m0r0`,
-`tu93`, `ls20`, `sc25`, `g50t` and `dc22`, at 0.4 times the human count. The carry family's share (`wa30`,
+All of the gain is six families, played by seventeen solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 28.30, now from all seven of its
+games, at 0.4 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -2375,9 +2492,10 @@ the human actions or fewer), and `tu93` on every level and seed in the fewest ac
 mazes allow (on two levels the humans' count), and `ls20` and `sc25` on every level and seed
 at the cap (383 and 129 actions against 776 and 350, `ls20`'s last level in fog), and `g50t`
 on every level and seed at the cap (287 actions against 879), and `dc22`'s
-first five levels on every seed at the cap (388 actions against 650); `re86` and
+first five levels on every seed at the cap (388 actions against 650), and `bp35`'s first six
+on every seed (197 actions against 271, all at the cap but the fifth); `re86` and
 `s5i5` open at human cost
-and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
+and stop at their second level; `vc33` keeps what the model-guided agent already did. Four
 lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
@@ -2394,7 +2512,7 @@ lessons:
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
-  in navigation `bp35`'s gravity and `dc22`'s last level. `dc22` shows the line moving: its
+  in navigation `dc22`'s last level and `bp35`'s from the seventh on. `dc22` shows the line moving: its
   first four levels are nothing but a board, its pieces and the buttons that step them, the
   fifth adds a crane the solver learned to drive, and the last puts the goal past the panel's
   line and the crane's buttons on tiles, which the solver does not read.
@@ -2403,6 +2521,11 @@ lessons:
   door that turns, a swap, a ghost held back by a door, and an enemy's heading all come out
   of that undo differently from a restart. The planner keeps to runs that both readings
   agree on, the safe side when the frames cannot tell them apart.
+* **What stops a solver can be another solver.** On `bp35`'s third level nothing in the
+  gravity solver's model was at fault: the restart after a death went to the marker solver,
+  earlier in the order, whose clicks changed the board under the gravity solver's map. A
+  solver now keeps the turn through the restart that ends its go, and the marker solver's cap
+  on its own searching counts all the work the searches do.
 * **Learning from the completed level is the strongest generic signal.** The first frame of
   a level-up still shows the finished level; the arrangement of piece and mark in it, and
   the controls that moved the pieces, carry over to the next level of the same game. It is
@@ -2453,7 +2576,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 48 (keys in fog) | 525 levels | 63.11 |
 | library, Phase 49 (panel solver) | 535 levels | 65.30 |
 | library, Phase 50 (a driven piece) | 540 levels | 66.40 |
-| library, Phase 51 (replay solver; default) | 575 levels | **71.00** |
+| library, Phase 51 (replay solver) | 575 levels | 71.00 |
+| library, Phase 52 (gravity solver; default) | 604 levels | **73.10** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -2499,8 +2623,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–51):** 575 levels, official-style
-score **71.00** — a hundred and sixty-one times Phase 23, all of it from sixteen family
+**Where it stands now (the `library` agent, Phases 24–52):** 604 levels, official-style
+score **73.10** — a hundred and sixty-six times Phase 23, all of it from seventeen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -2528,19 +2652,24 @@ drive carrying a bridge where the avatar needs it (`dc22`, 3.29: the first five 
 388 actions against 650), and an avatar walked through a maze whose plates hold doors open,
 turn them or swap two pads, the fifth key undoing each run and leaving a ghost that walks it
 again, past enemies whose ways are learned by watching them (`g50t`, 4.60: every level, in
-287 actions against 879). Fourteen of the 25 public games are now played at or near the cap,
-a fifteenth at three-quarters of it (`wa30`) and a sixteenth at seven-tenths (`dc22`); the
+287 actions against 879), and an avatar walked and fallen down a shaft taller than the screen,
+whose clicks clear blocks, turn toggles and turn gravity, each learned from its first click
+(`bp35`, 2.11: the first six levels, in 197 actions against 271). Fourteen of the 25
+public games are now played at or near the cap, a fifteenth at three-quarters of it (`wa30`),
+a sixteenth at seven-tenths (`dc22`) and a seventeenth at nearly half (`bp35`); the
 top of the Kaggle leaderboard was reported in the fifties, and this score on the public games
 is now above that, but the evaluation games are other games, and the agent is not ready to
 submit.
 
-**What would move it next (Phases 41–51):** the eight games that were near zero were all
+**What would move it next (Phases 41–52):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; six of them, `m0r0`, `sp80`, `tu93`, `sc25`, `ls20` and `g50t`, are now played at
-the cap on every level by the meet, pour, maze, spell, key and replay solvers, and `dc22`'s
-first five levels by the panel solver. The points left are in the games whose diagnoses
-called for large models: `bp35` (+4.6, or +2.1 for its first six levels: what clicks do to
-a board under gravity that scrolls, see "Phase 41"), `dc22`'s last level (+1.3: the goal
+the cap on every level by the meet, pour, maze, spell, key and replay solvers, `dc22`'s
+first five levels by the panel solver and `bp35`'s first six by the gravity solver. The
+points left are in the games whose diagnoses called for large models: `bp35`'s last three
+levels (+2.4: on the seventh, alike tiles sealed in a wall that the search's state should
+leave out; on the eighth and ninth, tiles whose click grows a tile into every empty
+neighbour), `dc22`'s last level (+1.3: the goal
 past the panel's line, the crane's buttons shown only while the avatar stands on their
 tiles, pads whose pairing a button cycles), `ka59` (+4.6, or +1.6 for its first four
 levels: pixel-exact pushes, slides and blasts) and `lf52` (+4.0 to +4.6: peg solitaire on

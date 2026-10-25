@@ -791,9 +791,10 @@ class GravitySolver:
                 self.know.open_seen[self.touched] = True
         x = self.at[0]
         lo, hi = sorted((at0[1], self.at[1]))
+        clicked = a[1] if a[0] == "click" else None  # its look before the click says nothing
         for y in range(lo, hi + 1):
             L = old.get((x, y))
-            if L is not None and (x, y) != at0 and not self.know.passable(L):
+            if L is not None and (x, y) != at0 and (x, y) != clicked and not self.know.passable(L):
                 self.know.open_seen[L] = True
                 self.stats["learned_open"] += 1
         stop = old.get((x, self.at[1] + self.g))

@@ -70,6 +70,7 @@ The project has two strands that share one codebase:
 | 43 | **Mechanics library, pour family**: a solver for boards with spouts, cups, a floor and movable pieces (bars that water runs along, angles that turn it); the flow simulated cell by cell, a beam search over where the pieces go led by the simulated outcome and priced by keys and clicks, what stops a piece learned from keys that do not move it | done — official-style score 44.98 → **49.48**, levels 419 → 440; `sp80` 2.49 → 115.0: every level on every seed, each on its first pour, 104 actions against the humans' 518; no game loses |
 | 44 | **Mechanics library, maze family**: a solver for mazes of nodes and links on a lattice: the avatar an eyed block the keys move, the exit a block of a colour of its own, watchers other eyed blocks whose kind (walks, wakes and trails, lunges) is learned by watching them, the node in front of a watcher of a kind not known never stopped on; a search over the avatar's node and the watchers' states turn by turn, and a safe move to watch when there is no plan | done — official-style score 49.48 → **53.91**, levels 440 → 465; `tu93` 1.77 → 112.6: every level on every seed without a death, 185 actions against the humans' 462; no game loses |
 | 45 | **Mechanics library, key family**: a solver for mazes where the avatar carries a key (a glyph shown at twice the size in a box) that tiles turn, recolour and reshape, and a door takes the avatar only when the key is its glyph; what each tile does, the move cost, pushers' landings and the tracks of sliding tiles learned by watching; an A* search over cell, key, refills, steps left and the tiles' phase, into a door in reach first while another door's glyph is not | done — official-style score 53.91 → **57.36**, levels 465 → 490; `ls20` 0.02 → 86.25: levels 1–6 on every seed, at the cap, 300 actions against the humans' 590; the seventh (fog) is left to the model-guided agent; no game loses |
+| 46 | **Mechanics library, spell family**: a solver for mazes with a 3x3 click pad beside them, whose patterns cast spells; the avatar (a square of two halves), the exit (a box in its colours) and the spell the pad shows read from the frames; what each spell does (a new size, a jump, a shot that clears barriers, aimed the way the avatar last moved) learned from its first cast; a search over the avatar's place and size by moves and casts | done — official-style score 57.36 → **58.68**, levels 490 → 505; `sc25` 0 → 32.86: levels 1–3 on every seed, at the cap, 36 actions against the humans' 74; levels 4–6, where several spells are hidden behind their icons, are left to the model-guided agent; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -185,6 +186,7 @@ neo4/
   pour.py         the pour solver: spouts, cups and pieces read, the flow simulated, placements searched
   maze.py         the maze solver: avatar to the exit on a lattice of nodes, watchers' rules learned
   keys.py         the key solver: the key turned, recoloured and reshaped on tiles into every door
+  spells.py       the spell solver: spells drawn on a click pad, their effects learned, casts planned
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -1937,6 +1939,58 @@ is in reach rather than first exploring (on the sixth level that is 82 actions i
 108). The sliding tiles of levels 5 and 6 are watched for four and eight moves before their
 cycles are known.
 
+### Phase 46 — the spell family: walk to the exit, casting what the pad draws
+
+`neo4/spells.py` is the fifth solver Phase 41 called for, for the first three levels of
+`sc25`. The game draws a maze in which the avatar, a square of two colours, must reach an
+exit, a box drawn in the same two colours. Below the maze sits a pad of 3x3 small cells that
+clicks toggle. When the cells toggled on make one of the level's spells, it is cast and the
+pad clears: the diamond makes the avatar small or large again (the small one passes a gap
+the large one cannot), the hook makes it jump to a marker, the line sends a fireball the way
+the avatar last moved, which, if it meets the target, clears the barriers of the target's
+colour. A move takes the avatar its own size along (a large one that is blocked tries half
+that), and each move and click spends one step of a budget. On the first three levels the
+pad shows the level's one spell, its cells in black; from the fourth there are several
+spells, shown only when their icon is clicked, with refills and two kinds of barrier.
+
+* **Reading the screen.** The avatar is the one square made of two equal rectangles of two
+  colours (its colours are then kept for the game, and it is tracked by its two halves, so
+  that it is not lost when it touches the exit). The floor is the colour round it, taking a
+  colour on the screen's edges last (the avatar starts in the dead end of a corridor); the
+  wall is the commonest other colour; the exit is the box of the avatar's colours elsewhere.
+  The pad is nine equal one-colour squares on a 3x3 lattice; the spell shown is the cells of
+  the colour fewer of them have, and a cell of a third colour is toggled on.
+* **What a spell does** is learned when it is first cast, from the avatar and the screen
+  before and after: a new size (and the size it gives back), a new place (where the jump
+  lands, for the level and the size), cells that became floor (a shot), or nothing. Nothing
+  is a shot that met nothing on its way, so the spell is cast again after a move (or a move
+  into a wall) the way whose line from the avatar meets something on the screen that is
+  neither wall nor floor. Whether a blocked large move tries half a step is learned from
+  moves, and whether a full step that touches the exit ends the level from a level that
+  ends on one.
+* **The plan** is a search over the avatar's place and size for the fewest actions to the
+  exit, by moves and by the spells whose outcome is known (a cast costs a click a cell);
+  when there is none, the spell shown is cast to see what it does, aimed if it is a shot.
+
+The solver takes control only on a level whose pad shows a spell, so it gives the fourth
+level and those after it back to the model-guided agent. It goes after the key solver and
+before the pointer and marker solvers. Over 100 random steps of each public game a spell
+scene is read only in `sc25`. The toy test (`tests/test_spells.py`: other colours, a pad of
+2-pixel cells, other patterns, a shrink, a jump to a room that cannot be walked to, a shot
+at a target down a side corridor, and an exit that the full step reaches) is played in 20, 5
+and 14 actions.
+
+**Results (Phase 46, `library`, 4,000 steps, 5 seeds): 57.36 → 58.68, levels 490 → 505; no
+other game changes, and the solver takes no turn in any other game.**
+
+| game | Phase 45 | Phase 46 | what changed |
+|---|---:|---:|---|
+| `sc25` | 0.00 | 32.86 | levels 1–3 on every seed, in 17, 5 and 14 actions (humans 36, 6, 32), every one at the cap: the game's first action is taken by a demonstration of the pad, each spell is cast once to see what it does, and the first fireball (sent the way the avatar last moved, up into a wall) meets nothing; levels 4–6 are left to the model-guided agent, which completes none; a run takes 28 s instead of 25 |
+
+The diagnosis played these levels in 13, 5 and 11 actions knowing the spells; the solver
+spends the difference learning them, which the humans' counts leave room for except on the
+second level, where 5 actions is both the fewest and what the cap needs.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -1957,11 +2011,12 @@ cycles are known.
 | library, + meet family (Phase 42) | 419 | 44.98 |
 | library, + pour family (Phase 43) | 440 | 49.48 |
 | library, + maze family (Phase 44) | 465 | 53.91 |
-| library, + key family (Phase 45, default) | 490 | **57.36** |
+| library, + key family (Phase 45) | 490 | 57.36 |
+| library, + spell family (Phase 46, default) | 505 | **58.68** |
 
-All of the gain is six families, played by thirteen solvers. The navigation family's share (`ls20`,
-`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 12.56, nearly all of it `m0r0`,
-`tu93` and `ls20`, at 0.33 times the human count. The carry family's share (`wa30`,
+All of the gain is six families, played by fourteen solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 13.87, nearly all of it `m0r0`,
+`tu93`, `ls20` and `sc25`, at 0.33 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -1972,8 +2027,8 @@ count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
 `lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
 the human actions or fewer), and `tu93` on every level and seed in the fewest actions its
-mazes allow (on two levels the humans' count), and `ls20` on six of its seven levels at the
-cap (the seventh is in fog); `re86` and `s5i5` open at human cost
+mazes allow (on two levels the humans' count), `ls20` on six of its seven levels at the
+cap (the seventh is in fog), and `sc25` on its first three of six; `re86` and `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
 
@@ -2033,7 +2088,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 42 (meet solver) | 419 levels | 44.98 |
 | library, Phase 43 (pour solver) | 440 levels | 49.48 |
 | library, Phase 44 (maze solver) | 465 levels | 53.91 |
-| library, Phase 45 (key solver; default) | 490 levels | **57.36** |
+| library, Phase 45 (key solver) | 490 levels | 57.36 |
+| library, Phase 46 (spell solver; default) | 505 levels | **58.68** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -2079,8 +2135,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–45):** 490 levels, official-style
-score **57.36** — a hundred and thirty times Phase 23, all of it from thirteen family
+**Where it stands now (the `library` agent, Phases 24–46):** 505 levels, official-style
+score **58.68** — a hundred and thirty-three times Phase 23, all of it from fourteen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -2098,19 +2154,25 @@ water fills every cup (`sp80`, 4.60: every level, in 104 actions against 518), a
 avatar walked through a maze past watchers whose rules are learned by watching them
 (`tu93`, 4.50: every level, in 185 actions against 462), and a key carried through a maze,
 turned, recoloured and reshaped on tiles until it is the door's glyph (`ls20`, 3.45: six of
-seven levels, in 300 actions against 590). Eleven of the 25 public games are now played at
-or near the cap and two more at three-quarters of it (`ls20` and `wa30`); the reported top
-of the Kaggle leaderboard is in the fifties, about where this score on the public games now
-stands; the evaluation games are other games, and the agent is not ready to submit.
+seven levels, in 300 actions against 590), and an avatar walked to the exit by spells drawn
+on a click pad, each learned from its first cast (`sc25`, 1.31: the first three of six
+levels, in 36 actions against 74). Eleven of the 25 public games are now played at or near
+the cap, two more at three-quarters of it (`ls20` and `wa30`) and `sc25` at 29%; the
+reported top of the Kaggle leaderboard is in the fifties, about where this score on the
+public games now stands; the evaluation games are other games, and the agent is not ready
+to submit.
 
-**What would move it next (Phases 41–45):** the eight games that were near zero were all
+**What would move it next (Phases 41–46):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; four of them, `m0r0`, `sp80`, `tu93` and `ls20` (six of its seven levels), are now
-played at the cap by the meet, pour, maze and key solvers. Next come the first levels of
-`sc25` (+1.3: spells drawn on a click pad) and the last level of `ls20` (+1.2: the same
-maze hidden in fog outside a disc round the avatar, so the map must be kept of what has
-been seen and the doors found), then `dc22`, `bp35` and `g50t`, which need a model of what
-clicks or a key do to the whole board (see "Phase 41").
+played at the cap by the meet, pour, maze and key solvers, and `sc25`'s first three levels
+by the spell solver. Next come `sc25`'s last three levels (+3.3: several spells at once,
+shown only when their icon is clicked but known from the first levels, refills, barriers of
+two colours, a shot that passes some things and stops at others, and a tight budget) and
+the last level of `ls20` (+1.2: the same maze hidden in fog outside a disc round the
+avatar, so the map must be kept of what has been seen and the doors found), then `dc22`,
+`bp35` and `g50t`, which need a model of what clicks or a key do to the whole board (see
+"Phase 41").
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

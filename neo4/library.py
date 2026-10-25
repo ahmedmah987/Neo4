@@ -55,6 +55,7 @@ class LibraryAgent:
         self.solvers = [cls(seed) for cls in (FAMILIES if families is None else families)]
         self.pending: tuple[GameAction, dict | None] | None = None
         self.controller: Any = None  # the solver that chose the last action, if any
+        self.resume: Any = None  # the solver whose go ended: first to be asked after the restart
         self.stats: dict[str, Any] = {}
 
     @property
@@ -74,8 +75,11 @@ class LibraryAgent:
             s.observe(action, data, obs)
         chosen: Action | None = None
         if obs.state == GameState.NOT_FINISHED and not obs.is_empty():
-            # the solver in control keeps the turn while it wants it
-            order = sorted(self.solvers, key=lambda s: s is not self.controller)
+            # the solver in control keeps the turn while it wants it, and through the
+            # restart that follows a go of its that ended
+            first = self.controller or self.resume
+            self.resume = None
+            order = sorted(self.solvers, key=lambda s: s is not first)
             for s in order:
                 if s.disabled:
                     continue
@@ -84,6 +88,8 @@ class LibraryAgent:
                     self.controller = s
                     break
         if chosen is None:
+            if obs.state == GameState.GAME_OVER and self.controller is not None:
+                self.resume = self.controller
             self.controller = None
             chosen = self.fallback.act(obs)
         else:

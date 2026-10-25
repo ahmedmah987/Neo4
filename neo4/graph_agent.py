@@ -418,7 +418,8 @@ class GraphAgent:
             idx = next((i for i, c in enumerate(node.cands)
                         if c.action == forced[0] and c.data == forced[1]), None)
             self.last_key, self.last_idx = (key, idx) if idx is not None else (None, None)
-            self.since_reset += 1
+            # a solver's restart counts as one, so the next action is never a second reset
+            self.since_reset = 0 if forced[0] is GameAction.RESET else self.since_reset + 1
             return forced
         idx = self._choose(node)
         if idx is None and self.since_reset == 0 and node.cands:

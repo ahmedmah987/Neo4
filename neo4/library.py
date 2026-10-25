@@ -34,12 +34,13 @@ from .panel import PanelSolver
 from .pointer import PointerSolver
 from .pour import PourSolver
 from .program import ProgramSolver
+from .replay import ReplaySolver
 from .translate import TranslateSolver
 from .model_agent import ModelAgent
 
 Action = tuple[GameAction, dict[str, int] | None]
 
-FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, BitSolver, ConnectSolver, CarrySolver, MazeSolver, KeySolver, SpellSolver, PointerSolver, MarkerSolver, PainterSolver, MeetSolver, PourSolver, PanelSolver]
+FAMILIES: list[type] = [ProgramSolver, TranslateSolver, ClueSolver, BitSolver, ConnectSolver, CarrySolver, MazeSolver, KeySolver, SpellSolver, PointerSolver, MarkerSolver, PainterSolver, MeetSolver, PourSolver, PanelSolver, ReplaySolver]
 
 
 class LibraryAgent:

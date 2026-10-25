@@ -4,15 +4,17 @@ steps its group of cells to the next of its states (a tile shuts or opens, a bri
 bar slides along a track or grows over it); a key on a tile shows a hidden button when the
 avatar steps on it; a press with the avatar on a pad of the pads' group takes it to the other
 pad; a press that leaves the avatar on a cell that is not open is undone (and costs steps).
-The level ends on the goal. Colours, sizes, the panel's side and the layouts are none of
-dc22's, and the rules here are written apart from the solver's."""
+On the last level four buttons drive a ring along a rail, a stop at a press (a press with no
+stop that way only shakes it), and a fifth makes it grip the bar beside one stop, which it
+then carries. The level ends on the goal. Colours, sizes, the panel's side and the layouts
+are none of dc22's, and the rules here are written apart from the solver's."""
 
 import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
 
 from neo4.library import LibraryAgent
 
-BG, PANEL, LINE, FLOOR, AVATAR, GOAL, KEY, TRACK, BAR = 1, 7, 0, 2, 12, 10, 15, 5, 8
+BG, PANEL, LINE, FLOOR, AVATAR, GOAL, KEY, TRACK, BAR, RING, CARGO = 1, 7, 0, 2, 12, 10, 15, 5, 8, 14, 4
 X0, Y0, C = 20, 2, 3  # the board's first cell (pixels) and the cell's size
 KEYS = {GameAction.ACTION1: (0, -1), GameAction.ACTION2: (0, 1), GameAction.ACTION3: (-1, 0), GameAction.ACTION4: (1, 0)}
 BUDGET = 150
@@ -55,7 +57,14 @@ LEVELS = [
          groups=[dict(button=(6, "bar"), states=[{}, paint([(5, 10)], ("solid", 4)), paint(rect(5, 10, 6, 10), ("solid", 4)),
                                                  paint(rect(5, 10, 7, 10), ("solid", 4))]),
                  dict(button=(11, "ell"), hidden=True, states=[{(8, 9): ("check", 11)}, {(8, 9): ("solid", 11)}])]),
+    # a ring on a rail grips a bar beside the rail's corner and carries it down over a gap
+    dict(floor=rect(1, 9, 8, 9) + rect(1, 10, 1, 12) + rect(12, 9, 13, 9), track=rect(1, 1, 8, 2) + rect(7, 3, 8, 8),
+         start=(1, 12), goal=(13, 9), groups=[],
+         crane=dict(stops=[(1, 1), (3, 1), (5, 1), (7, 1), (7, 3), (7, 5), (7, 7)], grip=(7, 1), cargo=rect(9, 3, 11, 3),
+                    buttons=[("up", (3, "bar")), ("right", (6, "bar")), ("down", (9, "bar")), ("grip", (11, "ell")),
+                             ("left", (13, "bar"))])),
 ]
+TURNS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 
 
 def obs_of(state, done, levels, frames) -> FrameDataRaw:
@@ -98,6 +107,10 @@ class PanelRoom:
         self.keys = dict(lv.get("keys", {}))
         self.shown = {i for i, g in enumerate(lv["groups"]) if not g.get("hidden")}
         self.left = BUDGET
+        self.crane = lv.get("crane")
+        if self.crane:
+            self.ring = self.crane["stops"][0]
+            self.holds = False
 
     def _patterns(self) -> dict:
         lv = self.lv
@@ -106,23 +119,46 @@ class PanelRoom:
         out[lv["goal"]] = ("solid", GOAL)
         for g, s in zip(lv["groups"], self.states):
             out.update(g["states"][s])
+        if self.crane:
+            out.update({c: ("solid", CARGO) for c in self._cargo()})
+            out.update({(self.ring[0] + i, self.ring[1] + j): ("ring",) for i in (0, 1) for j in (0, 1)})
         return out
 
-    def _grid(self, avatar_colour=AVATAR) -> np.ndarray:
+    def _cargo(self):
+        if not self.holds:
+            return self.crane["cargo"]
+        gx, gy = self.crane["grip"]
+        return [(x - gx + self.ring[0], y - gy + self.ring[1]) for x, y in self.crane["cargo"]]
+
+    def _buttons(self):
+        """[(slot, colour, shape, what it is)] of the buttons shown."""
+        out = [(i, *g["button"], ("group", i)) for i, g in enumerate(self.lv["groups"]) if i in self.shown]
+        if self.crane:
+            n = len(self.lv["groups"])
+            out += [(n + j, colour, shape, ("crane", name)) for j, (name, (colour, shape)) in enumerate(self.crane["buttons"])]
+        return out
+
+    def _grid(self, avatar_colour=AVATAR, shake=(0, 0), flash=False) -> np.ndarray:
         g = np.full((64, 64), BG, dtype=np.int8)
         g[:62, :16] = PANEL
         g[:, 16:18] = LINE
+        rail = set(self.lv.get("track", []))
         for cell, p in self._patterns().items():
-            draw_cell(g, cell, p)
+            if p[0] != "ring":
+                draw_cell(g, cell, p)
+            elif cell in rail:
+                draw_cell(g, cell, ("track",))  # the rail shows through the ring
+        if self.crane:
+            x, y = X0 + self.ring[0] * C + shake[0], Y0 + self.ring[1] * C + shake[1]
+            g[y:y + 6, x] = g[y:y + 6, x + 5] = g[y, x:x + 6] = g[y + 5, x:x + 6] = RING
+            if self.holds or flash:
+                g[y + 2:y + 4, x + 2:x + 4] = RING
         for cell in self.keys:
             x, y = X0 + cell[0] * C, Y0 + cell[1] * C
             g[y + 1, x + 1] = g[y + 1, x + 2] = g[y + 2, x + 1] = KEY
         x, y = X0 + self.at[0] * C, Y0 + self.at[1] * C
         g[y:y + C, x:x + C] = avatar_colour
-        for i, grp in enumerate(self.lv["groups"]):
-            if i not in self.shown:
-                continue
-            colour, shape = grp["button"]
+        for i, colour, shape, _ in self._buttons():
             by = 6 + 12 * i
             if shape == "bar":
                 g[by:by + 4, 4:12] = colour
@@ -142,16 +178,34 @@ class PanelRoom:
         return self._obs([self._grid()])
 
     def _button_at(self, x, y):
-        for i, grp in enumerate(self.lv["groups"]):
-            if i not in self.shown:
-                continue
+        for i, colour, shape, what in self._buttons():
             by = 6 + 12 * i
-            shape = grp["button"][1]
             if shape == "bar" and by <= y < by + 4 and 4 <= x < 12:
-                return i
+                return what
             if shape == "ell" and ((by <= y < by + 6 and 4 <= x < 7) or (by + 3 <= y < by + 6 and 4 <= x < 12)):
-                return i
+                return what
         return None
+
+    def _drive(self, name) -> FrameDataRaw:
+        """A crane button: a step to the next stop that way, or a grip beside the grip stop."""
+        before = (self.ring, self.holds)
+        if name == "grip":
+            if self.holds or self.ring != self.crane["grip"]:
+                return self._obs([self._grid(flash=True), self._grid()])
+            self.holds = True
+        else:
+            d = TURNS[name]
+            to = (self.ring[0] + 2 * d[0], self.ring[1] + 2 * d[1])
+            if to not in self.crane["stops"]:
+                return self._obs([self._grid(shake=d), self._grid()])
+            self.ring = to
+        if not is_open(self._patterns().get(self.at)):
+            pressed = self._grid()
+            falling = self._grid(LINE)
+            self.ring, self.holds = before
+            self.left -= 5
+            return self._obs([pressed, falling, self._grid()])
+        return self._obs([self._grid()])
 
     def step(self, action: GameAction, data=None) -> FrameDataRaw:
         if action is GameAction.RESET:
@@ -163,8 +217,11 @@ class PanelRoom:
             self.state = GameState.GAME_OVER
             return self._obs([])
         if action is GameAction.ACTION6:
-            i = self._button_at(data["x"], data["y"])
-            if i is not None:
+            what = self._button_at(data["x"], data["y"])
+            if what is not None and what[0] == "crane":
+                return self._drive(what[1])
+            if what is not None:
+                i = what[1]
                 grp = self.lv["groups"][i]
                 before, at = self.states[i], self.at
                 self.states[i] = (before + 1) % len(grp["states"])
@@ -201,7 +258,7 @@ def test_panel_solver_learns_the_buttons_and_walks_to_the_goal():
     agent = LibraryAgent(seed=0)
     obs = env.reset()
     done_at = []
-    for used in range(1, 400):
+    for used in range(1, 500):
         a, d = agent.act(obs)
         obs = env.step(a, d)
         while len(done_at) < obs.levels_completed:
@@ -223,6 +280,12 @@ def test_panel_solver_learns_the_buttons_and_walks_to_the_goal():
     assert per[2] <= 16, (per, dict(solver.stats))
     # level 4: the bar's four states, then the key on the far side and the gate
     assert per[3] <= 40, (per, dict(solver.stats))
+    # level 5: the crane's buttons pressed once (one to the rail's end), those that did nothing
+    # tried again with the ring elsewhere (one of them the grip), a step to see what it carries,
+    # then the ring down to its last stop and the walk over the bar
+    assert per[4] <= 36, (per, dict(solver.stats))
+    assert solver.stats["movers"] == 1 and solver.stats["learned_steps"] == 4, dict(solver.stats)
+    assert solver.stats["learned_grip"] == 1 and solver.stats["learned_cargo"] == 1, dict(solver.stats)
     assert solver.stats["probed"] == 1 and solver.stats["not_goal"] == 1, dict(solver.stats)
     assert solver.stats["keys_taken"] == 2, dict(solver.stats)
     assert solver.stats["learned_teleport"] == 1, dict(solver.stats)

@@ -79,6 +79,7 @@ The project has two strands that share one codebase:
 | 52 | **Mechanics library, gravity family**: a solver for a shaft taller than the screen, walked left and right and fallen down the way gravity pulls, whose clicks clear blocks, turn toggles and turn gravity; the avatar and its step from a first move, the cells on the lattice with the fewest kinds of cell, a map of the shaft from the view's shifts, and what each look is (open, solid, deadly, the gem) and does when clicked learned from the frames; a cheapest-first search over the avatar's cell, gravity and the tiles changed, each click made just before the step that needs it, and while the gem is unseen a search for a view of rows not yet seen or a fall into them; outside the family, the solver whose go ended keeps the turn through the restart, and the marker solver's search is bounded | done — official-style score 71.00 → **73.10**, levels 575 → 604; `bp35` 0.05 → 52.71: levels 1–6 on every seed, 197 actions against the humans' 271, all at the cap but the fifth; levels 7–9 are left to the model-guided agent; no game loses |
 | 53 | **Gravity family, the last levels**: the search's states leave out turners sealed in a wall, which way toggles stand and what growers did, and a cell back as mapped is no change; a tile whose click empties it and grows its look into every empty cell beside it learned from the first click, and growers climbed, tunnelled through and grown in chains into the way of a fall; cells that come into view read from every frame of an action, and a death out of view put on what the fall met; stuck at the level's start, the searches made once more with a cap of a million states | done — official-style score 73.10 → **75.56**, levels 604 → 619; `bp35` 52.71 → 114.04: every level on every seed, 448 actions against the humans' 651, all at the cap but the fifth; no game loses |
 | 54 | **Diagnosis of the last eight games** `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33`, `ar25`: mechanics from the sources, every level played (by search on a model of the rules or by hand), every game replayed here from the reset to the win | done — all eight are deterministic and every level was won in at most 93% of the humans' actions, so at the cap: 2,398 actions against 6,608, `lf52`'s seventh level for the first time; together worth 36.4 on the mean; `ar25` first (+4.5, small), then `vc33`, `sk48` and `s5i5` (medium) (see "Phase 54") |
+| 55 | **Mirror family** (`ar25`): mirror lines read as the rows and columns in which no cell shows the background, pieces and their reflections as the two colours that are each other's reflections in the lines, targets, the selection and the fixed lines; the plan is every object's final place, the cheapest that covers every target, searched over the lines' places and, for each, the pieces' places combined by the targets they cover | done — official-style score 75.56 → **80.01**, levels 619 → 653; `ar25` 3.55 → 115.00: every level on every seed, 253 actions against the humans' 748, the fewest possible; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -198,6 +199,7 @@ neo4/
   panel.py        the panel solver: buttons beside the board learned round their cycles, a crane driven and gripping
   replay.py       the replay solver: plates, doors and pads, ghosts that walk a run again, enemies on their way
   gravity.py      the gravity solver: a shaft that scrolls, gravity, tiles that clicks change or grow
+  mirror.py       the mirror solver: pieces and lines moved until pieces and reflections cover the targets
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -2562,6 +2564,64 @@ Five of the eight (`ar25`, `vc33`, `re86`, `s5i5` and `su15`) were put in the ma
 Phase 24. The diagnosis shows five mechanisms there, each needing a model of its own, which is
 why the marker solver stops early in all five.
 
+### Phase 55 — the mirror family
+
+`neo4/mirror.py` is the family for `ar25`, the first game in Phase 54's order. A board of
+cells has mirror lines across it, pieces, and target cells. Each piece is drawn again, in a
+colour of its own, reflected in every line and in the lines' reflections. The keys move the
+selected object a cell, a line only across itself. A click selects the piece under it, or
+else the line. Nothing collides. A level ends when every target is under a piece or a
+reflection.
+
+Everything is read from the frame:
+* **The lattice.** It is the one on which every cell with something drawn in it is one
+  colour, but for its middle pixel.
+* **The lines.** A line is a row or column in which no cell shows the background, with cells
+  of the lines' colour away from the lines across it. Targets, pieces and reflections are
+  drawn over the lines, and on `ar25`'s fifth level they hide most of one. A first reader,
+  which asked for 60% of a row in one colour, lost that line there.
+* **Pieces and reflections.** They are the two colours whose cells are each other's
+  reflections in the lines. The middle pixels tell them apart: the pieces have marks there,
+  the reflections none. A piece is a group of cells that touch at a side or a corner, since
+  one of the sixth level's pieces is joined only at corners in places.
+* **Targets.** They are the one colour left, and the cells whose middle shows that colour (a
+  target under a piece or a reflection).
+* **The selection and the fixed lines.** The selected object has marks of a colour of its
+  own, and a line with no marks is fixed. Where two lines cross, either may be drawn on top,
+  so the crossing cells are left out of both readings.
+
+The colours' parts, once seen, are kept for the game's later levels. On some of them no
+reflection lies on the board at first, and without the kept parts the pieces could not be
+told from anything else.
+
+**The plan.** Since nothing collides, the order of the moves does not matter. A plan costs a
+key for each cell an object moves, and a click to select each object moved but the one
+already selected. The search is therefore over final places, not over actions:
+* every place of the lines, cheapest first;
+* for each, the pieces' places, combined one piece at a time by the set of targets they
+  cover (a bit mask), keeping the cheapest way to each set.
+
+It stops at the first placement of the lines that costs more than the best plan found.
+`ar25`'s largest level (two lines, two pieces, 52 targets) is planned in 2.8 seconds. After
+each action the board is read again and checked against the model.
+
+**Results (Phase 55, `library`, 4,000 steps, 5 seeds): 75.56 → 80.01, levels 619 → 653; no
+other game changes.**
+
+| game | Phase 53 | Phase 55 | what changed |
+|---|---:|---:|---|
+| `ar25` | 3.55 | 115.00 | every level on every seed, in 15, 11, 40, 22, 28, 53, 37 and 47 actions (humans 32, 50, 75, 37, 89, 159, 233 and 73): 253 against 748, the fewest possible, all at the cap |
+
+The toy test is a game of 5-pixel cells inside a frame, with colours, lines and layouts of
+its own, and four levels:
+1. a fixed line;
+2. a line that moves, across a fixed one, and a piece joined at corners;
+3. two pieces whose reflections all lie off the board at first;
+4. a line two-thirds under targets.
+
+The solver plays each in its fewest actions (11, 7, 13 and 5). The fewest were counted by a
+search over every final place, written apart from the solver.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -2590,28 +2650,29 @@ why the marker solver stops early in all five.
 | library, + a driven piece that grips (Phase 50) | 540 | 66.40 |
 | library, + replay family (Phase 51) | 575 | 71.00 |
 | library, + gravity family (Phase 52) | 604 | 73.10 |
-| library, + the gravity family's last levels: growers (Phase 53, default) | 619 | **75.56** |
+| library, + the gravity family's last levels: growers (Phase 53) | 619 | 75.56 |
+| library, + mirror family (Phase 55, default) | 653 | **80.01** |
 
-All of the gain is six families, played by seventeen solvers. The navigation family's share (`ls20`,
+All of the gain is six families, played by eighteen solvers. The navigation family's share (`ls20`,
 `tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 30.75, now from all seven of its
 games, at 0.4 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
 went from 0.10 to 13.77 (`sb26`, `tn36` and `sp80`, at 0.33 times the human count). The marker family's share of
-the mean (pieces brought onto their goals by indirect control, `r11l` included) went from
-0.24 to 9.38, and its cost on the levels it completes from 21.8 to 1.4 times the human
-count (2.3 in Phase 30; `r11l` costs 0.4); the copy family's (a shown pattern or sequence
+the mean (pieces brought onto their goals by indirect control, `r11l` and `ar25` included) went from
+0.24 to 13.84, and its cost on the levels it completes from 21.8 to 0.9 times the human
+count (2.3 in Phase 30; `r11l` costs 0.4, `ar25` 0.34); the copy family's (a shown pattern or sequence
 reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr87`).
-`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
-the human actions or fewer), and `tu93` on every level and seed in the fewest actions its
+`lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0`, `sp80` and `ar25` are solved outright (every level, every
+seed, in half the human actions or fewer, `ar25` in the fewest possible), and `tu93` on every level and seed in the fewest actions its
 mazes allow (on two levels the humans' count), and `ls20` and `sc25` on every level and seed
 at the cap (383 and 129 actions against 776 and 350, `ls20`'s last level in fog), and `g50t`
 on every level and seed at the cap (287 actions against 879), and `dc22`'s
 first five levels on every seed at the cap (388 actions against 650), and `bp35` on every
 level and seed (448 actions against 651, all at the cap but the fifth); `re86` and
 `s5i5` open at human cost
-and stop at their second level; `vc33` keeps what the model-guided agent already did. Five
+and stop at their second level; `vc33` keeps what the model-guided agent already did. Six
 lessons:
 
 * **A family solver pays only where the family is the whole game.** `lp85` is nothing but
@@ -2623,9 +2684,9 @@ lessons:
   gates and blocks, `sp80` nothing but spouts, pieces and cups, `tu93` nothing but a
   maze, an exit and watchers, `sc25` nothing but a maze, a pad and the spells it casts,
   and `ls20` nothing but a maze, a key, tiles, refills and doors (in fog on its last
-  level), `g50t` nothing but a maze, plates, doors, pads, ghosts and enemies, and `bp35`
-  nothing but a shaft, gravity and tiles that clicks change or grow, and the solvers finish
-  all fifteen. In
+  level), `g50t` nothing but a maze, plates, doors, pads, ghosts and enemies, `bp35`
+  nothing but a shaft, gravity and tiles that clicks change or grow, and `ar25` nothing but
+  pieces, mirror lines and targets, and the solvers finish all sixteen. In
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
@@ -2643,6 +2704,12 @@ lessons:
   earlier in the order, whose clicks changed the board under the gravity solver's map. A
   solver now keeps the turn through the restart that ends its go, and the marker solver's cap
   on its own searching counts all the work the searches do.
+* **When nothing collides, plan where things end, not how they get there.** In `ar25` each
+  key moves one object a cell and nothing blocks it, so any order of the same moves ends in
+  the same places at the same cost. The search is over final places: 21 for each line, a
+  few hundred for each piece, combined by the targets they cover. A search over sequences
+  of actions would also have to order up to 53 moves. Over places it finds the fewest
+  actions on every level in under three seconds.
 * **A search's states should hold only what can still matter.** On `bp35`'s seventh level
   the search ran out of its 40,000 states before it reached the gem, and on the eighth it
   reached the same places hundreds of times over, though the model followed the hand
@@ -2702,7 +2769,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 50 (a driven piece) | 540 levels | 66.40 |
 | library, Phase 51 (replay solver) | 575 levels | 71.00 |
 | library, Phase 52 (gravity solver) | 604 levels | 73.10 |
-| library, Phase 53 (growers, the last levels; default) | 619 levels | **75.56** |
+| library, Phase 53 (growers, the last levels) | 619 levels | 75.56 |
+| library, Phase 55 (mirror solver; default) | 653 levels | **80.01** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -2748,8 +2816,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–53):** 619 levels, official-style
-score **75.56** — a hundred and seventy-two times Phase 23, all of it from seventeen family
+**Where it stands now (the `library` agent, Phases 24–55):** 653 levels, official-style
+score **80.01** — a hundred and eighty-two times Phase 23, all of it from eighteen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -2779,23 +2847,26 @@ turn them or swap two pads, the fifth key undoing each run and leaving a ghost t
 again, past enemies whose ways are learned by watching them (`g50t`, 4.60: every level, in
 287 actions against 879), and an avatar walked and fallen down a shaft taller than the screen,
 whose clicks clear blocks, turn toggles, turn gravity or grow, each learned from its first
-click (`bp35`, 4.56: every level, in 448 actions against 651). Fifteen of the 25
-public games are now played at or near the cap, a sixteenth at three-quarters of it (`wa30`)
-and a seventeenth at seven-tenths (`dc22`); the
+click (`bp35`, 4.56: every level, in 448 actions against 651), and pieces and mirror lines
+moved until the pieces and their reflections cover every target (`ar25`, 4.60: every level, in
+253 actions against 748, the fewest possible). Sixteen of the 25
+public games are now played at or near the cap, a seventeenth at three-quarters of it (`wa30`)
+and an eighteenth at seven-tenths (`dc22`); the
 top of the Kaggle leaderboard was reported in the fifties, and this score on the public games
 is now above that, but the evaluation games are other games, and the agent is not ready to
 submit.
 
-**What would move it next (Phases 41–54):** the eight games Phase 41 diagnosed were all
+**What would move it next (Phases 41–55):** the eight games Phase 41 diagnosed were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; seven of them, `m0r0`, `sp80`, `tu93`, `sc25`, `ls20`, `g50t` and `bp35`, are now
 played on every level by the meet, pour, maze, spell, key, replay and gravity solvers, and
 `dc22`'s first five levels by the panel solver. Phase 54 did the same for the last eight
 games near zero: every level of `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33` and
 `ar25` was won at the cap by a search on a model of its rules, 36.4 points on the mean
-together. In order: `ar25` (+4.5, small), then `vc33`, `sk48` and `s5i5` (about +4.5 each,
-medium), then the first levels of `su15` and `re86`, and last `ka59`, `lf52` and the crab and
-deformation levels (large). Besides those, `dc22`'s last level is worth +1.3 (the goal past
+together. `ar25` is now played on every level by the mirror solver, in the fewest actions
+possible. Next, in order: `vc33`, `sk48` and `s5i5` (about +4.5 each, medium), then the first
+levels of `su15` and `re86`, and last `ka59`, `lf52` and the crab and deformation levels
+(large). Besides those, `dc22`'s last level is worth +1.3 (the goal past
 the panel's line, the crane's buttons shown only while the avatar stands on their tiles, pads
 whose pairing a button cycles) and `wa30`'s ninth about as much.
 

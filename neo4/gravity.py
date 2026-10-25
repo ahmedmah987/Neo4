@@ -48,8 +48,10 @@ Action = tuple[GameAction, dict[str, int] | None]
 LEFT, RIGHT, CLICK = GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION6
 MAX_SHIFT = 12  # pixels the view can move between two frames
 MAX_PRE = 4  # clicks made ready before the step that needs them
+MAX_CHAIN = 4  # clicks in a chain that grows a tile into a fall's way
 RISK = 10  # the price of landing on a look not yet stood on
 MAX_STATES = 40_000
+MAX_GOAL_STATES = 1_000_000  # a search for the gem made longer, once for each map
 MAX_FAILS = 8
 MAX_LEVEL_ACTIONS = 400
 RARE = 40  # pixels a colour of the avatar's may cover in a frame
@@ -112,10 +114,27 @@ class Board:
         self.view = view  # gravity -> (rows above, rows below) the avatar in view
         self.width = width
         self.goal_cells = goal_cells
+        self._dicts: dict = {}
 
     def look(self, c, changes: dict):
         v = changes.get(c)
         return v if v is not None else self.cells.get(c)
+
+    def changes(self, frozen: frozenset) -> dict:
+        """A state's changes as a dict, made once for each set of them."""
+        d = self._dicts.get(frozen)
+        if d is None:
+            if len(self._dicts) > 20_000:
+                self._dicts.clear()
+            d = self._dicts[frozen] = dict(frozen)
+        return d
+
+    def changed(self, frozen: frozenset, now: dict, new: dict) -> frozenset:
+        """The changes once the cells in ``new`` take their looks; a cell back as mapped is no
+        change."""
+        gone = {(c, now[c]) for c in new if c in now}
+        come = {(c, L) for c, L in new.items() if self.cells.get(c) != L}
+        return frozen.difference(gone).union(come) if gone or come else frozen
 
     def open(self, look) -> bool:
         return look is not None and self.know.passable(look)
@@ -156,7 +175,9 @@ class Know:
         self.bg: int | None = None  # the background's colour
         self.open_guess: dict = {}  # look -> taken to be open (drawn mostly in the background's colour)
         self.open_seen: dict = {}  # look -> open as seen
-        self.effect: dict = {}  # look -> ("become", look) | ("gravity", look) | ("nothing", None)
+        # look -> ("become", look) | ("grow", look) | ("gravity", look) | ("nothing", None);
+        # a tile that grows becomes the look, and its look grows into every empty cell beside it
+        self.effect: dict = {}
         self.safe: set = set()
         self.deadly: set = set()
         self.goal: int | None = None
@@ -202,6 +223,7 @@ class GravitySolver:
         self.fails = 0
         self.cells: dict = {}  # (x, y) -> look id as now
         self.first: dict = {}  # (x, y) -> look id as first seen (the level as it began)
+        self._long_search = None  # what was known when the gem was last searched for at length
         self.rows = (0, 0)
         self.last_grid = None
         self.reset_last = False
@@ -231,13 +253,16 @@ class GravitySolver:
 
     # --- reading -----------------------------------------------------------------
 
-    def _read(self, grid: np.ndarray) -> None:
-        """Every cell wholly in view, into the map; the avatar's cell is open."""
+    def _read(self, grid: np.ndarray, only_new: bool = False) -> None:
+        """Every cell wholly in view, into the map; the avatar's cell is open. ``only_new``:
+        only cells not in the map yet, none with the avatar's main colour in it (a frame in
+        the middle of an action, or one the avatar is not in)."""
         p, n = self.pitch, self.pitch - 1
         H = grid.shape[0]
         first_row = -((self.off) // p)
         rows = []
-        self.in_view = set()
+        if not only_new:
+            self.in_view = set()
         for cy in range(first_row - 1, first_row + H // p + 2):
             top = self.off + cy * p
             if top < 0 or top + n > H - 1:
@@ -245,13 +270,17 @@ class GravitySolver:
             rows.append(cy)
             for cx in range(self.width):
                 c = (cx, cy)
-                if c == self.at:
+                if c == self.at or only_new and c in self.cells:
                     continue
                 x = self.ox + cx * p
-                L = self._look_id(grid[top:top + n, x:x + n])
+                block = grid[top:top + n, x:x + n]
+                if only_new and (block == self.avatar_mark[0]).any():
+                    continue
+                L = self._look_id(block)
                 self.cells[c] = L
                 self.first.setdefault(c, L)
-                self.in_view.add(c)
+                if not only_new:
+                    self.in_view.add(c)
         if rows:
             self.rows = (min(self.rows[0], rows[0]), max(self.rows[1], rows[-1]))
 
@@ -333,7 +362,10 @@ class GravitySolver:
         goals = set()
         if self.know.goal is not None:
             goals = {c for c, L in self.cells.items() if L == self.know.goal}
-        return Board(self.cells, self.know, self.rows, view, self.width, goals)
+        b = Board(self.cells, self.know, self.rows, view, self.width, goals)
+        b.air = self._air()
+        b.growers = {L for L, e in self.know.effect.items() if e[0] == "grow"}
+        return b
 
     # --- planning -------------------------------------------------------------------
 
@@ -342,7 +374,7 @@ class GravitySolver:
         opts = [[]]
         pre: list = []
         c = (start[0], start[1] + g)
-        for _ in range(60):
+        for i in range(60):
             if c in b.goal_cells:
                 break
             L = b.look(c, changes)
@@ -352,9 +384,13 @@ class GravitySolver:
             if b.open(L):
                 if eff and eff[0] == "become" and not b.open(eff[1]) and len(pre) < MAX_PRE and b.visible(c, at, g):
                     opts.append(pre + [c])  # turned solid: the fall stops before it
+                elif b.growers and i < MAX_CHAIN and not pre:
+                    chain = self._chain(b, changes, c, at, g)
+                    if chain:
+                        opts.append(chain)  # a tile grown into it: the fall stops before it
                 c = (c[0], c[1] + g)
                 continue
-            if eff and eff[0] == "become" and b.open(eff[1]) and len(pre) < MAX_PRE and b.visible(c, at, g):
+            if eff and eff[0] in ("become", "grow") and b.open(eff[1]) and len(pre) < MAX_PRE and b.visible(c, at, g):
                 pre = pre + [c]  # cleared: the fall goes on
                 opts.append(list(pre))
                 c = (c[0], c[1] + g)
@@ -362,12 +398,37 @@ class GravitySolver:
             break
         return opts
 
+    def _chain(self, b: Board, changes: dict, target, at, g: int):
+        """The fewest clicks that grow a tile into the empty cell ``target``: a tile that grows,
+        then each empty cell on the way to it, all in view; None if no chain is short enough."""
+        sup = (at[0], at[1] + g)
+        prev = {target: None}
+        frontier = [target]
+        for _ in range(MAX_CHAIN):
+            nxt = []
+            for e in frontier:
+                for n in ((e[0] + 1, e[1]), (e[0] - 1, e[1]), (e[0], e[1] + 1), (e[0], e[1] - 1)):
+                    if n in prev or n == at or n == sup or not b.visible(n, at, g):
+                        continue
+                    L = b.look(n, changes)
+                    if L in b.growers:
+                        clicks, k = [n], e
+                        while k != target:
+                            clicks.append(k)
+                            k = prev[k]
+                        return clicks
+                    if L == b.air:
+                        prev[n] = e
+                        nxt.append(n)
+            frontier = nxt
+        return None
+
     def _apply(self, b: Board, state: tuple, a):
         """One action on the model: (state, outcome), the outcome "goal", "still", or what the
         avatar came to rest against (a look, or None where the map runs out); None when the
         action cannot be made."""
         at, g, changes = state
-        ch = dict(changes)
+        ch = b.changes(changes)
         if a[0] == "move":
             t = (at[0] + a[1], at[1])
             if t in b.goal_cells:
@@ -383,11 +444,16 @@ class GravitySolver:
         if eff is None or eff[0] == "nothing":
             return None
         kind, to = eff
-        if kind == "become":
-            ch[c] = to
-            frozen = frozenset(ch.items())
+        if kind in ("become", "grow"):
+            new = {c: to}
+            if kind == "grow":
+                L0 = b.look(c, ch)
+                for n in ((c[0] + 1, c[1]), (c[0] - 1, c[1]), (c[0], c[1] + 1), (c[0], c[1] - 1)):
+                    if n != at and 0 <= n[0] < b.width and b.look(n, ch) == b.air:
+                        new[n] = L0
+            frozen = b.changed(changes, ch, new)
             if c == (at[0], at[1] + g) and b.open(to):
-                land, against = b.fall(c, g, ch)
+                land, against = b.fall(c, g, b.changes(frozen))
                 return (land, g, frozen), against
             return (at, g, frozen), "still"
         # gravity turns: the fall is made with the tile still there, then it changes
@@ -398,12 +464,11 @@ class GravitySolver:
             against = "goal"
         elif b.open(against):
             land, against = b.fall(at, g2, ch)
-        ch[c] = to
-        return (land, g2, frozenset(ch.items())), against
+        return (land, g2, b.changed(changes, ch, {c: to})), against
 
-    def _macros(self, b: Board, state: tuple, turners: list):
+    def _macros(self, b: Board, state: tuple, turners: list, sealed: frozenset = frozenset()):
         at, g, changes = state
-        ch = dict(changes)
+        ch = b.changes(changes)
         out = []
         for d in (-1, 1):
             t = (at[0] + d, at[1])
@@ -411,7 +476,7 @@ class GravitySolver:
             heads = [[]]
             if t not in b.goal_cells and not b.open(L):
                 eff = b.know.effect.get(L)
-                if not (eff and eff[0] == "become" and b.open(eff[1]) and b.visible(t, at, g)):
+                if not (eff and eff[0] in ("become", "grow") and b.open(eff[1]) and b.visible(t, at, g)):
                     continue
                 heads = [[t]]
             for h in heads:
@@ -422,17 +487,56 @@ class GravitySolver:
                     out.append([("click", c) for c in h + col] + [("move", d)])
         sup = (at[0], at[1] + g)
         eff = b.know.effect.get(b.look(sup, ch))
-        if eff and eff[0] == "become" and b.open(eff[1]) and b.visible(sup, at, g):
+        if eff and eff[0] in ("become", "grow") and b.open(eff[1]) and b.visible(sup, at, g):
             for col in self._column(b, ch, sup, g, at):
                 out.append([("click", c) for c in col] + [("click", sup)])
+        took_sealed = False
         for c in turners:
             eff = b.know.effect.get(b.look(c, ch))
             if eff and eff[0] == "gravity" and b.visible(c, at, g):
+                if c in sealed:
+                    if took_sealed:
+                        continue  # one sealed turner does what any other would
+                    took_sealed = True
                 for col in self._column(b, ch, at, -g, at):
                     out.append([("click", cc) for cc in col] + [("click", c)])
         return out
 
-    def _search(self, explore: int):
+    def _sealed(self, b: Board, turners: list) -> frozenset:
+        """Turners shut in: every cell next to them, or to the turners they touch, is a wall, a
+        deadly look, a look whose click does nothing or the board's edge. Which of them have
+        been clicked away never matters to a way, so the search's states leave them out."""
+        tset, seen, sealed = set(turners), set(), set()
+        wall = self._wall()
+        for c0 in turners:
+            if c0 in seen:
+                continue
+            group, stack, shut = [], [c0], True
+            seen.add(c0)
+            while stack:
+                c = stack.pop()
+                group.append(c)
+                for d in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    n = (c[0] + d[0], c[1] + d[1])
+                    if n in tset:
+                        if n not in seen:
+                            seen.add(n)
+                            stack.append(n)
+                        continue
+                    if not 0 <= n[0] < b.width:
+                        continue
+                    L = b.cells.get(n)
+                    if L is None and not b.rows[0] <= n[1] <= b.rows[1]:
+                        continue  # rows not seen yet: no way the search knows of goes through them
+                    if L is not None and (L == wall or L in self.know.deadly
+                                          or self.know.effect.get(L, ("",))[0] == "nothing"):
+                        continue
+                    shut = False
+            if shut:
+                sealed.update(group)
+        return frozenset(sealed)
+
+    def _search(self, explore: int, cap: int = MAX_STATES):
         """The cheapest steps to the gem, or exploring, to a fall on into rows not yet seen
         (explore 1) or a view of some (explore 2): a list of (action, state before, state
         after, outcome)."""
@@ -441,21 +545,38 @@ class GravitySolver:
         if explore == 2 and b.unseen_in_view(self.at, self.g):
             return None
         turners = [c for c, L in b.cells.items() if b.know.effect.get(L, ("",))[0] == "gravity"]
-        best = {start: 0}
-        prev = {start: None}
+        sealed = self._sealed(b, turners)
+        # Tiles that turn both ways (toggles) are set just before the step that needs them,
+        # so which way they stand is left out of the states too, as are sealed turners.
+        eff = self.know.effect
+        two_way = {L for L, e in eff.items() if e[0] == "become" and eff.get(e[1], ("", None))[1] == L}
+
+        loose = two_way | b.growers  # what grows, grows again round the avatar
+
+        keys: dict = {}
+
+        def key(st):
+            k = keys.get(st[2])
+            if k is None:
+                k = keys[st[2]] = frozenset(x for x in st[2] if x[0] not in sealed and x[1] not in loose
+                                            and b.cells.get(x[0]) not in loose)
+            return (st[0], st[1], k)
+
+        best = {key(start): 0}
+        prev = {key(start): None}
         heap = [(0, 0, start, None)]
         n = 0
         while heap:
             cost, _, state, end = heapq.heappop(heap)
             if end is not None:  # the cheapest way there
                 k, path = end
-                while prev[k] is not None:
-                    k, ss = prev[k]
+                while prev[key(k)] is not None:
+                    k, ss = prev[key(k)]
                     path = ss + path
                 return path
-            if cost > best.get(state, 1 << 30):
+            if cost > best.get(key(state), 1 << 30):
                 continue
-            for mac in self._macros(b, state, turners):
+            for mac in self._macros(b, state, turners, sealed):
                 cur, extra, ok, won = state, 0, True, False
                 steps = []
                 for a in mac:
@@ -484,11 +605,11 @@ class GravitySolver:
                 n += 1
                 if won:
                     heapq.heappush(heap, (total, n, cur, (state, list(steps))))
-                elif total < best.get(cur, 1 << 30):
-                    best[cur] = total
-                    prev[cur] = (state, steps)
+                elif total < best.get(key(cur), 1 << 30):
+                    best[key(cur)] = total
+                    prev[key(cur)] = (state, steps)
                     heapq.heappush(heap, (total, n, cur, None))
-            if n > MAX_STATES:
+            if n > cap:
                 return None
         return None
 
@@ -535,8 +656,9 @@ class GravitySolver:
 
     def _plan(self):
         self.trying = None
+        gem = self.know.goal is not None and any(L == self.know.goal for L in self.cells.values())
         if self.know.goal is not None:
-            if any(L == self.know.goal for L in self.cells.values()):
+            if gem:
                 path = self._search(0)
                 if path:
                     return path
@@ -563,6 +685,21 @@ class GravitySolver:
             self.stats["learn_clicks"] += 1
             state = (self.at, self.g, frozenset())
             return [(("click", c), state, None, None)]
+        return None
+
+    def _plan_long(self):
+        """Stuck at the level's start: the same searches made longer, once for what is known."""
+        known = (self.at, self.g, len(self.cells), frozenset(self.know.effect), len(self.know.deadly))
+        if self._long_search == known:
+            return None
+        self._long_search = known
+        gem = self.know.goal is not None and any(L == self.know.goal for L in self.cells.values())
+        for explore in ((0, 2, 1) if gem else (2, 1)):
+            self.stats["long_searches"] += 1
+            path = self._search(explore, MAX_GOAL_STATES)
+            if path:
+                self.stats["explores"] += explore > 0
+                return path
         return None
 
     # --- acting ----------------------------------------------------------------------
@@ -618,6 +755,8 @@ class GravitySolver:
                 self.actions += 1
                 return GameAction.RESET, None
             if not plan:
+                plan = self._plan_long()
+            if not plan:
                 self.stats["no_plan"] += 1
                 self._give_up()
                 return None
@@ -660,8 +799,12 @@ class GravitySolver:
             if exp is not None and exp[0] == "step":
                 # the go ended: what the avatar came to rest on killed it
                 out = exp[4]
-                if frames and self.ready and self._track(frames, alive=False):
-                    out = self.cells.get((self.at[0], self.at[1] + self.g), out)
+                if frames and self.ready:
+                    if self._track(frames, alive=False):
+                        out = self.cells.get((self.at[0], self.at[1] + self.g), out)
+                    else:  # out of view: the fall on the map as it now stands
+                        r = self._apply(self._board(), exp[2], exp[1])
+                        out = r[1] if r is not None else out
                 if isinstance(out, int) and out not in self.know.safe:
                     self.know.deadly.add(out)
                     self.stats["learned_deadly"] += 1
@@ -725,15 +868,20 @@ class GravitySolver:
         """Where the view moved and the avatar went; the map from what is now in view. False
         when the avatar is not found."""
         prev = self.last_grid if self.last_grid is not None else frames[0]
-        s = 0
-        for f in frames:
+        s = read_at = 0
+        off0 = self.off
+        for i, f in enumerate(frames):
             s += frame_shift(prev, f)
             prev = f
+            if s != read_at and i < len(frames) - 1:
+                self.off, read_at = off0 - s, s  # rows that came into view on the way
+                self._read(f, only_new=True)
         self.last_grid = frames[-1].copy()  # the game draws its next frames over this one
-        self.off -= s
+        self.off = off0 - s
         grid = frames[-1]
         spot = self._avatar_spot(grid)
         if spot is None:
+            self._read(grid, only_new=True)  # what came into view, all the same
             self._fail("avatar_lost")
             return False
         sx, sy = spot
@@ -761,8 +909,11 @@ class GravitySolver:
                     self.know.effect[L0] = ("gravity", to)
                     self.stats["learned_gravity"] += 1
                 elif seen and L1 != L0 or not seen and self.at != before[0]:
-                    self.know.effect[L0] = ("become", to)
-                    self.stats["learned_become"] += 1
+                    air = self._air()
+                    grew = [n for n in ((c[0] + 1, c[1]), (c[0] - 1, c[1]), (c[0], c[1] + 1), (c[0], c[1] - 1))
+                            if self.seen_before.get(n) == air and self.cells.get(n) == L0]
+                    self.know.effect[L0] = ("grow" if grew else "become", to)
+                    self.stats["learned_grow" if grew else "learned_become"] += 1
                 elif seen:
                     self.know.effect[L0] = ("nothing", None)
                     self.stats["learned_nothing"] += 1

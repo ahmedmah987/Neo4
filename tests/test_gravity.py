@@ -1,7 +1,8 @@
 """The gravity solver on a small game: a shaft of 5-pixel cells taller than the screen, the view
 following the avatar (a square in two colours of its own). Two keys move it a cell left or
 right, and it falls the way gravity pulls (down at first) until a solid cell stops it. A click
-clears a block, opens or shuts a gate, or clears a turner and turns gravity round. A fall onto
+clears a block, opens or shuts a gate, clears a turner and turns gravity round, or clears a
+grower, which grows into every empty cell beside it but the avatar's. A fall onto
 spikes, or running out of the bar of steps along the bottom row, ends the go. Reaching the gem
 ends the level. Colours, sizes, the drawing, which way gravity first pulls and the layouts are
 none of bp35's, and the rules here are written apart from the solver's."""
@@ -11,12 +12,13 @@ from arcengine import FrameDataRaw, GameAction, GameState
 
 from neo4.library import LibraryAgent
 
-BG, WALL, DOT, BLOCK, GATE, TURNER, SPIKE, GEM, GEM2, AV, AV2, BAR = 2, 8, 6, 12, 3, 14, 13, 4, 11, 9, 15, 7
+BG, WALL, DOT, BLOCK, GATE, TURNER, SPIKE, GEM, GEM2, AV, AV2, BAR, GROW = 2, 8, 6, 12, 3, 14, 13, 4, 11, 9, 15, 7, 5
 P, X0 = 5, 2  # the cell's size; the first column's pixel
 BUDGET = 60  # actions in one go at a level
-SOLID = set("#xTg^+")
+SOLID = set("#xTg^+y")
 
-# '#' wall, '.' air, 'x' block, 'T' gate shut, 't' gate open, 'g' turner, '^' spikes, '+' gem, '@' start
+# '#' wall, '.' air, 'x' block, 'T' gate shut, 't' gate open, 'g' turner, '^' spikes, '+' gem,
+# 'y' grower, '@' start
 LEVELS = [
     # blocks in the way down, the gem far below the first view
     ["############",
@@ -68,6 +70,30 @@ LEVELS = [
      "#..........#",
      "#.@.....g..#",
      "############"],
+    # growers: dug down through, and tunnelled through sideways
+    ["############",
+     "#..@......##",
+     "###y########",
+     "###.########",
+     "###.########",
+     "###....y..+#",
+     "############"],
+    # the way to the gem crosses a hole above spikes: a chain of grower clicks plugs it
+    ["############",
+     "#@....+....#",
+     "###.########",
+     "#y..########",
+     "#^^^^#######",
+     "############"],
+    # turners shut in a wall, all alike: gravity is turned up and down again to reach the gem
+    ["############",
+     "#g#........#",
+     "#g#.######.#",
+     "#g#.#....#.#",
+     "#g#.#.##.#.#",
+     "#g#...#+.#.#",
+     "#g#@..####.#",
+     "############"],
 ]
 
 
@@ -93,6 +119,9 @@ def tile(ch: str) -> np.ndarray:
     elif ch == "+":
         t[:] = GEM2
         t[1:4, 2] = t[2, 1:4] = GEM
+    elif ch == "y":
+        t[:] = GROW
+        t[0, 2] = t[2, 0] = t[2, 4] = t[4, 2] = BG
     return t
 
 
@@ -211,7 +240,16 @@ class ShaftRoom:
             x = (data["x"] - X0) // P
             y = self.at[1] + (data["y"] - self.cam) // P
             ch = self._cell((x, y))
-            if ch in "xTtg" and 0 < y < len(self.map) - 1:
+            if ch == "y" and 0 < y < len(self.map) - 1:
+                self.map[y][x] = "."
+                for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if n != self.at and self._cell(n) == ".":
+                        self.map[n[1]][n[0]] = "y"
+                frames.append(self._grid())
+                if not self._fall(frames):
+                    self.state = GameState.GAME_OVER  # on the spikes
+                    return self._obs(frames)
+            elif ch in "xTtg" and 0 < y < len(self.map) - 1:
                 self.map[y][x] = {"x": ".", "T": "t", "t": "T", "g": "."}[ch]
                 if ch == "g":
                     self.g = -self.g
@@ -232,7 +270,7 @@ def test_gravity_solver_explores_the_shaft_and_reaches_the_gem():
     agent = LibraryAgent(seed=0)
     obs = env.reset()
     done_at = []
-    for used in range(1, 300):
+    for used in range(1, 400):
         a, d = agent.act(obs)
         obs = env.step(a, d)
         while len(done_at) < obs.levels_completed:
@@ -252,6 +290,14 @@ def test_gravity_solver_explores_the_shaft_and_reaches_the_gem():
     assert per[2] <= 9, (per, dict(solver.stats))
     # level 4: the turner is clicked to see what it does: gravity turns, and the gem is above
     assert per[3] <= 7, (per, dict(solver.stats))
+    # level 5: a grower clicked to see what it does grows into the empty cells beside it; the
+    # avatar digs down through growers (each regrows below it) and tunnels through one sideways
+    assert per[4] <= 18, (per, dict(solver.stats))
+    # level 6: a chain of three grower clicks grows a grower into the hole above the spikes
+    assert per[5] <= 8, (per, dict(solver.stats))
+    # level 7: two of six alike turners shut in a wall turn gravity up and down again
+    assert per[6] <= 8, (per, dict(solver.stats))
+    assert solver.stats["learned_grow"] == 1, dict(solver.stats)
     assert solver.stats["probe"] == 1 and solver.stats["learned_goal"] == 1, dict(solver.stats)
     assert solver.stats["learned_deadly"] == 1, dict(solver.stats)
     assert solver.stats["learned_become"] == 2 and solver.stats["learned_gravity"] == 1, dict(solver.stats)

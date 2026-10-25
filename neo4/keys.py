@@ -24,7 +24,11 @@ From the frames alone:
   which, carried across turns); a refill fills the bar; a pusher's landing cell is learned
   when it throws the avatar;
 * a tile seen in another cell moves: its cells are kept move by move until they repeat,
-  and the moves before that are spent on safe steps to watch it.
+  and the moves before that are spent on safe steps to watch it;
+* a level in fog is one whose colours but one all lie within a disc round the avatar (the
+  bottom rows aside): a cell is read only when the whole of it is in sight, what was seen is
+  kept, and a tile no longer where it was seen is a mover, its cycle taken from the moves it
+  was seen at.
 
 The plan: an A* search over the avatar's cell, the key, the refills taken, the steps left
 and the phase of the moving tiles, for the fewest moves into every door with the right key.
@@ -32,7 +36,10 @@ The estimate is the most of the walk to the door, the tile steps the key needs, 
 walk by way of any tile that every way of making the door's glyph needs; doors left are
 chained in the cheapest order. While some door's glyph is out of reach of the tiles known,
 the plan goes into a door that is not; when none is, the nearest step whose outcome is not
-known is taken to see it.
+known is taken to see it. In fog, cells not seen are not walked on, and when there is no
+plan the avatar walks to the nearest cell from which cells not seen yet come into view
+(crossing a tile only at a toll), filling up at a refill first when the steps left would not
+last the way there and on to one.
 """
 
 from __future__ import annotations
@@ -50,6 +57,12 @@ KEYS = {GameAction.ACTION1: (0, -1), GameAction.ACTION2: (0, 1), GameAction.ACTI
 MAX_STATES = 1_000_000
 MAX_LEVEL_ACTIONS = 400
 MAX_FAILS = 8
+FOG_RADIUS = 32  # a level whose colours but one all lie this near the avatar is in fog
+HUD_ROWS = 9  # the bottom rows, where the counters are drawn over the fog
+FOG_EXPLORE_STATES = 100_000  # a search for a tile's unknown effect, in fog, is cut here
+MAX_APPS = 24  # tile steps looked through for turning a key into a door's glyph
+MAX_PERIOD = 24  # the longest cycle looked for in a moving tile's sightings
+TILE_TOLL = 6  # what walking over a tile costs an exploring walk in fog, in moves
 
 
 def add(a, b):
@@ -244,6 +257,19 @@ def find_bar(grid: np.ndarray, skip: set):
     return best
 
 
+def fog_of(grid: np.ndarray, x: int, y: int, s: int):
+    """(fog colour, radius) when every colour but one lies within a disc round the avatar (the
+    bottom rows, where counters are drawn, aside); None when the level is in plain view."""
+    top = grid[:grid.shape[0] - HUD_ROWS]
+    f = Counter(top.ravel().tolist()).most_common(1)[0][0]
+    ys, xs = np.nonzero(top != f)
+    if not len(xs):
+        return None
+    cx, cy = x + (s - 1) / 2, y + (s - 1) / 2
+    r = float(np.sqrt((xs - cx) ** 2 + (ys - cy) ** 2).max())
+    return (int(f), r) if r < FOG_RADIUS else None
+
+
 def locate(grid: np.ndarray, look: tuple):
     """Where the two-band square of this look is: (x, y), or None."""
     a, b, top, s = look
@@ -298,6 +324,11 @@ class KeySolver:
         self.landing: dict = {}  # pusher cell -> where it throws the avatar (this level)
         self.stops: set = set()  # cells learned to stop the avatar
         self.cost_known = False  # a move's steps, seen again on each level
+        self.fog = None  # (colour, radius) when the level is seen only round the avatar
+        self.known: set = set()  # cells seen whole (under fog)
+        self.seen_version = 0  # bumped when a door, an item or a pusher comes into view
+        self.sighted: dict = {}  # item cell -> the moves (ticks) it was seen there (fog)
+        self.searched_version = -1  # the map a search last found nothing on
 
     def _give_up(self) -> None:
         self.gave_up = True
@@ -318,7 +349,21 @@ class KeySolver:
         b = Board(grid, x, y, s, floor)
         cell = ((x - b.ox) // s, (y - b.oy) // s)
         b.read(grid, cell, set())
-        if not b.doors:
+        self.grid_h = grid.shape[0]
+        self._cells_on_screen = set(b.cells)
+        self.fog = fog_of(grid, x, y, s)
+        if self.fog is not None:
+            # in fog only what lies wholly in sight is read; the doors may be anywhere
+            self.board = b
+            sight = self._view(cell)
+            b.cells = {c: p for c, p in b.cells.items() if c in sight or c == cell}
+            b.floor_cells = {c for c in b.floor_cells if c in b.cells}
+            b.items = {c: i for c, i in b.items.items() if c in b.cells and c != cell}
+            b.doors = {c: g for c, g in b.doors.items() if c in b.cells}
+            b.pushers = {t: d for t, d in b.pushers.items() if (t[0] - d[0], t[1] - d[1]) in b.cells}
+            self.known = set(b.cells)
+            self.stats["fog_levels"] += 1
+        elif not b.doors:
             return False
         key = None
         for bg in sorted(b.not_lines) + [c for c, _ in Counter(int(v) for v in grid.ravel()).most_common()]:
@@ -332,8 +377,9 @@ class KeySolver:
         if key is None:
             return False
         uniform = Counter(int(p.flat[0]) for p in b.cells.values() if len(np.unique(p)) == 1)
-        self.wall = next((c for c, _ in uniform.most_common() if c != floor), None)
-        bar = find_bar(grid, {floor, self.bg, self.wall} | set(look[:2]))
+        fog = self.fog[0] if self.fog is not None else None
+        self.wall = next((c for c, _ in uniform.most_common() if c not in (floor, fog)), None)
+        bar = find_bar(grid, {floor, self.bg, self.wall, fog} | set(look[:2]))
         if bar is None:
             return False
         self.board, self.cell, self.start_cell = b, cell, cell
@@ -353,6 +399,184 @@ class KeySolver:
             if icon not in self.effects and colours(icon, floor) == {bar[1]}:
                 self.effects[icon] = ("refill",)
         return True
+
+    def _view(self, c) -> set:
+        """Under fog: the cells wholly in sight of the avatar standing in cell c."""
+        b = self.board
+        if getattr(self, "_sight", None) is None or self._sight[0] != (self.fog, b.s):
+            s, (_, r) = b.s, self.fog
+            reach = int(r // s) + 2
+            offsets = set()
+            for dj in range(-reach, reach + 1):
+                for di in range(-reach, reach + 1):
+                    # the cell's farthest corner from the avatar's centre, a pixel and a half spare
+                    far = max(np.hypot(di * s + cx - (s - 1) / 2, dj * s + cy - (s - 1) / 2)
+                              for cx in (0, s - 1) for cy in (0, s - 1))
+                    if far <= r - 1.5:
+                        offsets.add((di, dj))
+            self._sight = ((self.fog, b.s), offsets)
+        H = self.grid_h
+        out = set()
+        for o in self._sight[1]:
+            n = add(c, o)
+            y = b.oy + n[1] * b.s
+            if n in self._cells_on_screen and y + b.s <= H - HUD_ROWS:
+                out.add(n)
+        return out
+
+    def _merge(self, grid: np.ndarray, avatar) -> bool:
+        """Under fog: the cells in sight now read and kept with the rest; True when a door, an
+        item or a pusher came into view."""
+        b = self.board
+        fresh = Board(grid, b.ox, b.oy, b.s, b.floor)
+        fresh.read(grid, avatar, set(b.not_lines))
+        sight = self._view(avatar)
+        new = False
+        # an item no longer where it was seen (and not used up) moves: its sightings are its
+        # first steps, and the icon seen elsewhere is it again
+        for c0, icon in list(self.static.items()):
+            if c0 in sight and c0 != avatar and c0 not in self.used and fresh.items.get(c0) != icon:
+                del self.static[c0]
+                m = self.movers.setdefault(icon, {"track": [], "period": None, "seen": {}})
+                m.setdefault("seen", {})
+                for t in self.sighted.pop(c0, []):
+                    m["seen"][t] = c0
+                self.stats["movers_seen"] += 1
+        for icon, m in self.movers.items():
+            if "seen" not in m:
+                continue
+            at = [c for c in sight if fresh.items.get(c) == icon and c != avatar]
+            if len(at) == 1:
+                m["seen"][self.tick] = at[0]
+                self._cycle(m)
+        for c in sight:
+            if c not in fresh.cells or c == avatar:
+                continue  # the avatar's own cell is read before it steps in
+            b.cells[c] = fresh.cells[c]
+            b.floor_cells.discard(c)
+            b.items.pop(c, None)
+            if c in fresh.floor_cells:
+                b.floor_cells.add(c)
+            elif c in fresh.items:
+                icon = fresh.items[c]
+                b.items[c] = icon
+                if icon in self.movers:
+                    pass  # a moving tile, seen where it is now
+                elif c not in self.static:
+                    self.static[c] = icon
+                    new = True
+                    if icon not in self.effects and colours(icon, b.floor) == {self.bar[1]}:
+                        self.effects[icon] = ("refill",)
+                if c in self.static:
+                    self.sighted.setdefault(c, []).append(self.tick)
+            elif c in fresh.doors:
+                if c not in b.doors:
+                    new = True
+                    self.left.add(c)
+                b.doors[c] = fresh.doors[c]
+            self.known.add(c)
+        for t, d in fresh.pushers.items():
+            if (t[0] - d[0], t[1] - d[1]) in sight and t not in b.pushers:
+                b.pushers[t] = d
+                new = True
+        b.not_lines |= fresh.not_lines
+        if avatar not in self.known:
+            # thrown into cells not seen yet: where the avatar stands is floor
+            self.known.add(avatar)
+            b.floor_cells.add(avatar)
+            b.cells[avatar] = fresh.cells.get(avatar)
+        if new:
+            self.seen_version += 1
+            self.stats["fog_seen"] += 1
+        return new
+
+    def _mover_now(self, m):
+        """Where a moving tile is at this move: by its cycle, else as last tracked or seen."""
+        tr, per = m["track"], m["period"]
+        if per:
+            return tr[self.tick % per]
+        if tr and "seen" not in m:
+            return tr[-1]
+        return m.get("seen", {}).get(self.tick)
+
+    def _cycle(self, m) -> None:
+        """A moving tile's cycle from where it was seen at which moves: the shortest period
+        that every sighting agrees with, every phase of it seen and some seen twice."""
+        seen = m["seen"]
+        if m["period"] is not None or len(seen) < 4:
+            return
+        for per in range(2, MAX_PERIOD + 1):
+            phase: dict = {}
+            if all(phase.setdefault(t % per, c) == c for t, c in seen.items()) and len(phase) == per and len(seen) >= per + 2:
+                m["period"] = per
+                m["track"] = [phase[r] for r in range(per)]
+                self.stats["cycles_learned"] += 1
+                return
+
+    def _floor_paths(self, start, ends=()) -> tuple:
+        """The cheapest walks over cells seen from start, pushers and doors kept off and a tile
+        crossed only at a toll; cells in ends may be stepped onto but not walked through."""
+        b = self.board
+        dist, prev = {start: 0}, {start: None}
+        heap = [(0, start)]
+        while heap:
+            g, c = heapq.heappop(heap)
+            if g > dist[c] or (c in ends and c != start):
+                continue
+            for k, d in KEYS.items():
+                n = add(c, d)
+                if n in self.stops or n in b.pushers or n in b.doors:
+                    continue
+                if n in ends or n in b.floor_cells:
+                    step = 1
+                elif n in b.items:
+                    step = 1 + TILE_TOLL
+                else:
+                    continue
+                if g + step < dist.get(n, 1 << 30):
+                    dist[n] = g + step
+                    prev[n] = (c, k)
+                    heapq.heappush(heap, (g + step, n))
+        return dist, prev
+
+    def _frontier(self):
+        """Under fog: the fewest moves to a cell from which cells not seen yet come into view,
+        by way of a refill first when the steps left would not last the walk there and on to a
+        refill from it. (moves, expected states, True), or None."""
+        b = self.board
+        dec = self.cost or 1
+        refills = {c for c, i in self.static.items()
+                   if c not in self.used and self.effects.get(i, ("",))[0] == "refill" and c in b.items}
+        dist, prev = self._floor_paths(self.cell, refills)
+        gains = {c: len(self._view(c) - self.known) for c in dist if c not in refills}
+        gains = {c: g for c, g in gains.items() if g}
+        if not gains:
+            return None
+        target = min(gains, key=lambda c: (dist[c], -gains[c]))
+        if refills:
+            on, _ = self._floor_paths(target, refills)
+            back = min((on[r] for r in refills if r in on), default=None)
+            near = [r for r in refills if r in dist]
+            if near and (back is None or self.pips < (dist[target] + back + 1) * dec):
+                target = min(near, key=lambda r: dist[r])  # fill up on the way
+        moves = []
+        c = target
+        while prev[c] is not None:
+            p, k = prev[c]
+            moves.append((k, c))
+            c = p
+        moves.reverse()
+        out_moves, states = [], []
+        st = (self.cell, self.key, frozenset(self.used), self.pips, frozenset(self.left))
+        tick = self.tick
+        for k, c in moves:
+            r = self._move(st[0], c, st[1], st[2], st[3], st[4], tick) if st is not None else None
+            st = r if isinstance(r, tuple) else None  # past a step the model cannot tell, expect nothing
+            out_moves.append(k)
+            states.append(st)
+            tick += 1
+        self.stats["fog_walks"] += 1
+        return out_moves, states, True
 
     def _pips(self, grid: np.ndarray) -> int:
         y, c, x1, x2 = self.bar
@@ -484,7 +708,7 @@ class KeySolver:
             if g == goal:
                 out = seen[g]
                 break
-            if seen[g] >= 8:
+            if seen[g] >= MAX_APPS:
                 continue
             for i in icons:
                 n = self._apply(i, g)
@@ -673,7 +897,7 @@ class KeySolver:
                 best[sig] = r[3]
                 prev[r] = (st, k)
                 q.append(r)
-            if len(prev) > MAX_STATES:
+            if len(prev) > (MAX_STATES if self.fog is None else FOG_EXPLORE_STATES):
                 break
         return None
 
@@ -746,6 +970,8 @@ class KeySolver:
             self.tick = 0
             self.queue = []
             self._fail("reset")
+            if self.fog is not None:
+                self._merge(grid, cell)
             return
         if cell == before[0]:
             if t in b.doors and t in left0:
@@ -754,6 +980,8 @@ class KeySolver:
                 self.stops.add(t)
                 self._fail("stopped")
             self.key, self.pips = key, pips
+            if self.fog is not None:
+                self._merge(grid, cell)
             return
         if not self.cost_known and cell == t and t not in b.items and pips < pips0:
             self.cost = pips0 - pips
@@ -764,12 +992,16 @@ class KeySolver:
         if t in b.doors and t in self.left:
             self.left.discard(t)
         self.tick += 1
-        self._track(grid, cell)
+        if self.fog is not None:
+            if self._merge(grid, cell):
+                self.queue = []  # something came into view: plan again
+        else:
+            self._track(grid, cell)
         icon = None
         if cell in self.static and cell not in self.used:
             icon = self.static[cell]
         else:
-            icon = next((i for i, m in self.movers.items() if m["track"][-1] == cell), None)
+            icon = next((i for i, m in self.movers.items() if self._mover_now(m) == cell), None)
         if icon is not None:
             self._learn_item(icon, key0, key, pips0, pips, pips == self.full and pips0 < self.full)
             if cell in self.static and (self.effects.get(icon, ("",))[0] == "refill" or pips == self.full and pips0 < self.full):
@@ -809,6 +1041,9 @@ class KeySolver:
     def _watch(self):
         """A safe move to see the movers go round: to a plain floor cell and back."""
         b = self.board
+        if self.fog is not None and not any(m["period"] is None and m.get("seen") and max(m["seen"]) == self.tick
+                                            for m in self.movers.values()):
+            return []  # in fog a mover is watched only while it is in sight
         items = self._items_at(self.tick + 1)
         for k, d in KEYS.items():
             t = add(self.cell, d)
@@ -844,7 +1079,13 @@ class KeySolver:
             if self.queue:
                 self.stats["watch_moves"] += 1
         if not self.queue:
-            r = self._search()
+            r = None
+            if self.fog is None or (self.left and self.searched_version != self.seen_version):
+                r = self._search()
+                if r is None and self.fog is not None:
+                    self.searched_version = self.seen_version  # not again until more is seen
+            if r is None and self.fog is not None:
+                r = self._frontier()
             if r is None:
                 self.stats["no_plan"] += 1
                 self._give_up()

@@ -3,7 +3,9 @@ a key (a 3x3 glyph in one colour) shown at twice the size in a box, doors that t
 avatar only when the key is their glyph, tiles that turn the key a quarter, give it the
 next colour or the next shape, a bar of steps left with a refill, a wall whose edge line
 throws the avatar from the cell in front of it to the next wall, and on the third level a
-colour tile that slides up and down a corridor. When the steps run out the level starts
+colour tile that slides up and down a corridor. The fourth level lies in fog: only what is
+within 14 pixels of the avatar is drawn (the key and the bar are drawn at the bottom, over
+the fog), and the door is out of sight at the start. When the steps run out the level starts
 over. Colours, cell size, shapes and layout are none of ls20's, and the rules here are
 written apart from the solver's."""
 
@@ -12,7 +14,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 
 from neo4.library import LibraryAgent
 
-WALL, FLOOR, BOX, TOP, BOTTOM, BAR, LINE = 2, 7, 1, 4, 12, 11, 15
+WALL, FLOOR, BOX, TOP, BOTTOM, BAR, LINE, FOG = 2, 7, 1, 4, 12, 11, 15, 8
 KEY_COLOURS = (6, 10, 13)
 SHAPES = (
     ((1, 0, 0), (1, 0, 0), (1, 1, 0)),
@@ -31,7 +33,7 @@ TILES = {"T": "turn", "C": "colour", "S": "shape", "R": "refill"}
 
 # each level: the map, the key at the start and each door's key as (shape, turns, colour),
 # the steps a move costs, the bar, the edge lines (wall cell -> the side the line is on),
-# and the moving tiles (kind, the cells it slides along)
+# the moving tiles (kind, the cells it slides along), and the fog's radius if any
 LEVELS = [
     dict(rows=["#########",
                "#A..T...#",
@@ -65,6 +67,16 @@ LEVELS = [
                "#########"],
          key=(2, 0, 0), doors={"1": (2, 0, 2)}, cost=1, bar=40, lines={},
          movers=[("colour", [(3, 1), (4, 1), (5, 1)])]),
+    dict(rows=["#########",
+               "#A......#",
+               "#.#####.#",
+               "#.#...#.#",
+               "#.#.#.#.#",
+               "#...#C..#",
+               "#####.###",
+               "#1....###",
+               "#########"],
+         key=(1, 0, 0), doors={"1": (1, 0, 1)}, cost=1, bar=40, lines={}, movers=[], fog=14),
 ]
 
 
@@ -156,6 +168,16 @@ class KeyRoom:
         y0, x0 = at(self.avatar)
         g[y0:y0 + 2, x0:x0 + S] = TOP
         g[y0 + 2:y0 + S, x0:x0 + S] = BOTTOM
+        fog = self.levels[self.done].get("fog")
+        if fog:
+            # all but a disc round the avatar is fog; the key and the bar are drawn over it
+            ys, xs = np.mgrid[0:64, 0:64]
+            g[np.hypot(xs - (x0 + (S - 1) / 2), ys - (y0 + (S - 1) / 2)) > fog] = FOG
+            g[55:63, 1:9] = BOX
+            g[56:62, 2:8] = np.repeat(np.repeat(glyph(self.key), 2, 0), 2, 1)
+            g[63, 10:10 + self.full] = WALL
+            g[63, 10:10 + self.steps] = BAR
+            return g
         # the key box, top right, and the bar of steps left along the bottom
         g[1:9, 56:64] = BOX
         g[2:8, 57:63] = np.repeat(np.repeat(glyph(self.key), 2, 0), 2, 1)
@@ -232,7 +254,7 @@ def test_key_solver_turns_recolours_and_reshapes_the_key_into_every_door():
     agent = LibraryAgent(seed=0)
     obs = env.reset()
     done_at = []
-    for used in range(1, 200):
+    for used in range(1, 300):
         a, d = agent.act(obs)
         obs = env.step(a, d)
         while len(done_at) < obs.levels_completed:
@@ -246,6 +268,10 @@ def test_key_solver_turns_recolours_and_reshapes_the_key_into_every_door():
     assert per[0] <= 18, (per, dict(solver.stats))
     assert per[1] <= 37, (per, dict(solver.stats))
     assert per[2] <= 22, (per, dict(solver.stats))
+    # in fog: down the left side and round to the colour tile, its colour known, then the door
+    # once it is seen; 18 is also the fewest with the whole map in view
+    assert per[3] <= 18, (per, dict(solver.stats))
+    assert solver.stats["fog_levels"] == 1 and solver.stats["fog_walks"] >= 1, dict(solver.stats)
     assert solver.stats["lives_lost"] == 0, dict(solver.stats)
     for kind in ("turn", "colour", "shape", "push"):
         assert solver.stats[f"learned_{kind}"] >= 1, dict(solver.stats)

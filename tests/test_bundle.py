@@ -95,9 +95,10 @@ def test_bundle_plays_a_game_through_the_framework_contract(bundle_path: Path):
                            ROOT_URL="http://localhost", record=False, arc_env=env)
     agent.MAX_ACTIONS = 800
     agent.main()
-    assert agent.action_counter > 700
+    # the agent plays on to the cap, or stops when the game is won (ls20 now is, in under 400)
+    assert agent.action_counter > 700 or agent.frames[-1].state.name == "WIN", agent.action_counter
     assert agent.steps_with_reasoning == agent.action_counter
-    assert agent.frames[-1].levels_completed >= 1, "ls20's first level usually falls within 800 steps"
+    assert agent.frames[-1].levels_completed >= 1, "ls20's first level falls within 800 steps"
     assert agent._neo4.stats["nodes"] > 10
     assert "neo4" in agent.name
 

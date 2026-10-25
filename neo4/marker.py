@@ -554,6 +554,8 @@ class MarkerSolver:
         self._ops_seen = 0
         self._fails = 0
         self._budget = PLAN_BUDGET
+        self._reach: dict[tuple, set] = {}
+        self._reach_work = 0
         self.deaths = 0
         self.mark_ids: set[int] = set()
         self.grid = grid
@@ -1194,8 +1196,13 @@ class MarkerSolver:
         if any(not opts for opts in needs):
             return None
         # Relaxation: every needed mark must be reachable by some piece moving alone.
+        # A piece's reach is the same for every search of one plan: worked out once.
         reach = []
         for m in live:
+            seen_m = self._reach.get((optimistic, m.id, m.shape, m.x, m.y))
+            if seen_m is not None:
+                reach.append(seen_m)
+                continue
             seen_m = {(m.x, m.y)}
             frontier = deque([(m.x, m.y)])
             work = 0
@@ -1208,6 +1215,8 @@ class MarkerSolver:
                         if q not in seen_m and inside(m, q):
                             seen_m.add(q)
                             frontier.append(q)
+            self._reach[(optimistic, m.id, m.shape, m.x, m.y)] = seen_m
+            self._reach_work += work
             reach.append(seen_m)
         for opts in needs:
             if not any(reach[i] & places for i, places in opts):
@@ -1269,10 +1278,13 @@ class MarkerSolver:
 
     def _make_plan(self) -> list[tuple[OpKey, dict]] | None:
         self._budget = PLAN_BUDGET
+        self._reach = {}
+        self._reach_work = 0
         try:
             return self._make_plan_inner()
         finally:
-            self._level_work += PLAN_BUDGET - self._budget
+            # the reach worked out counts towards the level's share too, though not the plan's
+            self._level_work += PLAN_BUDGET - self._budget + self._reach_work
 
     def _make_plan_inner(self) -> list[tuple[OpKey, dict]] | None:
         groups, movers = self._groups()

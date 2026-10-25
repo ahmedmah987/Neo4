@@ -78,6 +78,7 @@ The project has two strands that share one codebase:
 | 51 | **Mechanics library, replay family**: a solver for mazes whose plates hold doors open while something stands on them (or turn them, or swap two pads), and whose fifth key undoes the run and leaves a ghost that walks it again; the avatar and its cells, the devices by their shapes and what each colour's regions join, the exit and the runs read from the frames; doors that turn learned by stepping on and off a plate; enemies that walk their way, press plates and catch the avatar, their heading and track learned from their steps; for each choice of where the ghosts end, a breadth-first search over the avatar, ghosts, doors, enemies and time, a run that will be undone kept to what the undo restores | done — official-style score 66.40 → **71.00**, levels 540 → 575; `g50t` 0 → 115.0: every level on every seed, at the cap, 287 actions against the humans' 879; no game loses |
 | 52 | **Mechanics library, gravity family**: a solver for a shaft taller than the screen, walked left and right and fallen down the way gravity pulls, whose clicks clear blocks, turn toggles and turn gravity; the avatar and its step from a first move, the cells on the lattice with the fewest kinds of cell, a map of the shaft from the view's shifts, and what each look is (open, solid, deadly, the gem) and does when clicked learned from the frames; a cheapest-first search over the avatar's cell, gravity and the tiles changed, each click made just before the step that needs it, and while the gem is unseen a search for a view of rows not yet seen or a fall into them; outside the family, the solver whose go ended keeps the turn through the restart, and the marker solver's search is bounded | done — official-style score 71.00 → **73.10**, levels 575 → 604; `bp35` 0.05 → 52.71: levels 1–6 on every seed, 197 actions against the humans' 271, all at the cap but the fifth; levels 7–9 are left to the model-guided agent; no game loses |
 | 53 | **Gravity family, the last levels**: the search's states leave out turners sealed in a wall, which way toggles stand and what growers did, and a cell back as mapped is no change; a tile whose click empties it and grows its look into every empty cell beside it learned from the first click, and growers climbed, tunnelled through and grown in chains into the way of a fall; cells that come into view read from every frame of an action, and a death out of view put on what the fall met; stuck at the level's start, the searches made once more with a cap of a million states | done — official-style score 73.10 → **75.56**, levels 604 → 619; `bp35` 52.71 → 114.04: every level on every seed, 448 actions against the humans' 651, all at the cap but the fifth; no game loses |
+| 54 | **Diagnosis of the last eight games** `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33`, `ar25`: mechanics from the sources, every level played (by search on a model of the rules or by hand), every game replayed here from the reset to the win | done — all eight are deterministic and every level was won in at most 93% of the humans' actions, so at the cap: 2,398 actions against 6,608, `lf52`'s seventh level for the first time; together worth 36.4 on the mean; `ar25` first (+4.5, small), then `vc33`, `sk48` and `s5i5` (medium) (see "Phase 54") |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -200,7 +201,9 @@ neo4/
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
+results/diagnosis/ every level's solution for the games Phase 54 diagnosed, with the humans' counts
 scripts/bundle.py builds the single-file Kaggle agent
+scripts/replay_diagnosis.py replays a diagnosed game's solutions from the reset to the win
 scripts/families.py the public games by mechanic family, with each family's share of the score
 kaggle/           my_agent.py — the generated submission file (do not edit by hand)
 tests/            unit tests for every module, on synthetic frames and toy environments
@@ -2521,6 +2524,44 @@ The toy test adds three levels to its game, written apart from the solver:
 2. A chain of three grower clicks that plugs a hole above spikes (8).
 3. Six alike turners shut in a wall, two of them used (8).
 
+### Phase 54 — the last eight games: a diagnosis
+
+Eight games still scored almost nothing: `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`,
+`vc33` and `ar25`. Together they were worth 9.65 points on the per-game scale, 0.39 of the
+mean. As in Phase 41, each was read from its source, its levels dumped and played. Four
+agents each took two games, and every game's whole sequence was replayed here, chained from
+the reset to the win. None of the eight uses randomness. Every level of every game was won in
+at most 93% of the humans' actions, so every level scores the cap: 2,398 actions against
+6,608 in all. Most counts come from searches on models of the rules, checked against the
+game over thousands of random actions; several are the fewest possible. The solutions are
+kept in `results/diagnosis/<game>.json`, and `scripts/replay_diagnosis.py <game>` replays one
+from the reset to the win.
+
+| Game | What it is | Played (actions per level, against the humans') | What a solver needs | Gain on the mean | Effort |
+|---|---|---|---|---:|---|
+| `ar25` (8 levels) | pieces and mirror lines on a grid of 3-pixel cells; each piece is reflected in every mirror (up to four images), and every target cell must be covered by a piece or an image; the keys move the selected object a cell (a mirror only across its line), a click selects, the fifth key cycles; nothing collides, so the order of moves does not matter; an energy budget | 15, 11, 40, 22, 28, 53, 37, 47 (32, 50, 75, 37, 89, 159, 233, 73), the fewest possible | the grid, targets, mirrors and pieces; the reflection rule, which the first frame already shows; a search over the objects' final places, priced by cells moved and clicks | +4.46 | small |
+| `vc33` (7 levels) | clicks only; a button moves length from the column across a wall to its own (the total kept), refused when the source is empty or the receiver is capped; tokens ride the column ends and must end level with a patch of their colour; bridges swap tokens between columns whose ends meet them; floors from level 6; the board turns from level to level | 3, 7, 23, 21, 44, 20, 49 (7, 18, 44, 61, 131, 34, 152), the fewest possible | each level's scale and anchored side; each button learned by a press; the refusals and the bridges; a breadth-first search over lengths and token places | +4.49 | medium |
+| `sk48` (8 levels) | arms on rails in a grid of 6-pixel cells: along the selected arm's axis it extends or retracts, its tip pushing a block and dragging those it carries; across the axis it slides along its track; a click selects an arm, and undo is free; the blocks on each arm must begin with the colours of its template, drawn below | 14, 27, 33, 23, 33, 60, 32, 24 (61, 177, 101, 103, 230, 181, 125, 92) | the grid, arms, rails, blocks and templates; an exact cell model; a breadth-first search at compiled speed (millions of states from level 2), in two phases on the two-arm levels | +4.60 | medium |
+| `s5i5` (8 levels) | clicks only; a slider lengthens or shortens every arm of its colour by a cell, carrying the arms, bars and rings linked at their tips; any overlap undoes the click; from level 6 buttons turn the arms of their colour; the rings must reach their marks | 13, 26, 37, 30, 28, 25, 45, 36 (20, 89, 106, 54, 162, 38, 86, 83), the fewest possible | arms, bases, sliders and buttons; the links from contact at the tips; a model of a tree of bars with collisions and undo; the space past the screen's edge counted free until a refused click shows a wall (levels 7 and 8 need an arm out there); a breadth-first search | +4.53 | medium |
+| `su15` (9 levels) | clicks only; a click pulls every piece within 8 pixels onto the point; equal squares that meet merge into the next size, unequal ones undo the click at a cost; the goal is the pieces the top bar shows, inside the targets; from level 4 crabs walk to the nearest piece, bite it a size smaller and knock it back, and later levels ask for crabs too | 7, 9, 11, 9, 5, 4, 7, 10, 8 (22, 42, 26, 115, 36, 31, 8, 40, 41) | squares by colour, targets and the bar's samples; the pull, merge and count rules, which are enough for levels 1–5 even with the crabs left out; a crab model exact to the pixel for levels 6–9; a beam search over click points | +4.60 (levels 1–5: +1.25) | medium (levels 1–5), large |
+| `ka59` (7 levels) | blocks on a 3-pixel lattice, selected by a click and walked by the keys; a block walked into another kicks it 15 pixels, and it slides on over ice; timed bombs fire beams that shove; every outline must hold a block of its size, the plus outline the key; a step budget | 11, 30, 33, 38, 20, 45, 76 (28, 109, 51, 51, 33, 132, 326) | the lattice, blocks, outlines, ice, bombs and key; a simulator of kicks, slides and beams; a search over kicks with planned walks and the bombs' phase in the state; on level 7 a block walks out of view for about 40 actions | +4.60 | medium (levels 1–6), large |
+| `re86` (8 levels) | the keys move the selected piece 3 pixels, and the fifth key selects the next; pieces drawn in strokes that overlap (crosses, X's, outlines, a line); every grey dot must show its colour; from level 4 pots recolour a piece on contact; from level 6 obstacles deform pieces (a cross's bar slides, an outline is squashed) | 20, 36, 47, 42, 63, 46, 98, 155 (26, 42, 86, 108, 189, 139, 424, 241) | pieces tracked as rigid templates through overlaps; the dots from the first frame; colour as state (pots) and shape as state (deformation); a search for each piece and over their combinations | +4.53 (levels 1–3: +0.70) | medium (levels 1–5), large |
+| `lf52` (10 levels) | peg solitaire on a 6-pixel grid with platforms on rails: a click picks a peg (rings show where it can land), a click on a ring jumps it over a neighbour; the keys move every platform a rail cell, carrying what is on it; red, blue and purple pieces with rules of their own; one peg left (two on levels 6 and 7); from level 3 the board is wider than the screen and the view moves on set events | 8, 34, 45, 50, 83, 85, 146, 68, 100, 43 (32, 81, 60, 71, 205, 148, 244, 109, 164, 225); level 7, unsolved in Phase 36, by a plan that uses the red peg as a moving stepping stone between rail networks | the grid and the view's offset; the jump, capture and platform rules (the rings show the jumps); a map kept across moves of the view; a search over platforms, pegs and offset, staged on level 10 | +4.60 (levels 1–2: +0.25) | large (levels 1–2: small) |
+
+The eight are worth 36.4 points on the mean together, from 75.56 to about 112, if played at
+these counts. The order follows the last two columns:
+* `ar25` comes first. It is worth as much as any of them and needs the smallest solver: the
+  reflection rule can be checked on the first frame, before any action, and nothing collides,
+  so the search is over final places.
+* `vc33`, `sk48` and `s5i5` follow, each a model of lengths, arms or linked bars with a
+  breadth-first search.
+* Then the first five levels of `su15` and of `re86`.
+* `ka59`, `lf52` and the crab and deformation levels are large.
+
+Five of the eight (`ar25`, `vc33`, `re86`, `s5i5` and `su15`) were put in the marker family in
+Phase 24. The diagnosis shows five mechanisms there, each needing a model of its own, which is
+why the marker solver stops early in all five.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -2745,16 +2786,18 @@ top of the Kaggle leaderboard was reported in the fifties, and this score on the
 is now above that, but the evaluation games are other games, and the agent is not ready to
 submit.
 
-**What would move it next (Phases 41–53):** the eight games that were near zero were all
+**What would move it next (Phases 41–54):** the eight games Phase 41 diagnosed were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; seven of them, `m0r0`, `sp80`, `tu93`, `sc25`, `ls20`, `g50t` and `bp35`, are now
 played on every level by the meet, pour, maze, spell, key, replay and gravity solvers, and
-`dc22`'s first five levels by the panel solver. The points left are in the games whose
-diagnoses called for large models: `dc22`'s last level (+1.3: the goal
-past the panel's line, the crane's buttons shown only while the avatar stands on their
-tiles, pads whose pairing a button cycles), `ka59` (+4.6, or +1.6 for its first four
-levels: pixel-exact pushes, slides and blasts) and `lf52` (+4.0 to +4.6: peg solitaire on
-islands that scroll), and the marker games that stop at their second level.
+`dc22`'s first five levels by the panel solver. Phase 54 did the same for the last eight
+games near zero: every level of `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33` and
+`ar25` was won at the cap by a search on a model of its rules, 36.4 points on the mean
+together. In order: `ar25` (+4.5, small), then `vc33`, `sk48` and `s5i5` (about +4.5 each,
+medium), then the first levels of `su15` and `re86`, and last `ka59`, `lf52` and the crab and
+deformation levels (large). Besides those, `dc22`'s last level is worth +1.3 (the goal past
+the panel's line, the crane's buttons shown only while the avatar stands on their tiles, pads
+whose pairing a button cycles) and `wa30`'s ninth about as much.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

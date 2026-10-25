@@ -1,0 +1,46 @@
+{
+ "game": "re86",
+ "phase": 54,
+ "levels": {
+  "1": {
+   "actions": "U U U U U U U R R R R S U U U U U U L L",
+   "count": 20,
+   "human": 26
+  },
+  "2": {
+   "actions": "D D D D D D D D D D L L L S U U U U U U L L L L L L S D D L L L L L L L",
+   "count": 36,
+   "human": 42
+  },
+  "3": {
+   "actions": "U U U U U U U U U U U U U L S U U U U U U U U R R R R R R R R S U U U U U U L L L L L L L L L",
+   "count": 47,
+   "human": 86
+  },
+  "4": {
+   "actions": "U U U U U L L L L L L L D D D L L L L L L S D D D D D D D D R R R R R R U U U U U L",
+   "count": 42,
+   "human": 108
+  },
+  "5": {
+   "actions": "U L L D R U U U U U U U U U R R R S D D D D D D D D D D R R R R R R R U U U U S D D D D D D D L L L L L L L L L L L U R R R R",
+   "count": 63,
+   "human": 189
+  },
+  "6": {
+   "actions": "U U R R D R D R R R R R R R U L R R R S D D D D D L L U L D D U U U U U U L L L L L L L L L",
+   "count": 46,
+   "human": 139
+  },
+  "7": {
+   "actions": "U U U U R R R U U U L U U U U R R R D R R R R R R D D D D D D D S U U U U U U U U U U U U U R D D D D D U R R R R R R R R S U U U U U U R R R R L L L L L L L L L U U U R D U U U U U U U R R D D D",
+   "count": 98,
+   "human": 424
+  },
+  "8": {
+   "actions": "L L L D D D U U U U U U U U U U U L L L L L L L U R R R R R R R R U U U U R R R D R R D R R D D L L L D D D D D D D D D L L L D D D D L L L L L L L L S U U U U U U U U U U U U U U D L L L L L L L L L L L L D D R R R R R R R R R U U U U R R R D R R D R R D D L L L D D D D D D D D D L L L D L L L D L L L L L L",
+   "count": 155,
+   "human": 241
+  }
+ }
+}

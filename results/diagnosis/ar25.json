@@ -1,0 +1,46 @@
+{
+ "game": "ar25",
+ "phase": 54,
+ "levels": {
+  "1": {
+   "actions": "L L L L L D D D D D D D D D D",
+   "count": 15,
+   "human": 32
+  },
+  "2": {
+   "actions": "L L C 46 19 D D D D D D D D",
+   "count": 11,
+   "human": 50
+  },
+  "3": {
+   "actions": "U U U U U U U C 13 22 R R R R R R R D D D D D D D C 46 28 L L L L L L L L L L L L D D D D D",
+   "count": 40,
+   "human": 75
+  },
+  "4": {
+   "actions": "D D D D D D C 13 19 R R R R R R R C 19 31 R R R R R R R",
+   "count": 22,
+   "human": 37
+  },
+  "5": {
+   "actions": "D D D D C 10 1 R R R R R C 43 37 L L L L L L L L L L U U U U U U U",
+   "count": 28,
+   "human": 89
+  },
+  "6": {
+   "actions": "D D D D D D D D D D D C 22 1 L C 55 25 L L L L L L L L L L L L L L L D D D D C 46 10 L L L L L L L D D D D D D D D D D D D",
+   "count": 53,
+   "human": 159
+  },
+  "7": {
+   "actions": "D D C 10 1 R R R R R R R R R C 58 40 L L U U U U U U U U U U U U C 19 49 R R R U U U U U U",
+   "count": 37,
+   "human": 233
+  },
+  "8": {
+   "actions": "D D D D D D C 10 1 R R R R R R R R R C 40 40 L L L L L L L L L U U U U U U U C 22 22 R R R R R R R R R U U U U",
+   "count": 47,
+   "human": 73
+  }
+ }
+}

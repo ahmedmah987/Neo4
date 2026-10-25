@@ -1,0 +1,41 @@
+{
+ "game": "ka59",
+ "phase": 54,
+ "levels": {
+  "1": {
+   "actions": "R R R L D L L L C 43 31 U R",
+   "count": 11,
+   "human": 28
+  },
+  "2": {
+   "actions": "R R R R U U L R D C 18 48 D L U L L U U C 13 21 L U U U C 42 34 R R R R R D D",
+   "count": 30,
+   "human": 109
+  },
+  "3": {
+   "actions": "D R R R R D L D D L L L L L L D D L L L L L L L D R U U R R R R R",
+   "count": 33,
+   "human": 51
+  },
+  "4": {
+   "actions": "R R R D C 30 48 D D D L U U R R R R C 30 30 D D L U U U L L U R R R R R R U D R R R R R",
+   "count": 38,
+   "human": 51
+  },
+  "5": {
+   "actions": "U U U U U U U U U U U U R R R R R R R D",
+   "count": 20,
+   "human": 33
+  },
+  "6": {
+   "actions": "U L L U U L L L L L L L U U U U L L U L L L L L U R R R R R D D D R U R R R R R R R U U R",
+   "count": 45,
+   "human": 132
+  },
+  "7": {
+   "actions": "C 36 52 U U R R R U C 55 45 L L L L L L L L L D C 45 34 U L L L L L L L L L L L L L L L L U U U U U U U U R R R R R D L L L L L D D D D D R R R R R D D D D R R R R R U U",
+   "count": 76,
+   "human": 326
+  }
+ }
+}

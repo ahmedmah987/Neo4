@@ -73,6 +73,7 @@ The project has two strands that share one codebase:
 | 46 | **Mechanics library, spell family**: a solver for mazes with a 3x3 click pad beside them, whose patterns cast spells; the avatar (a square of two halves), the exit (a box in its colours) and the spell the pad shows read from the frames; what each spell does (a new size, a jump, a shot that clears barriers, aimed the way the avatar last moved) learned from its first cast; a search over the avatar's place and size by moves and casts | done — official-style score 57.36 → **58.68**, levels 490 → 505; `sc25` 0 → 32.86: levels 1–3 on every seed, at the cap, 36 actions against the humans' 74; levels 4–6, where several spells are hidden behind their icons, are left to the model-guided agent; no game loses |
 | 47 | **Spell family, later levels**: spells cast from memory on levels whose pad shows none; targets (a box framed in the colour of the first one a shot cleared, clearing its core's colour), the colours a shot flies through and those the avatar can stand on, learned from what was seen; jump marks as drawn, the next of several by the ring round it; a search over place, size, facing, barrier colours cleared and jumps made | done — official-style score 58.68 → **61.96**, levels 505 → 520; `sc25` 32.86 → 115.0: every level on every seed, at the cap, 129 actions against the humans' 350; no game loses |
 | 48 | **Key family in fog**: a level seen only in a disc round the avatar taken for fog; cells read only when wholly in sight and kept, a tile no longer where it was seen taken for a mover and its cycle found from its sightings; with no plan, a walk to the nearest cell from which unseen cells come into view (refills taken first when the steps would not last); key plans looked through 24 tile steps deep | done — official-style score 61.96 → **63.11**, levels 520 → 525; `ls20` 86.25 → 115.0: every level on every seed, the last (in fog) in 83 actions against the humans' 186; no game loses |
+| 49 | **Mechanics library, panel family**: a solver for boards of floor pieces with a panel of buttons beside them; the avatar (the square that moves under the arrow keys, told from the goal by a first move), the board (the box of the background round it), the buttons (the panel's solid shapes) and the goal (a square of the avatar's size in a colour of its own) read from the frames; each button pressed round its cycle to learn the pixels it changes in each state; keys that show buttons, pads that move the avatar, colours it is refused on and presses that drop it learned from what is seen; a breadth-first search over the avatar's cell and every group's state | done — official-style score 63.11 → **65.30**, levels 525 → 535; `dc22` 0.05 → 54.76: levels 1–4 on every seed, at the cap, 206 actions against the humans' 326; levels 5 and 6, where buttons drive a crane, are left to the model-guided agent; no game loses |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -189,6 +190,7 @@ neo4/
   maze.py         the maze solver: avatar to the exit on a lattice of nodes, watchers' rules learned
   keys.py         the key solver: the key turned, recoloured and reshaped on tiles into every door, in fog too
   spells.py       the spell solver: spells drawn on a click pad, their effects, targets and marks learned
+  panel.py        the panel solver: buttons beside the board pressed round their cycles, keys and pads learned
   library.py      the mechanics library: family solvers in front of the model-guided agent ("library")
   run.py          runner: games x seeds under a step budget, multi-process; summariser; `explain`
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
@@ -2102,6 +2104,76 @@ tile is seen moving and is watched for one move until its cycle is known. The tw
 taken there, with a few replans where the tile's place was mispredicted, and the avatar walks
 down to the door. Three refills are taken along the way, and no life is lost.
 
+### Phase 49 — the panel family: buttons beside the board step its pieces through their states
+
+`neo4/panel.py` is the sixth solver Phase 41 called for, for the first four levels of `dc22`.
+A 2-pixel avatar walks a board of floor pieces on a background, and only on floor. Beside the
+board, past a dashed line, a panel holds buttons. A press steps every piece of the button's
+group to the next of its states: tiles open or shut, bridges turn about one of their
+squares, bars grow from both ends or slide a segment along a track. A key lying on a tile
+shows a hidden button when the avatar steps on it. A press with the avatar on a pad of the
+button's group takes it to the other pad. A press that leaves the avatar off the floor drops
+it: the press is undone, and 20 steps of the bar are spent. Level 1 has two buttons. Level 2
+adds a key, and level 3 adds pads. On level 4 one button steps two bars through 8 states and
+another slides two through 6, and the avatar crosses them a press and a step at a time.
+
+From the frames alone:
+
+* **The avatar** is the square of one colour that moves under the arrow keys. On the first
+  level three squares could be it (the avatar, the goal and the square a bridge turns
+  about), so a first move shows which, and its look is kept for the game. **The goal** is a
+  square of its size in a colour drawn nowhere else on the board, one that no button
+  changes; a square reached without the level ending is not it.
+* **The board** is the box of the background round the avatar. The rest of the screen
+  between the board's rows is the panel, and **the buttons** are its solid shapes (the
+  dashes of the line, the frames drawn round the first level's buttons and the step bar are
+  not).
+* **Floor**: a cell (the avatar's size, on its lattice) is floor when none of its pixels is
+  of the background or of a colour a move was refused onto. A shut tile is drawn as a
+  checkerboard of its colour and the background, and the empty part of a bar's track is
+  drawn in a colour the avatar is refused on once (level 4).
+* **What a button does** is learned by pressing it until the board comes back. That gives
+  the pixels it changes and their colours in each state of its cycle (2 states for tiles,
+  bridges and pads, 8 and 6 for the bars). Buttons are learned from a cell no known group
+  touches, and a learning press that drops the avatar is taken again from another cell.
+* **Keys** are small shapes on floor that no button changes, drawn over floor of another
+  colour; a step that shows a new button took one. **A teleport** is a press that moves the
+  avatar. It is kept for that button and cell, and the way back from the pad it led to is
+  taken to be the same press.
+
+The plan is a breadth-first search over the avatar's cell and every group's state, by moves
+and presses, for the fewest actions onto the goal; a press that would leave the avatar off
+the floor is not planned. With no plan, the nearest thing not known yet is tried: a key not
+taken, or a press with the avatar on a piece of the button's group (once a piece), which is
+how the pads are found. The solver gives a level up when no button changes the board,
+after ten failures, or at 300 actions. That happens on levels 5 and 6, where buttons drive a
+crane that carries bridges; the model-guided agent plays them.
+
+The toy test (`tests/test_panel.py`) uses another game written apart from the solver:
+3-pixel cells, the panel on the left, other colours and buttons of other shapes. Level 1
+has a tile pair and a bridge, level 2 a key, a gate and a sliding bar on a track, level 3 a
+start tile that a press shuts and two pads, level 4 a bar that grows over a gap and a key on
+the far side. The four levels are played in 30, 36, 14 and 34 actions. The solver reads a
+scene in no other public game: over 100 random steps of each, only `dc22`'s screens are
+read, and inside the library it takes no turn anywhere else.
+
+**Results (Phase 49, `library`, 4,000 steps, 5 seeds): 63.11 → 65.30, levels 525 → 535; no
+other game changes.**
+
+| game | Phase 48 | Phase 49 | what changed |
+|---|---:|---:|---|
+| `dc22` | 0.05 | 54.76 | levels 1–4 on every seed, in 26, 48, 53 and 79 actions (humans 59, 102, 67, 98): 206 actions against the humans' 326, every level at the cap; the model-guided agent had taken about 830 and 1,950 actions for the first two and no more; levels 5 and 6 are left to it, after 33 actions in which the solver presses the crane's buttons and gives the level up |
+
+The solver's own costs show in the counts. Every button is pressed round its cycle before
+any plan: 4 presses on level 1, 6 on level 2, 8 on level 3 and 16 on level 4. Beyond them the
+walks are the shortest the diagnosis found by searching the game's own states (20, 42, 45
+and 62), with two more actions on level 1 and one on level 4. On level 1 these are the first
+move, which tells the avatar from the goal and from the square a bridge turns about, and the
+way back from it. On level 4 it is a step onto the empty part of a track, refused, which
+teaches that its colour does not carry the avatar. The explorations cost nothing extra: on
+level 3 the press on the first pad, made to see what it does, is the teleport the level
+needs, and on level 4 so is the press at the first bar's end.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -2125,11 +2197,12 @@ down to the door. Three refills are taken along the way, and no life is lost.
 | library, + key family (Phase 45) | 490 | 57.36 |
 | library, + spell family (Phase 46) | 505 | 58.68 |
 | library, + spells from memory, targets, marks (Phase 47) | 520 | 61.96 |
-| library, + the key family in fog (Phase 48, default) | 525 | **63.11** |
+| library, + the key family in fog (Phase 48) | 525 | 63.11 |
+| library, + panel family (Phase 49, default) | 535 | **65.30** |
 
-All of the gain is six families, played by fourteen solvers. The navigation family's share (`ls20`,
-`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 18.31, nearly all of it `m0r0`,
-`tu93`, `ls20` and `sc25`, at 0.34 times the human count. The carry family's share (`wa30`,
+All of the gain is six families, played by fifteen solvers. The navigation family's share (`ls20`,
+`tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 20.50, nearly all of it `m0r0`,
+`tu93`, `ls20`, `sc25` and `dc22`, at 0.37 times the human count. The carry family's share (`wa30`,
 `ka59`) went from 0 to 3.33, all of it `wa30`. The board-rules family's share
 (`ft09`, `lf52`, `cn04`) went from 0 to 9.20, `ft09` and `cn04`, at 0.30 times the human
 count. The program family's share
@@ -2141,7 +2214,8 @@ reproduced) went from 0.01 to 9.12, at 0.5 times the human count (`cd82` and `tr
 `lp85`, `r11l`, `sb26`, `tr87`, `ft09`, `tn36`, `cn04`, `m0r0` and `sp80` are solved outright (every level, every seed, in half
 the human actions or fewer), and `tu93` on every level and seed in the fewest actions its
 mazes allow (on two levels the humans' count), and `ls20` and `sc25` on every level and seed
-at the cap (383 and 129 actions against 776 and 350, `ls20`'s last level in fog); `re86` and
+at the cap (383 and 129 actions against 776 and 350, `ls20`'s last level in fog), and `dc22`'s
+first four levels on every seed at the cap (206 actions against 326); `re86` and
 `s5i5` open at human cost
 and stop at their second level; `vc33` keeps what the model-guided agent already did. Two
 lessons:
@@ -2159,7 +2233,9 @@ lessons:
   every other game something beyond the shared core decides the later levels — paint pots
   and benders (`re86`), arms that collide and carry children (`s5i5`), columns that run out
   and bridges that swap (`vc33`), a pull towards the click that merges pieces (`su15`), and
-  in navigation each game's own ghosts and clicks that change the whole board.
+  in navigation each game's own ghosts, gravity and cranes. `dc22` shows the line: its first
+  four levels are nothing but a board, its pieces and the buttons that step them, and the
+  panel solver plays them at the cap; its last two add a crane, and it gives them up.
 * **Learning from the completed level is the strongest generic signal.** The first frame of
   a level-up still shows the finished level; the arrangement of piece and mark in it, and
   the controls that moved the pieces, carry over to the next level of the same game. It is
@@ -2207,7 +2283,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 45 (key solver) | 490 levels | 57.36 |
 | library, Phase 46 (spell solver) | 505 levels | 58.68 |
 | library, Phase 47 (spells from memory) | 520 levels | 61.96 |
-| library, Phase 48 (keys in fog; default) | 525 levels | **63.11** |
+| library, Phase 48 (keys in fog) | 525 levels | 63.11 |
+| library, Phase 49 (panel solver; default) | 535 levels | **65.30** |
 
 The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
@@ -2253,8 +2330,8 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–48):** 525 levels, official-style
-score **63.11** — a hundred and forty-three times Phase 23, all of it from fourteen family
+**Where it stands now (the `library` agent, Phases 24–49):** 535 levels, official-style
+score **65.30** — a hundred and forty-eight times Phase 23, all of it from fifteen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
 every level, in 97 actions against the humans' 233), a row of glyphs rewritten by rules, or
@@ -2275,20 +2352,25 @@ turned, recoloured and reshaped on tiles until it is the door's glyph, the last 
 and explored for its door and tiles (`ls20`, 4.60: every level, in 383 actions against 776),
 and an avatar walked to the exit by spells drawn
 on a click pad, each learned from its first cast and cast from memory once the pad stops
-showing them (`sc25`, 4.60: every level, in 129 actions against 350). Thirteen of the 25
-public games are now played at or near the cap and a fourteenth at three-quarters of it
-(`wa30`); the top of the Kaggle leaderboard was reported in the fifties, and this
+showing them (`sc25`, 4.60: every level, in 129 actions against 350), and an avatar walked
+over a board whose pieces the buttons beside it step through their states, each button
+pressed round its cycle to see what it does (`dc22`, 2.19: the first four levels, in 206
+actions against 326). Thirteen of the 25 public games are now played at or near the cap, a
+fourteenth at three-quarters of it (`wa30`) and a fifteenth at half (`dc22`); the top of the Kaggle leaderboard was reported in the fifties, and this
 score on the public games is now above that, but the evaluation games are other games, and
 the agent is not ready to submit.
 
-**What would move it next (Phases 41–48):** the eight games that were near zero were all
+**What would move it next (Phases 41–49):** the eight games that were near zero were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; five of them, `m0r0`, `sp80`, `tu93`, `sc25` and `ls20`, are now played at the cap
-on every level by the meet, pour, maze, spell and key solvers. The points left are in the
-games whose diagnoses called for large models: `dc22`, `bp35` and `g50t` (+4.6 each: what
-clicks or a key do to the whole board, see "Phase 41"), `ka59` (+4.6, or +1.6 for its first
-four levels: pixel-exact pushes, slides and blasts) and `lf52` (+4.0 to +4.6: peg solitaire
-on islands that scroll), and the marker games that stop at their second level.
+on every level by the meet, pour, maze, spell and key solvers, and `dc22`'s first four
+levels by the panel solver. The points left are in the games whose diagnoses called for
+large models: `dc22`'s last two levels (+2.4: a crane that four buttons move along a track
+and a fifth makes carry a bridge; on the last level the crane's buttons show only while the
+avatar stands on their tiles), `bp35` and `g50t` (+4.6 each: what clicks or a key do to the
+whole board, see "Phase 41"), `ka59` (+4.6, or +1.6 for its first four levels: pixel-exact
+pushes, slides and blasts) and `lf52` (+4.0 to +4.6: peg solitaire on islands that scroll),
+and the marker games that stop at their second level.
 
 **What would move it next after the library** (Phases 24–28): the remaining points sit in
 each game's own mechanism. The families whose goal is *shown* on screen pay best, because

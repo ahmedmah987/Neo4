@@ -81,6 +81,7 @@ The project has two strands that share one codebase:
 | 54 | **Diagnosis of the last eight games** `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33`, `ar25`: mechanics from the sources, every level played (by search on a model of the rules or by hand), every game replayed here from the reset to the win | done — all eight are deterministic and every level was won in at most 93% of the humans' actions, so at the cap: 2,398 actions against 6,608, `lf52`'s seventh level for the first time; together worth 36.4 on the mean; `ar25` first (+4.5, small), then `vc33`, `sk48` and `s5i5` (medium) (see "Phase 54") |
 | 55 | **Mirror family** (`ar25`): mirror lines read as the rows and columns in which no cell shows the background, pieces and their reflections as the two colours that are each other's reflections in the lines, targets, the selection and the fixed lines; the plan is every object's final place, the cheapest that covers every target, searched over the lines' places and, for each, the pieces' places combined by the targets they cover | done — official-style score 75.56 → **80.01**, levels 619 → 653; `ar25` 3.55 → 115.00: every level on every seed, 253 actions against the humans' 748, the fewest possible; no game loses |
 | 56 | **The hidden games, a holdout, and goals that narrow**: the first Kaggle submission; a holdout evaluation that plays each public game without the solvers built or tuned on it; goal hypotheses that narrow from level to level (counts of a kind or a colour that only ever moved towards where they ended, beside the gap relations, those an earlier level supported first) | done — hidden games **0.33** (rank 2,927 of 4,853); holdout 0.45 against the explorer's 0.44, so the solvers neither help nor hurt a game they were not built for; goal hypotheses: holdout 0.448 → **0.471** (`ft09` a second level in 22 actions, humans 12), public score unchanged at 80.01 (652 levels) |
+| 57 | **Waste the explorer can see, and a game that must not stop**: the undo key (ACTION7) recognised by the frame it gives back and no longer explored; a key that never changed anything in eight or more uses predicted a no-op; a solver that raises switched off, and the agent replaced if it raises itself | done — holdout 0.471 → 0.452 in one sweep, all of it `ft09`, whose second level comes and goes with Python's hash seed; on the four games that differed, two hash seeds × five seeds each, on and off: `ft09` identical, `bp35` 1 → 3 first levels, `m0r0` and `lf52` first levels faster, sum of the four 0.40 → 0.48; the second submission |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2698,6 +2699,48 @@ The direction is right, but one short solution path leaves too many hypotheses s
 A further variant, colour areas as goals and count goals dropped once met without a
 level-up, lowered the holdout to 0.441 (107 levels): goals were dropped in 38 runs, among
 them `ft09`'s colour count. It was reverted.
+
+### Phase 57 — waste the explorer can see, and a game that must not stop
+
+The model-guided agent tests every action it cannot predict, at every new state. Counting the
+holdout's actions that changed nothing showed two kinds tried over and over for nothing:
+* **the undo key.** In all six public games that offer ACTION7 it takes the game back one step.
+  The explorer saw a frame it had not predicted and tried it again at the next state (`su15`:
+  189 times in 1,500 actions). It is now recognised by what it does: when every try (two at
+  least) gave back the frame from before the previous action, it is no longer explored.
+  `su15`'s ACTION7 tries fall to 3, `lf52`'s first level from 202 actions to 87;
+* **keys that do nothing.** `m0r0`'s and `wa30`'s ACTION5 changed nothing 207 and 162 times in
+  1,200 actions. A key used eight times or more without any change is now predicted a no-op and,
+  like a no-op click, skipped in the first pass over a level.
+
+Clicks that change nothing (a quarter to a third of the actions in `su15`, `sc25`, `ka59`,
+`sk48`, `s5i5`) were left alone: they fall on kinds whose clicks change something in other
+states, and skipping them per instance cost levels before (Phase 5).
+
+**A game that must not stop.** No public run has raised an exception, but the hidden games are
+frames the solvers were not written for, and an exception in the competition rerun ends that
+game. A solver that raises is now switched off for the rest of the game; if the agent itself
+raises, a fresh model-guided agent takes over from the current frame.
+
+**Results (4,000 steps, 5 seeds).** One holdout sweep gave 0.452 against Phase 56's 0.471,
+with 113 levels against 112. All of the difference is `ft09`, and it is not Phase 57's. The
+agent iterates over sets of signatures, whose order follows Python's hash seed, so each run
+of a sweep, a fresh process, breaks some ties differently. `ft09`'s second level, which made
+Phase 56's 0.57, comes and goes with it. Run again with two fixed hash seeds, on and off:
+
+| game (5 seeds × 2 hash seeds) | Phase 57 off | Phase 57 on |
+|---|---:|---:|
+| `ft09` | 0.29 (10 levels) | 0.29 (10 levels, the same runs) |
+| `bp35` | 0.05 (2) | 0.09 (6) |
+| `m0r0` | 0.01 (10, first levels in 299–1,555) | 0.02 (12, in 278–1,196) |
+| `lf52` | 0.05 (14, first levels in 154–733) | 0.08 (10, in 118–845) |
+| sum | 0.40 | **0.48** |
+
+Every other game scored the same in the sweep, with the same levels. The gain is small, about
++0.003 on the mean, and of the kind expected: first levels found in fewer actions. `lf52`
+loses two second levels that took over 3,400 actions each and were worth nothing. Phase 57 is
+the default and the second submission. A single holdout sweep differs from another by about
+±0.02 from hash order alone, so smaller differences are noise.
 
 ### Where the library stands
 

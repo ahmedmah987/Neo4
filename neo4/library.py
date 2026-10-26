@@ -58,10 +58,21 @@ class LibraryAgent:
         self.controller: Any = None  # the solver that chose the last action, if any
         self.resume: Any = None  # the solver whose go ended: first to be asked after the restart
         self.stats: dict[str, Any] = {}
+        self.errors: list[str] = []  # solvers switched off by an exception
 
     @property
     def dyn(self):  # the explain command reads the fallback's model
         return self.fallback.dyn
+
+    def _guarded(self, solver: Any, method: Any, *args: Any) -> Any:
+        """A solver that fails on a frame it was not written for is switched off for the
+        rest of the game; the other solvers and the explorer play on."""
+        try:
+            return method(*args)
+        except Exception as e:
+            solver.disabled = True
+            self.errors.append(f"{solver.name}: {e!r}")
+            return None
 
     def _hand_back(self) -> None:
         """The fallback resumes mid-level: it must not record a transition from an
@@ -73,7 +84,7 @@ class LibraryAgent:
     def act(self, obs: FrameDataRaw) -> Action:
         action, data = self.pending if self.pending is not None else (None, None)
         for s in self.solvers:
-            s.observe(action, data, obs)
+            self._guarded(s, s.observe, action, data, obs)
         chosen: Action | None = None
         if obs.state == GameState.NOT_FINISHED and not obs.is_empty():
             # the solver in control keeps the turn while it wants it, and through the
@@ -84,7 +95,7 @@ class LibraryAgent:
             for s in order:
                 if s.disabled:
                     continue
-                chosen = s.act(obs)
+                chosen = self._guarded(s, s.act, obs)
                 if chosen is not None:
                     self.controller = s
                     break
@@ -104,6 +115,8 @@ class LibraryAgent:
             for k, v in s.stats.items():
                 self.stats[f"{s.name}_{k}"] = v
         self.stats["solver_steps"] = self.stats.get("solver_steps", 0)
+        if self.errors:
+            self.stats["solver_errors"] = list(self.errors)
         return chosen
 
 

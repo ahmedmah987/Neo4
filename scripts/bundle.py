@@ -115,6 +115,8 @@ class MyAgent(Agent):
         super().__init__(*args, **kwargs)
         seed = random.Random(f"{{self.game_id}}").randrange(1 << 30)
         self._neo4 = ModelAgent(seed=seed) if os.environ.get("NEO4_AGENT") == "model" else LibraryAgent(seed=seed)
+        self._seed = seed
+        self._errors = 0
         self._steps = 0
         self._started = time.monotonic()
 
@@ -130,7 +132,7 @@ class MyAgent(Agent):
 
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         obs = _to_raw(latest_frame)
-        action, data = self._neo4.act(obs)
+        action, data = self._act(obs)
         # The framework reads action.action_data.model_dump() and action.reasoning.
         action.set_data(dict(data) if data is not None else {{}})
         self._steps += 1
@@ -142,6 +144,29 @@ class MyAgent(Agent):
             "solver": self._neo4.stats.get("solver", ""),
         }}
         return action
+
+    def _act(self, obs: FrameDataRaw) -> tuple:
+        """The agent's action; an exception must not end the game for the rest of the run.
+        After a failure the model-guided agent starts afresh from the current frame
+        (at most a few times), and failing that a random available action is played."""
+        try:
+            return self._neo4.act(obs)
+        except Exception:
+            self._errors += 1
+        if self._errors <= 5:
+            try:
+                self._neo4 = ModelAgent(seed=self._seed + self._errors)
+                return self._neo4.act(obs)
+            except Exception:
+                self._errors += 1
+        rng = random.Random(self._seed + self._steps)
+        if obs.state != GameState.NOT_FINISHED:
+            return GameAction.RESET, None
+        ids = [a for a in obs.available_actions if a != 0] or [1, 2, 3, 4]
+        action = GameAction.from_id(rng.choice(ids))
+        if action.is_complex():
+            return action, {{"x": rng.randrange(64), "y": rng.randrange(64)}}
+        return action, None
 '''
 
 

@@ -119,3 +119,25 @@ def test_bundle_click_actions_carry_coordinates(bundle_path: Path):
     data = GameAction.ACTION6.action_data.model_dump()
     assert {"x", "y"} <= set(data) and 0 <= data["x"] <= 63 and 0 <= data["y"] <= 63
     assert agent.frames[-1].levels_completed >= 1
+
+
+def test_bundle_keeps_playing_when_the_agent_raises(bundle_path: Path):
+    install_framework_shim()
+    spec = importlib.util.spec_from_file_location("my_agent_bundle3", bundle_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from neo4.run import arcade
+
+    env = arcade().make("ls20", seed=0)
+    agent = module.MyAgent(card_id="test", game_id="ls20", agent_name="MyAgent.test",
+                           ROOT_URL="http://localhost", record=False, arc_env=env)
+
+    def fail(obs):
+        raise RuntimeError("a bug met on an unseen game")
+
+    agent._neo4.act = fail  # the library fails at once; a fresh model-guided agent takes over
+    agent.MAX_ACTIONS = 50
+    agent.main()
+    assert agent.action_counter >= 50 and agent._errors == 1
+    assert type(agent._neo4).__name__ == "ModelAgent"

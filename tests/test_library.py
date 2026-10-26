@@ -49,3 +49,24 @@ def test_the_solver_whose_go_ended_is_asked_first_after_the_restart():
     late.start = 10**9
     assert agent.act(frame(GameState.NOT_FINISHED))[0] is GameAction.ACTION1
     assert agent.controller is early
+
+
+class Broken(Stub):
+    """A solver that raises once it has seen ``start`` observations."""
+
+    def act(self, obs):
+        if self.seen >= self.start:
+            raise IndexError("a frame this solver was not written for")
+        return None
+
+
+def test_a_solver_that_raises_is_switched_off_and_play_goes_on():
+    broken = Broken("broken", GameAction.ACTION1, start=2)
+    other = Stub("other", GameAction.ACTION2, start=3)
+    agent = LibraryAgent(seed=0, families=[])
+    agent.solvers = [broken, other]
+    agent.act(frame(GameState.NOT_FINISHED))  # nobody wants the turn yet: the fallback plays
+    action, _ = agent.act(frame(GameState.NOT_FINISHED))  # the broken solver raises
+    assert action is not None and broken.disabled
+    assert agent.stats["solver_errors"] == ["broken: IndexError('a frame this solver was not written for')"]
+    assert agent.act(frame(GameState.NOT_FINISHED))[0] is GameAction.ACTION2

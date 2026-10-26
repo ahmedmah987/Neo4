@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "An exploration + rule-induction agent for the ARC-AGI-3 interactive benchmark."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "MIT-0" }
 dependencies = [
     "arc-agi>=0.9.9",
     "numpy>=1.26",

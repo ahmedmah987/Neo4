@@ -2908,6 +2908,8 @@ Interactive Reasoning Tasks* (AAAI 2026 workshop) and its open-source code
 [`arc-agi-3-just-explore`](https://github.com/dolphin-in-a-coma/arc-agi-3-just-explore) (MIT).
 Game environments are provided by the ARC Prize Foundation through the `arc-agi` toolkit.
 
-This repository is public and MIT-licensed (see `LICENSE`). ARC Prize requires every
-eligible entry to be open source, and nothing here is secret: API keys, downloaded game
-files and raw run logs are git-ignored.
+This repository is public under MIT No Attribution (MIT-0, see `LICENSE`). ARC Prize
+requires a submitter's own code to be open source under a permissive public-domain
+licence such as CC0 or MIT-0, and third-party code under an open-source licence; the
+work Phase 1 builds on is MIT. Nothing here is secret: API keys, downloaded game files
+and raw run logs are git-ignored.

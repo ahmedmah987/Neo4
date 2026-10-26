@@ -45,7 +45,8 @@ HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for pla
 # The goal advisor (Phase 58) is asked at a level's start and again once the level has taken
 # this many actions without ending; a game's questions are capped.
 ADVICE_AT = (0, 30, 120, 400, 1200)
-MAX_ADVICE_PER_GAME = 60
+MAX_ADVICE_PER_LEVEL = 10  # with the re-asks that follow advice carried out to its end
+MAX_ADVICE_PER_GAME = 80
 MAX_ADVICE_PLANS_PER_LEVEL = 12
 
 
@@ -130,6 +131,8 @@ class ModelAgent(GraphAgent):
         self.available: list[int] = []
         self.level_actions = 0
         self.advice_queries = 0
+        self.advice_next = 0  # the next scheduled question (ADVICE_AT)
+        self.advice_asked_at = 0
         self.advice_targets: list[Obj] = []
         self.advice_done: set[int] = set()
         self.advice_current: int | None = None
@@ -179,6 +182,8 @@ class ModelAgent(GraphAgent):
         self.h_kind: dict[tuple, tuple | None] = {}  # the kind a count goal stands for this level
         self.level_actions = 0
         self.advice_queries = 0
+        self.advice_next = 0
+        self.advice_asked_at = 0
         self.advice_targets = []
         self.advice_done = set()
         self.advice_current = None
@@ -532,9 +537,13 @@ class ModelAgent(GraphAgent):
     def _advice_due(self) -> bool:
         if self.advisor is None or not self.advisor.available:
             return False
-        if self.advice_queries >= len(ADVICE_AT) or self.stats["advice_queries"] >= MAX_ADVICE_PER_GAME:
+        if self.advice_queries >= MAX_ADVICE_PER_LEVEL or self.stats["advice_queries"] >= MAX_ADVICE_PER_GAME:
             return False
-        return self.level_actions >= ADVICE_AT[self.advice_queries]
+        if self.advice_next < len(ADVICE_AT) and self.level_actions >= ADVICE_AT[self.advice_next]:
+            return True
+        # Everything advised was done and the level goes on: ask again, on the frame it led to.
+        return (bool(self.advice_targets) and len(self.advice_done) >= len(self.advice_targets)
+                and self.level_actions - self.advice_asked_at >= 2)
 
     def _ask_advisor(self, node: Node) -> None:
         """Show the advisor this frame, its objects and what the agent knows; keep its targets."""
@@ -548,6 +557,10 @@ class ModelAgent(GraphAgent):
         prompt = build_prompt(describe_objects(shown, objs), self.available, self._advice_notes(shown),
                               max(0, self.levels_completed))
         self.advice_queries += 1
+        while self.advice_next < len(ADVICE_AT) and self.level_actions >= ADVICE_AT[self.advice_next]:
+            self.advice_next += 1
+        self.advice_asked_at = self.level_actions
+        self.advice_targets = []
         self.stats["advice_queries"] += 1
         advice = self.advisor.advise(self.cur_grid, prompt, len(shown))
         if advice is None:

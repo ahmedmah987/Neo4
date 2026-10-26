@@ -225,6 +225,7 @@ class ModelAdvisor(Advisor):
         self.model: Any = None
         self.processor: Any = None
         self.broken = False
+        self.consecutive_failures = 0
         self.load_seconds = 0.0
 
     @property
@@ -251,11 +252,26 @@ class ModelAdvisor(Advisor):
                             ("bfloat16" if native_bf16 else "float16"))
             # Spread the weights over every GPU, each filled to at most 70%, so that the activations of
             # a long prompt still fit (device_map="auto" alone filled the first T4 and ran out of memory)
-            max_memory = None
+            # NEO4_ADVISOR_DEVICE=single keeps the model on the first GPU (a model split over two T4s
+            # failed with a CUDA launch error after its first answer); NEO4_ADVISOR_QUANT=4bit or 8bit
+            # loads it quantised (bitsandbytes) so that a 7B model fits one T4.
+            placement: dict[str, Any] = {"device_map": "auto"}
             if torch.cuda.is_available():
-                max_memory = {i: int(torch.cuda.get_device_properties(i).total_memory * 0.70)
-                              for i in range(torch.cuda.device_count())}
-                max_memory["cpu"] = 64 * 2**30
+                if os.environ.get("NEO4_ADVISOR_DEVICE", "") == "single":
+                    placement = {"device_map": {"": 0}}
+                else:
+                    max_memory: dict[Any, int] = {
+                        i: int(torch.cuda.get_device_properties(i).total_memory * 0.70)
+                        for i in range(torch.cuda.device_count())}
+                    max_memory["cpu"] = 64 * 2**30
+                    placement["max_memory"] = max_memory
+            quant = os.environ.get("NEO4_ADVISOR_QUANT", "")
+            if quant in ("4bit", "8bit"):
+                placement["quantization_config"] = transformers.BitsAndBytesConfig(
+                    load_in_4bit=quant == "4bit", load_in_8bit=quant == "8bit",
+                    bnb_4bit_compute_dtype=torch.float16, bnb_4bit_quant_type="nf4")
+            self.stats["placement"] = os.environ.get("NEO4_ADVISOR_DEVICE", "") or "spread"
+            self.stats["quant"] = quant or "none"
             errors = []
             # image-text models first; a text-only model is shown the object list without the image
             for cls_name, image in (("AutoModelForImageTextToText", True), ("AutoModelForMultimodalLM", True),
@@ -264,8 +280,7 @@ class ModelAdvisor(Advisor):
                 if cls is None:
                     continue
                 try:
-                    self.model = cls.from_pretrained(path, torch_dtype=dtype, device_map="auto",
-                                                     max_memory=max_memory)
+                    self.model = cls.from_pretrained(path, torch_dtype=dtype, **placement)
                     self.use_image = self.use_image and image
                     self.stats["model_class"] = cls_name
                     break
@@ -295,12 +310,14 @@ class ModelAdvisor(Advisor):
                 text = self._generate(grid, prompt)
             except Exception as e:
                 self.stats["failures"] += 1
+                self.consecutive_failures += 1
                 self.stats["last_error"] = repr(e)[:300]
-                if self.stats["failures"] >= 5 and self.stats["answers"] == 0:
+                if self.consecutive_failures >= 5:  # a dead CUDA context, out of memory: stop asking
                     self.broken = True
                 return None
             finally:
                 self.stats["seconds"] += time.monotonic() - t0
+        self.consecutive_failures = 0
         advice = parse(text, n_objects)
         if advice is None:
             self.stats["unparsed"] = self.stats.get("unparsed", 0) + 1

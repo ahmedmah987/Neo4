@@ -161,7 +161,7 @@ class ModelAgent(GraphAgent):
 
     @staticmethod
     def _summary(objs: list[Obj]) -> list[tuple]:
-        return [(o.sig, o.x1, o.y1, o.x2, o.y2, o.area) for o in objs]
+        return [(o.sig, o.x1, o.y1, o.x2, o.y2) for o in objs]
 
     @classmethod
     def _gap_in(cls, summary: list[tuple], m: tuple, t: tuple) -> int | None:
@@ -223,7 +223,6 @@ class ModelAgent(GraphAgent):
                 for sg in summ:
                     seen[("count", sg[0])] = seen.get(("count", sg[0]), 0) + 1
                     seen[("ncolour", sg[0][0])] = seen.get(("ncolour", sg[0][0]), 0) + 1
-                    seen[("area", sg[0][0])] = seen.get(("area", sg[0][0]), 0) + sg[5]
                 for key in set(seen) | set(series):
                     series.setdefault(key, [0] * i).append(seen.get(key, 0))
             for key, vals in series.items():
@@ -284,9 +283,7 @@ class ModelAgent(GraphAgent):
             ms = self._instances(objs, h[1])
             ts = self._instances(objs, h[2])
             return float(min(self._gap(a, b) for a in ms for b in ts)) if ms and ts else None
-        if h[0] == "area":
-            n = sum(o.area for o in objs if o.color == h[1])
-        elif h[0] == "count":
+        if h[0] == "count":
             if h not in self.h_kind:
                 # the kind it stands for in this level: itself, or the one kind of its size
                 # and shape in another colour, as the level's first frame shows them
@@ -301,17 +298,6 @@ class ModelAgent(GraphAgent):
         if h[2] < 0:
             return float(n)  # fewer is better: all of them gone, at best
         return float(max(0, max(h[3], first + 1) - n))  # more is better, up to what the last level reached
-
-    def _drop_met_goals(self, objs: list[Obj]) -> bool:
-        """A count, colour or area hypothesis met in a frame where the level goes on is not
-        what the level asks: it is dropped (the gap relations stay, as one pair meeting is
-        often only part of a goal). True if any was dropped."""
-        kept = [h for h in self.relations if h[0] == "gap" or self._measure(h, objs) != 0]
-        if len(kept) == len(self.relations):
-            return False
-        self.stats["goals_dropped"] = self.stats.get("goals_dropped", 0) + len(self.relations) - len(kept)
-        self.relations = kept
-        return True
 
     def _heuristic(self, objs: list[Obj]) -> float | None:
         """Over the goal hypotheses, how far a frame is from each, as a share of how far
@@ -377,8 +363,6 @@ class ModelAgent(GraphAgent):
             )
             if outcome == LEVEL_UP:
                 self._learn_relations(self.level_start_objs, self.last_objs)
-            elif outcome == OK and self.relations and after is not None and self._drop_met_goals(after):
-                pass
             elif outcome == OK and self.relations and data is not None and after is not None:
                 # Credit the clicked kind with the change in the goal gap it produced.
                 h_now = self._heuristic(after)

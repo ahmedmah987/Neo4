@@ -55,7 +55,7 @@ class Node:
     deaths: list[int] = field(default_factory=list)  # times the edge ended the game
     interest: int = 0  # untested candidates whose outcome is unknown; set by model agents
     h: float | None = None  # how far the frame is from the learned goal relation; set by model agents
-    summary: list | None = None  # (sig, x1, y1, x2, y2, area) of the frame's objects; set by model agents
+    summary: list | None = None  # (sig, x1, y1, x2, y2) of the frame's objects; set by model agents
 
     def __post_init__(self) -> None:
         self.result = [UNTESTED] * len(self.cands)

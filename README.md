@@ -2689,6 +2689,9 @@ library's own score unchanged at 80.01 (653 → 652 levels, one of `lf52`'s).**
 * `r11l`: a count that is not its goal costs two second levels, which scored nothing anyway.
 
 The direction is right, but one short solution path leaves too many hypotheses standing.
+A further variant, colour areas as goals and count goals dropped once met without a
+level-up, lowered the holdout to 0.441 (107 levels): goals were dropped in 38 runs, among
+them `ft09`'s colour count. It was reverted.
 
 ### Where the library stands
 

@@ -80,6 +80,7 @@ The project has two strands that share one codebase:
 | 53 | **Gravity family, the last levels**: the search's states leave out turners sealed in a wall, which way toggles stand and what growers did, and a cell back as mapped is no change; a tile whose click empties it and grows its look into every empty cell beside it learned from the first click, and growers climbed, tunnelled through and grown in chains into the way of a fall; cells that come into view read from every frame of an action, and a death out of view put on what the fall met; stuck at the level's start, the searches made once more with a cap of a million states | done — official-style score 73.10 → **75.56**, levels 604 → 619; `bp35` 52.71 → 114.04: every level on every seed, 448 actions against the humans' 651, all at the cap but the fifth; no game loses |
 | 54 | **Diagnosis of the last eight games** `ka59`, `sk48`, `su15`, `lf52`, `s5i5`, `re86`, `vc33`, `ar25`: mechanics from the sources, every level played (by search on a model of the rules or by hand), every game replayed here from the reset to the win | done — all eight are deterministic and every level was won in at most 93% of the humans' actions, so at the cap: 2,398 actions against 6,608, `lf52`'s seventh level for the first time; together worth 36.4 on the mean; `ar25` first (+4.5, small), then `vc33`, `sk48` and `s5i5` (medium) (see "Phase 54") |
 | 55 | **Mirror family** (`ar25`): mirror lines read as the rows and columns in which no cell shows the background, pieces and their reflections as the two colours that are each other's reflections in the lines, targets, the selection and the fixed lines; the plan is every object's final place, the cheapest that covers every target, searched over the lines' places and, for each, the pieces' places combined by the targets they cover | done — official-style score 75.56 → **80.01**, levels 619 → 653; `ar25` 3.55 → 115.00: every level on every seed, 253 actions against the humans' 748, the fewest possible; no game loses |
+| 56 | **The hidden games, a holdout, and goals that narrow**: the first Kaggle submission; a holdout evaluation that plays each public game without the solvers built or tuned on it; goal hypotheses that narrow from level to level (counts of a kind or a colour that only ever moved towards where they ended, beside the gap relations, those an earlier level supported first) | done — hidden games **0.33** (rank 2,927 of 4,853); holdout 0.45 against the explorer's 0.44, so the solvers neither help nor hurt a game they were not built for; goal hypotheses: holdout 0.448 → **0.471** (`ft09` a second level in 22 actions, humans 12), public score unchanged at 80.01 (652 levels) |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2644,6 +2645,51 @@ its own, and four levels:
 The solver plays each in its fewest actions (11, 7, 13 and 5). The fewest were counted by a
 search over every final place, written apart from the solver.
 
+### Phase 56 — the hidden games, a holdout, and goals that narrow
+
+**The first submission** (26 October 2026, the Phase 55 bundle) scored **0.33** on the hidden
+games, rank 2,927 of 4,853. The family solvers are built for the public games' mechanics. The
+hidden games are other games, so there almost everything falls to the model-guided agent.
+
+**A holdout to see it coming.** `library-holdout` plays each public game without the solvers
+built or tuned on it (`BUILT_FOR` in `neo4/library.py`: documentation of the public set, not
+an input to the agent). It is a stand-in for an unseen game, measurable offline. It scores
+**0.45**, against the model-guided agent's 0.44 alone, so the hidden score was predictable:
+
+| | official-style score |
+|---|---:|
+| the library, each game with its own solvers | 80.01 |
+| the library, each game without them (holdout) | 0.45 |
+| the model-guided agent alone | 0.44 |
+| the hidden games (Kaggle) | 0.33 |
+
+The solvers neither help nor hurt a game they were not built for. The marker solver claims
+ten of them briefly and gives way, and nothing transfers between public games. Within a
+mechanic they do transfer: every solver plays a toy game written apart from it. What the
+holdout's levels show is where the agent loses:
+* some first levels come at near human cost (`vc33` 15 actions, humans 7; `r11l` 24–49
+  against 22);
+* second levels cost hundreds to thousands (`r11l` 645–1,934 against 33; `sp80` 429–2,402
+  against 58), because what the agent learned about the goal does not survive the new layout.
+
+**Goals that narrow from level to level.** Phase 22 guessed a level's goal from its solution
+as a gap between two kinds. Now a completed level also proposes counts: a kind or a colour
+whose number of objects only ever moved towards where it ended along the solution path (all
+of a kind cleared, pegs taken). Hypotheses an earlier level supported rank first. Each
+hypothesis is measured as a share of how far the level started from it, and together they
+drive the click order (Phase 23) and the choice of frontier. A first version demanded a steady
+trend over at least three frames; on solution paths of 3–8 actions it let no count through,
+and the sweep was unchanged to the action.
+
+**Results (Phase 56, 4,000 steps, 5 seeds): holdout 0.448 → 0.471, levels 111 → 112; the
+library's own score unchanged at 80.01 (653 → 652 levels, one of `lf52`'s).**
+* `ft09` (the toggle game): a colour count directs one seed's second level to 22 actions,
+  against the humans' 12 (0.00 → 0.57).
+* `ar25`: its second level is reached in three seeds of five, though in 547–1,876 actions.
+* `r11l`: a count that is not its goal costs two second levels, which scored nothing anyway.
+
+The direction is right, but one short solution path leaves too many hypotheses standing.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |
@@ -2673,7 +2719,8 @@ search over every final place, written apart from the solver.
 | library, + replay family (Phase 51) | 575 | 71.00 |
 | library, + gravity family (Phase 52) | 604 | 73.10 |
 | library, + the gravity family's last levels: growers (Phase 53) | 619 | 75.56 |
-| library, + mirror family (Phase 55, default) | 653 | **80.01** |
+| library, + mirror family (Phase 55) | 653 | 80.01 |
+| library, + goal hypotheses that narrow across levels (Phase 56, default) | 652 | **80.01** |
 
 All of the gain is six families, played by eighteen solvers. The navigation family's share (`ls20`,
 `tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 30.75, now from all seven of its
@@ -2792,7 +2839,8 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 51 (replay solver) | 575 levels | 71.00 |
 | library, Phase 52 (gravity solver) | 604 levels | 73.10 |
 | library, Phase 53 (growers, the last levels) | 619 levels | 75.56 |
-| library, Phase 55 (mirror solver; default) | 653 levels | **80.01** |
+| library, Phase 55 (mirror solver) | 653 levels | 80.01 |
+| library, Phase 56 (goal hypotheses; default) | 652 levels | **80.01** |
 
 **On the hidden games** (the first submission, 26 October 2026, the Phase 55 bundle): public
 leaderboard score **0.33**, rank 2,927 of 4,853. The family solvers are built for the public
@@ -2847,7 +2895,7 @@ first level is found by exploration at tens of times the human action count, and
 the games where later levels are reached cheaply (`tu93`, `sp80`, `vc33`, `r11l`, `lp85`)
 are few.
 
-**Where it stands now (the `library` agent, Phases 24–55):** 653 levels, official-style
+**Where it stands now (the `library` agent, Phases 24–56):** 652 levels, official-style
 score **80.01** — a hundred and eighty-two times Phase 23, all of it from eighteen family
 solvers: pieces onto their goals (4.78 of the mean, 4.39 of it `lp85`), handles pointed so
 that the body between them, painted from pots if need be, lands on its goal (`r11l`, 4.60:
@@ -2885,8 +2933,11 @@ public games are now played at or near the cap, a seventeenth at three-quarters 
 and an eighteenth at seven-tenths (`dc22`). On the hidden games, which are other games, the
 first submission scored 0.33 (rank 2,927 of 4,853; 71.48 at the top, 30.99 at the bronze
 line): what the library knows does not carry over to mechanics it has not been built for.
+The holdout of Phase 56 (0.45) measures the same gap offline.
 
-**What would move it next (Phases 41–55):** the eight games Phase 41 diagnosed were all
+**What would move it next (Phases 41–56):** on the hidden games, learning what a game asks,
+from its first levels, in a form the planners can use (Phase 56 is a first step: 0.448 →
+0.471 on the holdout). On the public games: the eight games Phase 41 diagnosed were all
 won, every level, in no more actions than the humans took, by searches on models of their
 rules; seven of them, `m0r0`, `sp80`, `tu93`, `sc25`, `ls20`, `g50t` and `bp35`, are now
 played on every level by the meet, pour, maze, spell, key, replay and gravity solvers, and

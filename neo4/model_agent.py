@@ -44,9 +44,9 @@ PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning agai
 HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
 # The goal advisor (Phase 58) is asked at a level's start and again once the level has taken
 # this many actions without ending; a game's questions are capped.
-ADVICE_AT = (0, 30, 120, 400, 1200)
-MAX_ADVICE_PER_LEVEL = 10  # with the re-asks that follow advice carried out to its end
-MAX_ADVICE_PER_GAME = 80
+ADVICE_AT = (0, 40, 250)
+MAX_ADVICE_PER_LEVEL = 5  # with the re-asks that follow advice carried out to its end
+MAX_ADVICE_PER_GAME = 40
 MAX_ADVICE_PLANS_PER_LEVEL = 12
 
 

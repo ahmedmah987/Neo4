@@ -43,7 +43,7 @@ COLOUR_NAMES = [
 SCALE = 8  # pixels per cell in the rendered image (64 cells -> 512 pixels)
 MAX_OBJECTS = 40  # objects listed in a prompt
 MAX_TARGETS = 6  # targets taken from an answer
-MAX_NEW_TOKENS = 220
+MAX_NEW_TOKENS = 160
 
 
 @dataclass(slots=True)
@@ -307,8 +307,10 @@ class ModelAdvisor(Advisor):
                 {"role": "user", "content": [{"type": "image", "image": Image.fromarray(render(grid))},
                                              {"type": "text", "text": prompt}]},
             ]
-        else:  # a text-only model: plain strings
-            messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]
+        else:  # a text-only model: the screen as text, plain strings
+            text = prompt.replace("The image shows the screen;", "The screen is shown below;")
+            messages = [{"role": "system", "content": SYSTEM},
+                        {"role": "user", "content": ascii_grid(grid) + "\n\n" + text}]
         inputs = self.processor.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt")
         inputs = inputs.to(self.model.device)
@@ -317,17 +319,28 @@ class ModelAdvisor(Advisor):
         return self.processor.decode(out[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
 
 
-def resolve(path: str) -> str | None:
-    """A model directory: ``path`` itself, or for ``auto:<name>`` the first directory under
-    /kaggle/input whose path contains <name> and that holds a config.json."""
+def resolve(path: str, base: str = "/kaggle/input") -> str | None:
+    """A model directory: ``path`` itself, or for ``auto:<name>|<name>...`` the first directory
+    under ``base`` whose path contains a name (tried in order) and that holds a config.json."""
     if not path.startswith("auto:"):
         return path if os.path.isdir(path) else None
-    name = path[5:].lower()
-    for root, dirs, files in os.walk("/kaggle/input"):
+    found = []
+    for root, dirs, files in os.walk(base):
         dirs.sort()
-        if "config.json" in files and name in root.lower():
-            return root
+        if "config.json" in files:
+            found.append(root)
+    for name in path[5:].lower().split("|"):
+        for root in found:
+            if name and name in root.lower():
+                return root
     return None
+
+
+def ascii_grid(grid: np.ndarray) -> str:
+    """The frame as text for a model without vision: one hexadecimal colour code per cell."""
+    legend = ", ".join(f"{i:x}={n}" for i, n in enumerate(COLOUR_NAMES))
+    rows = ["".join(f"{int(v) & 15:x}" for v in row) for row in grid]
+    return f"The screen, one character per cell (row y=0 first; {legend}):\n" + "\n".join(rows)
 
 
 _SHARED: Advisor | None = None
@@ -340,7 +353,7 @@ def shared() -> Advisor:
     with _SHARED_LOCK:
         if _SHARED is None:
             path = os.environ.get("NEO4_ADVISOR", "")
-            budget = float(os.environ.get("NEO4_ADVISOR_BUDGET", str(4 * 3600)))
+            budget = float(os.environ.get("NEO4_ADVISOR_BUDGET", str(2.5 * 3600)))
             _SHARED = ModelAdvisor(path, time_budget=budget) if path else Advisor()
         return _SHARED
 

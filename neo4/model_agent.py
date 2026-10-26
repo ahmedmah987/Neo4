@@ -40,6 +40,7 @@ MAX_PLANS_PER_LEVEL = 5  # goal plans per level and avatar state
 MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
+COUNT_STEADINESS = 0.5  # how steadily a count must move towards its end along a solution
 HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
 
 
@@ -48,6 +49,7 @@ class ModelAgent(GraphAgent):
     # Clicks nearest to a moving kind first: measured neutral to harmful on the public
     # click games (r11l, lp85), so off unless a variant turns it on.
     near_clicks = False
+    goal_counts = True  # count goals beside the gap relations (Phase 56)
 
     def __init__(
         self,
@@ -98,6 +100,8 @@ class ModelAgent(GraphAgent):
         # the gap changes their clicks produced, and how many were tried.
         self.kind_gain: dict[tuple, float] = {}
         self.kind_tries: dict[tuple, int] = {}
+        self.h_first: dict[tuple, float] = {}
+        self.h_kind: dict[tuple, tuple | None] = {}
         self.last_h: float | None = None
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
@@ -145,6 +149,8 @@ class ModelAgent(GraphAgent):
         self._cur_objs = None  # the mask changed with the level
         self.level_start_objs = list(self.cur_objs()) if self.cur_grid is not None else None
         self.best_first = bool(self.relations)
+        self.h_first: dict[tuple, float] = {}  # each goal measure's value when first met this level
+        self.h_kind: dict[tuple, tuple | None] = {}  # the kind a count goal stands for this level
 
     # -- difference reduction ---------------------------------------------------
 
@@ -170,11 +176,16 @@ class ModelAgent(GraphAgent):
         )
 
     def _learn_relations(self, start: list[Obj] | None, end: list[Obj] | None) -> None:
-        """From a level's first and last frames: the kinds whose instances moved (or
-        appeared) and ended nearest to a kind that stood still. Candidates are ranked
-        by how steadily their gap closed along the solution path (the shortest known
-        route through the level graph), then by how much it closed; the two best
-        pairs become the heuristic for later levels."""
+        """What the completed level asked, as goal hypotheses for the next levels.
+
+        Gap relations: the kinds whose instances moved (or appeared) and ended nearest
+        to a kind that stood still, ranked by how steadily their gap closed along the
+        solution path (the shortest known route through the level graph), then by how
+        much it closed; the two best pairs are kept. Counts (``goal_counts``): a kind or
+        a colour whose number of objects moved steadily one way along the path, ending
+        where it ended (all of a kind cleared, pegs taken, pieces added). Hypotheses an
+        earlier level supported too are ranked first, so the agent's idea of the goal
+        narrows from level to level."""
         if not start or not end:
             return
         s0: dict[tuple, list[Obj]] = {}
@@ -204,9 +215,43 @@ class ModelAgent(GraphAgent):
                 steadiness = (down - up) / max(1, len(gaps) - 1)
                 scored.append((steadiness, g0 - g1, g1, m, t))
         scored.sort(key=lambda r: (-r[0], -r[1], r[2]))
-        if scored:
-            self.relations = [(m, t) for _, _, _, m, t in scored[:2]]
+        hyps = [("gap", m, t) for _, _, _, m, t in scored[:2]]
+        if self.goal_counts:
+            counts = []
+            series: dict[tuple, list[int]] = {}
+            for i, summ in enumerate(path):
+                seen: dict[tuple, int] = {}
+                for sg in summ:
+                    seen[("count", sg[0])] = seen.get(("count", sg[0]), 0) + 1
+                    seen[("ncolour", sg[0][0])] = seen.get(("ncolour", sg[0][0]), 0) + 1
+                for key in set(seen) | set(series):
+                    series.setdefault(key, [0] * i).append(seen.get(key, 0))
+            for key, vals in series.items():
+                v0, v1 = vals[0], vals[-1]
+                if v0 == v1 or len(vals) < 3:
+                    continue
+                d = 1 if v1 > v0 else -1
+                toward = sum(1 for a, b in zip(vals, vals[1:]) if (b - a) * d > 0)
+                away = sum(1 for a, b in zip(vals, vals[1:]) if (b - a) * d < 0)
+                steadiness = (toward - away) / (len(vals) - 1)
+                if steadiness >= COUNT_STEADINESS:
+                    counts.append((steadiness, abs(v1 - v0), key + (d, v1)))
+            counts.sort(key=lambda r: (-r[0], -r[1]))
+            hyps += [h for _, _, h in counts[:2]]
+        if hyps:
+            before = {self._goal_id(h) for h in self.relations}
+            hyps.sort(key=lambda h: self._goal_id(h) not in before)  # stable: earlier support first
+            self.relations = hyps
             self.best_first = True
+
+    @staticmethod
+    def _goal_id(h: tuple) -> tuple:
+        """A goal hypothesis up to recolouring: kinds by size and shape."""
+        if h[0] == "gap":
+            return ("gap", h[1][1:], h[2][1:])
+        if h[0] == "count":
+            return ("count", h[1][1:], h[2])
+        return h[:3]
 
     @staticmethod
     def _instances(objs: list[Obj], sig: tuple) -> list[Obj]:
@@ -234,23 +279,48 @@ class ModelAgent(GraphAgent):
                 return sig
         return None
 
+    def _measure(self, h: tuple, objs: list[Obj]) -> float | None:
+        """How far a frame is from a goal hypothesis (0: met), or None if it cannot say."""
+        if h[0] == "gap":
+            ms = self._instances(objs, h[1])
+            ts = self._instances(objs, h[2])
+            return float(min(self._gap(a, b) for a in ms for b in ts)) if ms and ts else None
+        if h[0] == "count":
+            if h not in self.h_kind:
+                # the kind it stands for in this level: itself, or the one kind of its size
+                # and shape in another colour, as the level's first frame shows them
+                found = self._instances(self.level_start_objs or objs, h[1])
+                self.h_kind[h] = found[0].sig if found else None
+            if self.h_kind[h] is None:
+                return None
+            n = sum(1 for o in objs if o.sig == self.h_kind[h])
+        else:
+            n = sum(1 for o in objs if o.color == h[1])
+        first = self.h_first.setdefault(h, float(n))
+        if h[2] < 0:
+            return float(n)  # fewer is better: all of them gone, at best
+        return float(max(0, max(h[3], first + 1) - n))  # more is better, up to what the last level reached
+
     def _heuristic(self, objs: list[Obj]) -> float | None:
-        """Sum over the learned relations of the gap between the nearest M and T."""
+        """Over the goal hypotheses, how far a frame is from each, as a share of how far
+        the level started from it."""
         if not self.relations:
             return None
-        total = 0
+        total = 0.0
         found = False
-        for m_sig, t_sig in self.relations:
-            ms = self._instances(objs, m_sig)
-            ts = self._instances(objs, t_sig)
-            if ms and ts:
-                total += min(self._gap(a, b) for a in ms for b in ts)
-                found = True
-        return float(total) if found else None
+        for h in self.relations:
+            v = self._measure(h, objs)
+            if v is None:
+                continue
+            key = ("scale",) + h
+            scale = self.h_first.setdefault(key, max(1.0, v))
+            total += v / scale
+            found = True
+        return total if found else None
 
     def _near_moving(self, node: Node, local: list[int], objs: list[Obj]) -> list[int]:
         """Click candidates nearest to an instance of a moving kind of the relation."""
-        ms = [o for m_sig, _ in self.relations for o in objs if o.sig == m_sig]
+        ms = [o for h in self.relations if h[0] == "gap" for o in objs if o.sig == h[1]]
         clicks = [i for i in local if node.cands[i].data is not None]
         if not ms or not clicks:
             return []

@@ -83,7 +83,7 @@ def test_difference_reduction_descends_to_the_target():
     agent = ModelAgent(seed=0)
     steps = level_steps(agent, SlideRoom(), 2000)
     assert len(steps) == 2, (steps, agent.stats)
-    assert agent.relations and agent.relations[0][0][0] == 9 and agent.relations[0][1][0] == 12
+    assert agent.relations and agent.relations[0][0] == "gap" and agent.relations[0][1][0] == 9 and agent.relations[0][2][0] == 12
     # The second level needs 17 pushes; a plain explorer tests every button at every
     # state and takes far longer than that.
     assert steps[1] - steps[0] <= 60, (steps, agent.stats)

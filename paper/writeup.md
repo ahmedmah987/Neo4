@@ -101,8 +101,9 @@ each was won in no more than the humans' actions; the last eight took 2,398 acti
 
 The holdout score matches the explorer's and predicts the hidden score. The solvers neither
 help nor hurt a game they were not built for. They claim such games briefly and give way,
-and do not transfer between public games at all. [Ablation on the hidden set: explorer alone,
-TBD.]
+and do not transfer between public games at all. Within a mechanic they do transfer: each of
+the eighteen plays a toy game written apart from it, with other colours, sizes and layouts.
+What they encode is a mechanic, and the public games share almost none. [Ablation on the hidden set: explorer alone, TBD.]
 
 ## 5. Analysis: why the gap
 

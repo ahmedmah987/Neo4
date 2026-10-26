@@ -40,7 +40,6 @@ MAX_PLANS_PER_LEVEL = 5  # goal plans per level and avatar state
 MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
-COUNT_STEADINESS = 0.5  # how steadily a count must move towards its end along a solution
 HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
 
 
@@ -228,14 +227,13 @@ class ModelAgent(GraphAgent):
                     series.setdefault(key, [0] * i).append(seen.get(key, 0))
             for key, vals in series.items():
                 v0, v1 = vals[0], vals[-1]
-                if v0 == v1 or len(vals) < 3:
+                if v0 == v1:
                     continue
                 d = 1 if v1 > v0 else -1
                 toward = sum(1 for a, b in zip(vals, vals[1:]) if (b - a) * d > 0)
                 away = sum(1 for a, b in zip(vals, vals[1:]) if (b - a) * d < 0)
-                steadiness = (toward - away) / (len(vals) - 1)
-                if steadiness >= COUNT_STEADINESS:
-                    counts.append((steadiness, abs(v1 - v0), key + (d, v1)))
+                if away == 0:  # it only ever moved towards where it ended
+                    counts.append((toward, abs(v1 - v0), key + (d, v1)))
             counts.sort(key=lambda r: (-r[0], -r[1]))
             hyps += [h for _, _, h in counts[:2]]
         if hyps:

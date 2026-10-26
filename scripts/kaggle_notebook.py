@@ -7,10 +7,15 @@ dummy submission.parquet otherwise. One cell is added: in the commit run only, t
 two public games offline inside the same framework, so an error shows before a submission is
 spent (the competition allows one a day). CPU only, no internet.
 
-    python scripts/kaggle_notebook.py <owner>/<slug> "<title>" [NAME=VALUE ...]   # writes kaggle/notebook/
+    python scripts/kaggle_notebook.py <owner>/<slug> "<title>" [NAME=VALUE ...] [--gpu=rtx6000]
+        [--model=<owner>/<model>/<framework>/<variation>/<version>]   # writes kaggle/notebook/
 
 NAME=VALUE pairs are set for the agent in both runs, e.g. NEO4_AGENT=model for the
-model-guided agent alone (the commit check then asks only that it plays).
+model-guided agent alone (the commit check then asks only that it plays). --gpu picks the
+accelerator (cpu, t4, p100, rtx6000) and --model attaches a Kaggle model; with
+NEO4_ADVISOR=auto:<variation> the agent finds it under /kaggle/input and asks it about goals
+(Phase 58). The commit check then also plays a set of public games without the solvers built
+for them, once without the advisor and once with it, in the same process, and prints both.
 """
 import json
 import sys
@@ -19,7 +24,12 @@ from textwrap import dedent
 
 ROOT = Path(__file__).resolve().parent.parent
 kernel_id, title = sys.argv[1:3]
-env = dict(a.split("=", 1) for a in sys.argv[3:])
+flags = dict(a[2:].split("=", 1) for a in sys.argv[3:] if a.startswith("--"))
+env = dict(a.split("=", 1) for a in sys.argv[3:] if not a.startswith("--"))
+ACCELERATORS = {"cpu": ("none", False), "t4": ("nvidiaTeslaT4", True), "p100": ("nvidiaTeslaP100", True),
+                "rtx6000": ("nvidiaRtx6000", True)}
+accelerator, gpu = ACCELERATORS[flags.get("gpu", "cpu")]
+models = [flags["model"]] if "model" in flags else []
 out = ROOT / "kaggle" / "notebook"
 out.mkdir(parents=True, exist_ok=True)
 agent_body = (ROOT / "kaggle" / "my_agent.py").read_text()
@@ -158,13 +168,62 @@ check_cell = code_cell(dedent(
         print('commit check passed')
     """
 ).replace("f.write(SLIM_INIT)", "f.write(" + repr(SLIM_INIT) + ")").replace("ENV_DICT", repr(env)))
+advisor_cell = code_cell(dedent(
+    """\
+    import os
+    if not os.getenv('KAGGLE_IS_COMPETITION_RERUN') and os.environ.get('NEO4_ADVISOR'):
+        # Commit run only: the advisor on public games, each without the solvers built for it,
+        # first without the advisor, then with it, in one process (the same hash order).
+        import subprocess, time
+        print(subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv'],
+                             capture_output=True, text=True).stdout)
+        for root, dirs, files in os.walk('/kaggle/input'):
+            depth = root.count('/') - 2
+            if depth <= 5 and 'config.json' in files:
+                print('model dir:', root)
+        import torch, transformers
+        print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())
+        os.environ['NEO4_HOLDOUT'] = '1'
+        from agents.templates.my_agent import MyAgent
+        import neo4.advisor as nadv
+        adv = nadv.shared()
+        print('advisor:', adv.name, adv.path, nadv.resolve(adv.path))
+        MyAgent.MAX_ACTIONS = AB_ACTIONS
+        results = {}
+        for mode in ('off', 'on'):
+            for game in AB_GAMES:
+                env = arc.make(game)
+                agent = MyAgent(card_id='ab-check', game_id=game, agent_name='MyAgent.ab.' + game,
+                                ROOT_URL='http://localhost', record=False, arc_env=env, tags=['ab'])
+                fb = getattr(agent._neo4, 'fallback', agent._neo4)
+                if mode == 'off':
+                    fb.advisor = None
+                t = time.time()
+                agent.main()
+                ups, prev = [], 0
+                for i, f in enumerate(agent.frames):
+                    if f.levels_completed > prev:
+                        ups.append(i)
+                        prev = f.levels_completed
+                results[(mode, game)] = ups
+                print(f'{mode} {game}: levels at actions {ups}, {time.time() - t:.0f}s, '
+                      f'advice {fb.stats.get("advice_queries", 0)}q/{fb.stats.get("advice_answers", 0)}a '
+                      f'{fb.stats.get("advice_plans", 0)}p/{fb.stats.get("advice_clicks", 0)}c', flush=True)
+                for line in getattr(fb, 'advice_log', [])[:6]:
+                    print('    ', line[:240])
+        print('advisor stats:', adv.stats)
+        for game in AB_GAMES:
+            print(f'{game}: off {results[("off", game)]} | on {results[("on", game)]}')
+    """
+).replace("AB_ACTIONS", flags.get("ab_actions", "1000")).replace(
+    "AB_GAMES", repr(flags.get("ab_games", "vc33,lp85,r11l,sp80,tu93,ls20,ft09,cd82,su15,s5i5,m0r0,bp35,lf52,dc22,ar25").split(","))))
 
 notebook = {
     "metadata": {
         "kernelspec": {"language": "python", "display_name": "Python 3", "name": "python3"},
         "language_info": {"name": "python", "mimetype": "text/x-python", "file_extension": ".py",
                           "pygments_lexer": "ipython3"},
-        "kaggle": {"accelerator": "none", "isInternetEnabled": False, "isGpuEnabled": False,
+        "kaggle": {"accelerator": accelerator, "isInternetEnabled": False, "isGpuEnabled": gpu,
                    "language": "python", "sourceType": "notebook"},
     },
     "nbformat_minor": 4,
@@ -181,6 +240,7 @@ notebook = {
         run_cell,
         dummy_submission_cell,
         check_cell,
+        advisor_cell,
     ],
 }
 (out / "submission.ipynb").write_text(json.dumps(notebook, indent=1))
@@ -191,14 +251,14 @@ meta = {
     "language": "python",
     "kernel_type": "notebook",
     "is_private": True,
-    "enable_gpu": False,
+    "enable_gpu": gpu,
     "enable_tpu": False,
     "enable_internet": False,
     "keywords": [],
     "dataset_sources": [],
     "kernel_sources": [],
     "competition_sources": ["arc-prize-2026-arc-agi-3"],
-    "model_sources": [],
+    "model_sources": models,
 }
 (out / "kernel-metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
 print("wrote", out / "submission.ipynb", (out / "submission.ipynb").stat().st_size, "bytes")

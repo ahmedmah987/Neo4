@@ -30,6 +30,7 @@ import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
 
 from . import frame as fp
+from .advisor import Advisor, build_prompt, describe_objects, listed_objects
 from .dynamics import GAME_OVER, LEVEL_UP, OK, Dynamics
 from .graph_agent import GraphAgent, LevelGraph, Node
 from .objects import Obj, at, erase, extract, find
@@ -41,6 +42,11 @@ MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
 HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
+# The goal advisor (Phase 58) is asked at a level's start and again once the level has taken
+# this many actions without ending; a game's questions are capped.
+ADVICE_AT = (0, 30, 120, 400, 1200)
+MAX_ADVICE_PER_GAME = 60
+MAX_ADVICE_PLANS_PER_LEVEL = 12
 
 
 class ModelAgent(GraphAgent):
@@ -115,8 +121,21 @@ class ModelAgent(GraphAgent):
              "explore_plans": 0, "explore_steps": 0,
              "noise_sigs": 0, "graph_rebuilds": 0, "budget_deaths": 0, "fatal_moves": 0,
              "switch_plans": 0, "locked_goals": 0, "budget_resets": 0, "refill_plans": 0,
-             "descents": 0, "near_clicks": 0, "gain_clicks": 0}
+             "descents": 0, "near_clicks": 0, "gain_clicks": 0,
+             "advice_queries": 0, "advice_answers": 0, "advice_plans": 0, "advice_steps": 0,
+             "advice_clicks": 0}
         )
+        # The goal advisor (Phase 58): None or an Advisor; what it advised in this level.
+        self.advisor: Advisor | None = None
+        self.available: list[int] = []
+        self.level_actions = 0
+        self.advice_queries = 0
+        self.advice_targets: list[Obj] = []
+        self.advice_done: set[int] = set()
+        self.advice_current: int | None = None
+        self.advice_plans = 0
+        self.advice_tried: list[str] = []
+        self.advice_log: list[str] = []
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -158,6 +177,13 @@ class ModelAgent(GraphAgent):
         self.best_first = bool(self.relations)
         self.h_first: dict[tuple, float] = {}  # each goal measure's value when first met this level
         self.h_kind: dict[tuple, tuple | None] = {}  # the kind a count goal stands for this level
+        self.level_actions = 0
+        self.advice_queries = 0
+        self.advice_targets = []
+        self.advice_done = set()
+        self.advice_current = None
+        self.advice_plans = 0
+        self.advice_tried = []
 
     # -- difference reduction ---------------------------------------------------
 
@@ -400,8 +426,10 @@ class ModelAgent(GraphAgent):
         # Within a level the mask is fixed, so this frame's objects are the ones just extracted.
         self._cur_objs = after
         self._verdicts = {}
+        self.available = [int(getattr(a, "value", a)) for a in (obs.available_actions or [])]
 
         action, data = super().act(obs)
+        self.level_actions += 1
 
         if action is GameAction.RESET or grid is None:
             if obs.state != GameState.GAME_OVER:
@@ -418,6 +446,8 @@ class ModelAgent(GraphAgent):
         return action, data
 
     def _choose(self, node: Node) -> int | None:
+        if self.advisor is not None and self.cur_grid is not None and self._advice_due():
+            self._ask_advisor(node)
         if self.cur_grid is None or not self.dyn.observations:
             return super()._choose(node)
         objs = self.cur_objs()
@@ -435,6 +465,8 @@ class ModelAgent(GraphAgent):
             idx = self._follow_plan(node, me)
             if idx is None and not self.plan:
                 idx = self._make_plan(node, me, "goal")
+            if idx is None and not self.plan and self.advice_targets:
+                idx = self._make_plan(node, me, "advice")
             if idx is not None:
                 if self.plan_kind != "refill" and self._short_of_energy(len(self.plan)):
                     # The resource will run out before the plan ends: go and refill it
@@ -494,6 +526,133 @@ class ModelAgent(GraphAgent):
             return False
         tries = self.undo_tries.get(aid, 0)
         return tries >= 2 and self.undo_hits.get(aid, 0) == tries
+
+    # -- the goal advisor (Phase 58) ---------------------------------------------
+
+    def _advice_due(self) -> bool:
+        if self.advisor is None or not self.advisor.available:
+            return False
+        if self.advice_queries >= len(ADVICE_AT) or self.stats["advice_queries"] >= MAX_ADVICE_PER_GAME:
+            return False
+        return self.level_actions >= ADVICE_AT[self.advice_queries]
+
+    def _ask_advisor(self, node: Node) -> None:
+        """Show the advisor this frame, its objects and what the agent knows; keep its targets."""
+        objs = self.cur_objs()
+        clicks = [c.data for c in node.cands if c.data is not None]
+        if clicks and not any(a in self.available for a in (1, 2, 3, 4, 5)):
+            # only clicks: show the objects a click of the agent's can land on
+            shown = listed_objects([o for o in objs if any(o.contains(d["x"], d["y"]) for d in clicks)])
+        else:
+            shown = listed_objects(objs)
+        prompt = build_prompt(describe_objects(shown, objs), self.available, self._advice_notes(shown),
+                              max(0, self.levels_completed))
+        self.advice_queries += 1
+        self.stats["advice_queries"] += 1
+        advice = self.advisor.advise(self.cur_grid, prompt, len(shown))
+        if advice is None:
+            return
+        self.stats["advice_answers"] += 1
+        self.advice_targets = [shown[t - 1] for t in advice.targets]
+        self.advice_done = set()
+        self.advice_current = None
+        self.advice_log.append(f"L{max(0, self.levels_completed) + 1}@{self.level_actions}: {advice.goal} "
+                               f"-> {advice.targets}")
+        self.stats["advice_last"] = self.advice_log[-1][:200]
+
+    def _advice_notes(self, shown: list[Obj]) -> list[str]:
+        """What the agent has learned, in the advisor's terms (object numbers, colour names)."""
+        from .advisor import COLOUR_NAMES
+
+        def number(sig: tuple) -> str:
+            for i, o in enumerate(shown, 1):
+                if o.sig == sig:
+                    return f"#{i}"
+            return f"a {COLOUR_NAMES[sig[0]]} object"
+
+        notes = []
+        avatar = self.dyn.avatar()
+        if avatar is not None:
+            moves = []
+            for aid in (1, 2, 3, 4, 5):
+                d = self.dyn.direction(aid)
+                if d is not None:
+                    moves.append(f"ACTION{aid} moves it by ({d[0]:+d}, {d[1]:+d})")
+            notes.append(f"The keys move {number(avatar)}" + (": " + ", ".join(moves) if moves else "") + ".")
+            walls = [COLOUR_NAMES[c] for c in range(16) if self.dyn.blocks(c)]
+            if walls:
+                notes.append("It cannot pass through " + ", ".join(walls) + ".")
+        dead = [sig for sig, c in self.dyn.click.items()
+                if sum(c.values()) >= 3 and c["none"] == sum(c.values())]
+        if dead:
+            notes.append("Clicking these kinds changed nothing: "
+                         + ", ".join(f"{COLOUR_NAMES[e[0]]} {e[2]}x{e[1]}" for e in dead[:8]) + ".")
+        if self.dyn.level_ups:
+            done = []
+            for sig in self.dyn.goal_sigs():
+                done.append(f"the player reached {number(sig)}")
+            for c in self.dyn.goal_colors():
+                done.append(f"the player entered {COLOUR_NAMES[c]}")
+            for e in self.dyn.goal_click_sigs():
+                done.append(f"a {COLOUR_NAMES[e[0]]} {e[2]}x{e[1]} object was clicked")
+            if done:
+                notes.append("Earlier levels ended when " + "; or ".join(done[:4]) + ".")
+        if self.advice_tried:
+            notes.append("Already tried in this level without ending it: " + "; ".join(self.advice_tried[-6:]) + ".")
+        if self.level_actions:
+            notes.append(f"{self.level_actions} actions have been spent on this level.")
+        return notes
+
+    @staticmethod
+    def _label(o: Obj) -> str:
+        from .advisor import COLOUR_NAMES
+
+        return f"the {COLOUR_NAMES[o.color]} {o.w}x{o.h} object at x={o.x1}, y={o.y1}"
+
+    def _locate(self, target: Obj, objs: list[Obj]) -> Obj | None:
+        """The advised object in the current frame: same exact shape and colour, nearest."""
+        same = [o for o in objs if o.esig == target.esig] or [o for o in objs if o.sig == target.sig]
+        if not same:
+            return None
+        return min(same, key=lambda o: abs(o.x1 - target.x1) + abs(o.y1 - target.y1))
+
+    def _advice_mask(self, me: Obj) -> np.ndarray | None:
+        """Cells of the first advised object not yet reached, other than the player."""
+        objs = self.cur_objs()
+        for i, t in enumerate(self.advice_targets):
+            if i in self.advice_done:
+                continue
+            o = self._locate(t, objs)
+            if o is None or o.sig == me.sig or self._touching(me, o):
+                self.advice_done.add(i)
+                continue
+            mask = np.zeros(self.cur_grid.shape, dtype=bool)
+            mask[o.pixels[:, 0], o.pixels[:, 1]] = True
+            self.advice_current = i
+            return mask
+        return None
+
+    def _advised_click(self, node: Node, local: list[int]) -> int | None:
+        """An untested click on the first advised object that has one here, in whatever
+        priority group the explorer put it."""
+        if not self.advice_targets:
+            return None
+        objs = self.cur_objs()
+        local = node.untested(self.graph.max_group(), self.graph.epoch)
+        for i, t in enumerate(self.advice_targets):
+            if i in self.advice_done:
+                continue
+            o = self._locate(t, objs)
+            if o is None:
+                self.advice_done.add(i)
+                continue
+            for j in local:
+                c = node.cands[j]
+                if c.data is not None and o.contains(c.data["x"], c.data["y"]):
+                    self.advice_done.add(i)
+                    self.advice_tried.append("clicked " + self._label(o))
+                    return j
+        return None
 
     # -- move budgets ---------------------------------------------------------
 
@@ -589,6 +748,10 @@ class ModelAgent(GraphAgent):
     def _plan_finished(self) -> None:
         """The plan's last move was executed and the level did not end."""
         objs = self.cur_objs()
+        if self.plan_kind == "advice" and self.advice_current is not None:
+            self.advice_done.add(self.advice_current)
+            self.advice_tried.append("reached " + self._label(self.advice_targets[self.advice_current]))
+            self.advice_current = None
         if self.plan_kind == "goal" and self.dyn.switches():
             # The goal was reached in this avatar state and nothing happened: it is
             # locked until a switch changes the state.
@@ -608,7 +771,7 @@ class ModelAgent(GraphAgent):
             # The final move touches the target; whether it goes through or not, the
             # plan is done, so do not hold the next step to a predicted position.
             self.plan_expect[0] = (-1, -1)
-        self.stats["plan_steps" if self.plan_kind != "explore" else "explore_steps"] += 1
+        self.stats[{"explore": "explore_steps", "advice": "advice_steps"}.get(self.plan_kind, "plan_steps")] += 1
         return idx
 
     def _make_plan(self, node: Node, me: Obj | None, kind: str) -> int | None:
@@ -653,6 +816,13 @@ class ModelAgent(GraphAgent):
                 tests.append(lambda cols, coords: bool(cols & goals))
             if not tests:
                 return None
+        elif kind == "advice":
+            if self.advice_plans >= MAX_ADVICE_PLANS_PER_LEVEL:
+                return None
+            target = self._advice_mask(me)
+            if target is None:
+                return None
+            tests = [lambda cols, coords: any(target[y, x] for y, x in coords)]
         else:
             if self.explore_plans_this_level >= MAX_EXPLORE_PLANS_PER_LEVEL:
                 return None
@@ -677,6 +847,11 @@ class ModelAgent(GraphAgent):
         if found is not None and budget is not None and len(found[0]) > budget - 1:
             found = None  # longer than any attempt can be
         if found is None:
+            if kind == "advice":
+                # no known route to this advised object: try the next one
+                self.advice_done.add(self.advice_current)
+                self.advice_current = None
+                return None
             # No route through cells known to be passable yet; try again after a
             # cooldown, and do not spend the per-level allowance on the search.
             self.plan_cooldown = PLAN_COOLDOWN
@@ -684,11 +859,13 @@ class ModelAgent(GraphAgent):
         if kind == "goal":
             self.plans_this_level += 1
             self.goal_plans_by_state[state] = self.goal_plans_by_state.get(state, 0) + 1
+        elif kind == "advice":
+            self.advice_plans += 1
         else:
             self.explore_plans_this_level += 1
         self.plan, self.plan_expect = found
         self.plan_kind = kind
-        self.stats["plans" if kind == "goal" else "explore_plans"] += 1
+        self.stats[{"goal": "plans", "advice": "advice_plans"}.get(kind, "explore_plans")] += 1
         return self._plan_step(node)
 
     def _make_switch_plan(self, node: Node, me: Obj, state: frozenset) -> int | None:
@@ -827,6 +1004,10 @@ class ModelAgent(GraphAgent):
         if winners:
             self.stats["goal_clicks"] += 1
             return self.rng.choice(winners)
+        advised = self._advised_click(node, local)
+        if advised is not None:
+            self.stats["advice_clicks"] += 1
+            return advised
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
         pool = unknown or local
         if self.relations and self.kind_tries:

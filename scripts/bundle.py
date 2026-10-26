@@ -22,7 +22,7 @@ PKG = ROOT / "neo4"
 OUT = ROOT / "kaggle" / "my_agent.py"
 
 # Dependency order: each module only imports the ones before it.
-MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "model_agent", "marker", "painter", "pointer", "program", "translate", "board", "bits", "connect", "carry", "meet", "pour", "maze", "keys", "spells", "panel", "replay", "gravity", "mirror", "library"]
+MODULES = ["frame", "objects", "planner", "dynamics", "graph_agent", "advisor", "model_agent", "marker", "painter", "pointer", "program", "translate", "board", "bits", "connect", "carry", "meet", "pour", "maze", "keys", "spells", "panel", "replay", "gravity", "mirror", "library"]
 
 HEADER = '''"""Neo4 — ARC-AGI-3 agent for the ARC Prize 2026 Kaggle track (generated file).
 
@@ -69,7 +69,8 @@ def _materialise() -> None:
 
 _materialise()
 
-from neo4.library import LibraryAgent  # noqa: E402
+from neo4.advisor import shared as shared_advisor  # noqa: E402
+from neo4.library import LibraryAgent, LibraryHoldoutAgent  # noqa: E402
 from neo4.model_agent import ModelAgent  # noqa: E402
 
 # -- the framework adapter ------------------------------------------------------
@@ -106,6 +107,9 @@ class MyAgent(Agent):
     wall clock per game, counted from the agent's construction, so that every
     game's agent stops together whatever the number of games. ``NEO4_AGENT=model``
     plays the model-guided agent alone, without the family solvers (an ablation).
+    ``NEO4_ADVISOR`` names a vision-language model directory (``auto:<name>`` searches
+    /kaggle/input) that advises the model-guided agent on goals (Phase 58).
+    ``NEO4_HOLDOUT=1`` leaves out the solvers built for the game (the commit check only).
     """
 
     MAX_ACTIONS = int(os.environ.get("NEO4_MAX_ACTIONS", "40000"))
@@ -114,7 +118,13 @@ class MyAgent(Agent):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         seed = random.Random(f"{{self.game_id}}").randrange(1 << 30)
-        self._neo4 = ModelAgent(seed=seed) if os.environ.get("NEO4_AGENT") == "model" else LibraryAgent(seed=seed)
+        if os.environ.get("NEO4_AGENT") == "model":
+            self._neo4 = ModelAgent(seed=seed)
+        elif os.environ.get("NEO4_HOLDOUT") == "1":
+            self._neo4 = LibraryHoldoutAgent(seed=seed, game=str(self.game_id).split("-")[0])
+        else:
+            self._neo4 = LibraryAgent(seed=seed)
+        self._advise(self._neo4)
         self._seed = seed
         self._errors = 0
         self._steps = 0
@@ -138,12 +148,20 @@ class MyAgent(Agent):
         self._steps += 1
         action.reasoning = {{
             "step": self._steps,
+            "advice": getattr(getattr(self._neo4, "fallback", self._neo4), "stats", {{}}).get("advice_last", ""),
             "nodes": self._neo4.stats.get("nodes", 0),
             "skipped": self._neo4.stats.get("skipped", 0),
             "plans": self._neo4.stats.get("plans", 0),
             "solver": self._neo4.stats.get("solver", ""),
         }}
         return action
+
+    @staticmethod
+    def _advise(agent) -> None:
+        """Give the model-guided agent (the library's fallback) the process's advisor."""
+        advisor = shared_advisor()
+        if advisor.name != "none":
+            getattr(agent, "fallback", agent).advisor = advisor
 
     def _act(self, obs: FrameDataRaw) -> tuple:
         """The agent's action; an exception must not end the game for the rest of the run.
@@ -156,6 +174,7 @@ class MyAgent(Agent):
         if self._errors <= 5:
             try:
                 self._neo4 = ModelAgent(seed=self._seed + self._errors)
+                self._advise(self._neo4)
                 return self._neo4.act(obs)
             except Exception:
                 self._errors += 1

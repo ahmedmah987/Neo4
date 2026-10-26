@@ -2794,7 +2794,16 @@ over games. Every action between two level completions counts, exploration inclu
 | library, Phase 53 (growers, the last levels) | 619 levels | 75.56 |
 | library, Phase 55 (mirror solver; default) | 653 levels | **80.01** |
 
-The reported top of the Kaggle leaderboard is in the fifties. The gap is not about how
+**On the hidden games** (the first submission, 26 October 2026, the Phase 55 bundle): public
+leaderboard score **0.33**, rank 2,927 of 4,853. The family solvers are built for the public
+games' mechanics, and the hidden games are other games, so there almost everything falls to
+the model-guided agent, whose 0.44 on the public games this matches. On that day the
+leaderboard read 71.48 at the top, 45.03 at tenth place, 38.22 at the gold line (rank 19),
+32.30 at the silver (242) and 30.99 at the bronze (484); about 1,900 teams scored between 20
+and 40, and about 2,900 below 1.
+
+The top of the Kaggle leaderboard was reported in the fifties when this section was first
+written. The gap is not about how
 many levels are completed but about **how many actions each one costs**: `ls20`'s first
 level takes this agent ~200–1,300 actions against a human's 22, which is worth 0–1 % of
 that level; `r11l`'s first level in 41 actions against 22 is worth 29 %, its second in
@@ -2873,10 +2882,9 @@ click (`bp35`, 4.56: every level, in 448 actions against 651), and pieces and mi
 moved until the pieces and their reflections cover every target (`ar25`, 4.60: every level, in
 253 actions against 748, the fewest possible). Sixteen of the 25
 public games are now played at or near the cap, a seventeenth at three-quarters of it (`wa30`)
-and an eighteenth at seven-tenths (`dc22`); the
-top of the Kaggle leaderboard was reported in the fifties, and this score on the public games
-is now above that, but the evaluation games are other games, and the agent is not ready to
-submit.
+and an eighteenth at seven-tenths (`dc22`). On the hidden games, which are other games, the
+first submission scored 0.33 (rank 2,927 of 4,853; 71.48 at the top, 30.99 at the bronze
+line): what the library knows does not carry over to mechanics it has not been built for.
 
 **What would move it next (Phases 41–55):** the eight games Phase 41 diagnosed were all
 won, every level, in no more actions than the humans took, by searches on models of their

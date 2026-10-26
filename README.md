@@ -2738,8 +2738,9 @@ Phase 56's 0.57, comes and goes with it. Run again with two fixed hash seeds, on
 
 Every other game scored the same in the sweep, with the same levels. The gain is small, about
 +0.003 on the mean, and of the kind expected: first levels found in fewer actions. `lf52`
-loses two second levels that took over 3,400 actions each and were worth nothing. Phase 57 is
-the default and the second submission. A single holdout sweep differs from another by about
+loses two second levels that took over 3,400 actions each and were worth nothing. The library's
+own score is unchanged at **80.01** (650 levels against 652: the same two `lf52` levels). Phase 57
+is the default and the second submission. A single holdout sweep differs from another by about
 ±0.02 from hash order alone, so smaller differences are noise.
 
 **Phase 56 under the same control.** `ft09` with the count goals on and off, three hash seeds
@@ -2778,7 +2779,8 @@ every hash seed, in 22 actions (hash seed 1, the run Phase 56 reported) or 448 (
 | library, + gravity family (Phase 52) | 604 | 73.10 |
 | library, + the gravity family's last levels: growers (Phase 53) | 619 | 75.56 |
 | library, + mirror family (Phase 55) | 653 | 80.01 |
-| library, + goal hypotheses that narrow across levels (Phase 56, default) | 652 | **80.01** |
+| library, + goal hypotheses that narrow across levels (Phase 56) | 652 | 80.01 |
+| library, + undo and no-op keys skipped, error guards (Phase 57, default) | 650 | **80.01** |
 
 All of the gain is six families, played by eighteen solvers. The navigation family's share (`ls20`,
 `tu93`, `sc25`, `g50t`, `dc22`, `bp35`, `m0r0`) went from 0.08 to 30.75, now from all seven of its

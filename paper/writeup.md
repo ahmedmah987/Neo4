@@ -12,8 +12,8 @@ exactly and plans the fewest actions. On the 25 public games the library raises 
 official-style score from 0.44 to 80.01, sixteen games at the cap. On the hidden games it
 scores 0.33. We measure the gap offline with a holdout protocol, in which each public game is
 played without the solvers built for it. That gives 0.45, which predicts the hidden score.
-Diagnoses of the sixteen hardest public games, played by search on hand-built models of their
-rules, won every level in fewer actions than humans. Search, then, is not the bottleneck:
+Sixteen public games were diagnosed by search on hand-built models of their rules, and every
+level was won in no more actions than humans took. Search, then, is not the bottleneck:
 acquiring the model is. We report what transfers, what does not, and a first step towards
 learning the goal from completed levels.
 
@@ -95,8 +95,9 @@ Official-style score, 25 public games, 4,000 actions, 5 seeds:
 
 Sixteen of the 25 games are played at or near the cap. Examples: `ar25`, all eight levels in
 253 actions (humans 748); `bp35`, all nine in 448 (651); `tu93` in the fewest moves its mazes
-allow. The sixteen diagnosed games were won on every level in no more than the humans'
-actions; the last eight took 2,398 actions against 6,608.
+allow. Sixteen games were diagnosed while the library could not yet play them. Every level of
+each was won in no more than the humans' actions; the last eight took 2,398 actions against
+6,608.
 
 The holdout score matches the explorer's and predicts the hidden score. The solvers neither
 help nor hurt a game they were not built for. They claim such games briefly and give way,
@@ -112,9 +113,10 @@ Three findings explain the numbers.
    take seconds. Where the explorer lacks the model, its levels cost 10–50 times the human
    count and score nothing.
 2. **The explorer's points come from first levels with few relevant actions.** It finishes
-   some first levels near human cost (`vc33`, `r11l`, `lp85`, `sp80`). Second levels cost 400
-   to 2,400 actions against human counts of 33–58, because what it learned about the goal
-   does not survive the new layout.
+   some first levels near human cost (`vc33`, `r11l`, `lp85`, `sp80`). Second levels often
+   cost hundreds to thousands of actions: `r11l` 645–1,934 against the humans' 33, and `sp80`
+   429–2,402 against 58. What the agent learned about the goal does not survive the new
+   layout.
 3. **Goals, not mechanics, are what the explorer fails to learn.** Its rules capture movement
    and blocking well. Its goal is guessed from one level-up as a gap between two kinds, and a
    level-1 solution path is only 3–8 actions long, so many measures change together along it.

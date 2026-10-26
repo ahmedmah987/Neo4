@@ -35,7 +35,7 @@ from .graph_agent import GraphAgent, LevelGraph, Node
 from .objects import Obj, at, erase, extract, find
 from .planner import plan_path
 
-SKIP_VERDICTS = ("blocked", "danger", "noop_click")
+SKIP_VERDICTS = ("blocked", "danger", "noop_click", "noop_key")
 MAX_PLANS_PER_LEVEL = 5  # goal plans per level and avatar state
 MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
@@ -49,6 +49,7 @@ class ModelAgent(GraphAgent):
     # click games (r11l, lp85), so off unless a variant turns it on.
     near_clicks = False
     goal_counts = True  # count goals beside the gap relations (Phase 56)
+    skip_undo = True  # the undo key, once seen to restore the frame before the last action, is not explored
 
     def __init__(
         self,
@@ -101,6 +102,12 @@ class ModelAgent(GraphAgent):
         self.kind_tries: dict[tuple, int] = {}
         self.h_first: dict[tuple, float] = {}
         self.h_kind: dict[tuple, tuple | None] = {}
+        # Undo (the seventh action in ARC-AGI-3): how often it was tried after another action, and
+        # how often the frame it gave back was the one from before that action. Only this key is
+        # checked: a move left after a move right also gives the old frame back.
+        self.undo_tries: dict[int, int] = {}
+        self.undo_hits: dict[int, int] = {}
+        self.keys_back: list[str | None] = [None, None]  # the frames' keys before the last two actions
         self.last_h: float | None = None
         self.stats.update(
             {"skipped": 0, "ran_unknown": 0, "ran_predicted": 0,
@@ -146,6 +153,7 @@ class ModelAgent(GraphAgent):
         self.switch_plans_this_level = 0
         self.switch_from = None
         self._cur_objs = None  # the mask changed with the level
+        self.keys_back = [None, None]
         self.level_start_objs = list(self.cur_objs()) if self.cur_grid is not None else None
         self.best_first = bool(self.relations)
         self.h_first: dict[tuple, float] = {}  # each goal measure's value when first met this level
@@ -371,6 +379,12 @@ class ModelAgent(GraphAgent):
                     kind = self._kind_of(target, self.kind_tries) or target.sig
                     self.kind_gain[kind] = self.kind_gain.get(kind, 0.0) + (h_now - self.last_h)
                     self.kind_tries[kind] = self.kind_tries.get(kind, 0) + 1
+            if (outcome == OK and grid is not None and action is GameAction.ACTION7
+                    and self.keys_back[0] is not None and self.mask is not None):
+                aid = action.value
+                self.undo_tries[aid] = self.undo_tries.get(aid, 0) + 1
+                if fp.state_key(grid, self.mask) == self.keys_back[0]:
+                    self.undo_hits[aid] = self.undo_hits.get(aid, 0) + 1
             self.last_cand = None
             if outcome == GAME_OVER:
                 if self.dyn.last_death_budget:
@@ -394,10 +408,13 @@ class ModelAgent(GraphAgent):
                 self.dyn.new_attempt()
             self.last_cand = None
             self._drop_plan()
+            self.keys_back = [None, None]
         else:
             self.last_cand = (action, data)
             self.last_grid = grid
             self.last_objs = self.cur_objs()
+            key = fp.state_key(grid, self.mask) if self.mask is not None else None
+            self.keys_back = [self.keys_back[1], key]
         return action, data
 
     def _choose(self, node: Node) -> int | None:
@@ -438,6 +455,12 @@ class ModelAgent(GraphAgent):
                 return idx
         for i in node.untested(self.graph.max_group(), self.graph.epoch):
             c = node.cands[i]
+            if self.skip_undo and c.data is None and self._is_undo(c.action.value):
+                if self.graph.epoch == 0:
+                    # it only takes the game back a step, to a frame already seen
+                    self.graph.mark_tested(node.key, i)
+                    self.stats["undo_skipped"] = self.stats.get("undo_skipped", 0) + 1
+                    continue
             if me is not None and c.data is None and (me.x1, me.y1, c.action.value) in self.fatal:
                 verdict = "danger"  # this very move lost the game in this level
             else:
@@ -463,6 +486,14 @@ class ModelAgent(GraphAgent):
             self.stats["budget_resets"] += 1
             return None
         return super()._choose(node)
+
+    def _is_undo(self, aid: int) -> bool:
+        """The undo key: every time it was tried after another action (at least twice), it gave
+        back the frame from before that action."""
+        if aid != GameAction.ACTION7.value:
+            return False
+        tries = self.undo_tries.get(aid, 0)
+        return tries >= 2 and self.undo_hits.get(aid, 0) == tries
 
     # -- move budgets ---------------------------------------------------------
 

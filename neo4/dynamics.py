@@ -46,6 +46,7 @@ PASS_RATE = 0.9  # a colour the avatar crossed at least this often is passable
 DANGER_RATE = 0.5  # share of visits that ended the game
 DEATH_SUPPORT = 2  # lost games on a click target before its clicks count as dangerous
 NOOP_RATE = 0.95  # share of clicks on a signature that changed nothing
+NOOP_KEY_SUPPORT = 8  # uses of a key that never changed anything before it is read as a no-op
 DIR_PURITY = 0.7  # share of an action's observed moves that agree on one direction
 GOAL_LIFT = 5.0  # a goal feature ends levels at least this many times the base rate
 NOISE_RATE = 0.5  # a signature churning on this share of steps under every action is noise
@@ -60,7 +61,7 @@ FAR = 6  # cells beyond the avatar's body from which a change counts as remote
 
 @dataclass(slots=True)
 class Prediction:
-    verdict: str  # unknown | move | blocked | danger | noop_click
+    verdict: str  # unknown | move | blocked | danger | noop_click | noop_key
     support: int = 0
     why: str = ""
 
@@ -92,6 +93,7 @@ class Dynamics:
         self.key_frames = 0
         self.key_uses: Counter = Counter()  # keyboard action id -> times used
         self.key_death: Counter = Counter()  # keyboard action id -> times it lost the game
+        self.key_change: Counter = Counter()  # keyboard action id -> times it changed something
         self.steps_by_class: Counter = Counter()  # action class -> transitions observed
         self.observations = 0
         # sig -> {"with": moved by the avatar's vector while touching it, "without": did not}
@@ -229,6 +231,8 @@ class Dynamics:
     ) -> None:
         aid = action.value
         self.key_uses[aid] += 1
+        if outcome != OK or d is None or d.changed:
+            self.key_change[aid] += 1
         if outcome == BUDGET:
             return  # the budget ran out on this move; the move itself is not to blame
         if outcome == GAME_OVER:
@@ -840,6 +844,10 @@ class Dynamics:
         deaths, uses = self.key_death[action.value], self.key_uses[action.value]
         if deaths >= MIN_SUPPORT and deaths / uses >= DANGER_RATE:
             return Prediction("danger", uses, f"{action.name} lost the game {deaths}/{uses}x")
+        # A key that has never changed anything (m0r0's and wa30's ACTION5 were tried
+        # at nearly every new state) is not worth testing again in the next one.
+        if uses >= NOOP_KEY_SUPPORT and self.key_change[action.value] == 0:
+            return Prediction("noop_key", uses, f"{action.name} changed nothing {uses}x")
         avatar = self.avatar()
         direction = self.direction(action.value)
         if avatar is None or direction is None:

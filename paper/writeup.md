@@ -26,22 +26,20 @@ quadratically: a level finished in ten times the human count is worth 1%. And la
 where a learned rule can be reused, weigh the most.
 
 We started from graph-based exploration [1] and asked how far an agent without a language
-model can go. Through 55 measured phases we answer two questions: how well can such an agent
+model can go. Over 56 measured phases we answer two questions: how well can such an agent
 play once it understands a mechanic, and how much of that understanding transfers?
 
 ## 2. Prior work
 
-The graph explorer of [1] tests every action in every state and replays known routes. We keep
-its state graph and add induced rules, as in program-synthesis approaches to grid tasks. The
-leading Kaggle entries this year instead run local language or vision models that write code
-or pick actions [2]; they score 45–71 on the hidden games. Our agent uses no learned model
-weights.
+The graph explorer of [1] tests every action in every state; we keep its state graph and add
+induced rules. The leading Kaggle entries this year instead run local language or vision
+models that write code or pick actions [2], and score 45–71 on the hidden games. Our agent
+uses no learned model weights.
 
 ## 3. Approach
 
 **Perception.** A frame is a set of single-colour components, each with a signature (colour,
-size, shape), matched between frames. A status-bar mask and a noise filter remove
-action-independent changes.
+size, shape), matched between frames; status bars and action-independent noise are masked.
 
 **The model-guided explorer.** Every transition updates a rule set:
 * which object the keys move, by how much, and which colours block it;
@@ -74,9 +72,8 @@ then hands back to the explorer. Three design rules mattered most:
 3. **Every solver is tested on a toy game** written apart from it, with other colours,
    sizes and layouts.
 
-**Diagnoses.** Before writing a solver we read each hard game's source, dumped its levels and
-played them, by search on a hand-built model or by hand. This bounds what perfect
-understanding is worth.
+**Diagnoses.** Before writing a solver we read each hard game's source and played every level,
+by search on a hand-built model or by hand. This bounds what perfect understanding is worth.
 
 **Holdout evaluation.** To estimate performance on unseen games offline, each public game is
 played with the solvers built or tuned on it removed; everything else stays.
@@ -126,11 +123,15 @@ Three findings explain the numbers.
 
 ## 6. Towards closing it
 
-The library contains the skills; what is missing is knowing which applies. We are testing
-goal hypotheses that narrow from level to level. Each completed level proposes candidates:
-gaps between kinds, and counts of kinds or colours that moved steadily one way along the
-solution. Those an earlier level also supported rank first, and the combination directs click
-ordering and frontier choice on the next level. [Result TBD.] Beyond that, we see two steps.
+The library contains the skills; what is missing is knowing which applies. As a first step,
+goal hypotheses now narrow from level to level. Each completed level proposes candidates:
+gaps between kinds, and counts of a kind or a colour that only ever moved towards where they
+ended. Hypotheses an earlier level also supported rank first. Together they direct click
+ordering and frontier choice on the next level. On the holdout this raises the score from
+0.448 to 0.471. On the toggle game `ft09`, a colour count makes one second level take 22
+actions, against the humans' 12. On `r11l`, a wrong count costs two second levels. The
+direction is right, but one short solution path leaves too many hypotheses standing. Beyond
+that, we see two steps.
 * Split each solver into perception and skill, so that a skill (navigate, push, select and
   move, toggle, cover) can be bound to roles learned by interaction.
 * Measure transfer with holdouts during development, not after.

@@ -243,7 +243,12 @@ class ModelAdvisor(Advisor):
             if path is None:
                 raise FileNotFoundError(f"no model directory for {self.path!r}")
             self.stats["model_path"] = path
-            dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
+            self.stats["dtype"] = os.environ.get("NEO4_ADVISOR_DTYPE", "") or "auto"
+            # bfloat16 where the GPU has it natively, else float16; NEO4_ADVISOR_DTYPE overrides (Gemma 3
+            # overflows in float16, so on a T4 a small Gemma runs in float32)
+            native_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+            dtype = getattr(torch, os.environ.get("NEO4_ADVISOR_DTYPE", "") or
+                            ("bfloat16" if native_bf16 else "float16"))
             errors = []
             # image-text models first; a text-only model is shown the object list without the image
             for cls_name, image in (("AutoModelForImageTextToText", True), ("AutoModelForMultimodalLM", True),

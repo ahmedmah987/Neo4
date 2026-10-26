@@ -107,6 +107,30 @@ class LibraryAgent:
         return chosen
 
 
+# The public games each solver was built or tuned on. Documentation of the public set for the
+# holdout evaluation, not an input to the agent: a game played without the solvers made for it
+# stands in for one of the hidden games, which are other games.
+BUILT_FOR: dict[str, list[str]] = {
+    "program": ["sb26"], "translate": ["tr87"], "clue": ["ft09"], "bits": ["tn36"],
+    "connect": ["cn04"], "carry": ["wa30"], "maze": ["tu93"], "keys": ["ls20"], "spells": ["sc25"],
+    "pointer": ["r11l"], "mirror": ["ar25"], "painter": ["cd82"], "meet": ["m0r0"], "pour": ["sp80"],
+    "panel": ["dc22"], "replay": ["g50t"], "gravity": ["bp35"],
+    "marker": ["lp85", "re86", "s5i5", "r11l", "vc33", "ar25", "su15"],
+}
+
+
+class LibraryHoldoutAgent(LibraryAgent):
+    """The library meeting each public game as an unseen one: the solvers built or tuned on the
+    game are left out (evaluation only)."""
+
+    name = "library-holdout"
+    per_game = True
+
+    def __init__(self, seed: int = 0, game: str = "") -> None:
+        super().__init__(seed)
+        self.solvers = [s for s in self.solvers if game not in BUILT_FOR.get(s.name, [])]
+
+
 class LibraryNoNavAgent(LibraryAgent):
     """The library without the Phase 26 navigation additions (ablation)."""
 

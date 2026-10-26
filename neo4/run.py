@@ -23,7 +23,7 @@ from typing import Any
 from arcengine import GameState
 
 from .graph_agent import AGENTS as _GRAPH_AGENTS
-from .library import LibraryAgent, LibraryNoNavAgent
+from .library import LibraryAgent, LibraryHoldoutAgent, LibraryNoNavAgent
 from .model_agent import (
     ModelAbstractAgent,
     ModelAdjacencyAgent,
@@ -43,6 +43,7 @@ AGENTS = {
     ModelAdjacencyAgent.name: ModelAdjacencyAgent,
     LibraryAgent.name: LibraryAgent,
     LibraryNoNavAgent.name: LibraryNoNavAgent,
+    LibraryHoldoutAgent.name: LibraryHoldoutAgent,
 }
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -107,7 +108,8 @@ def play(
     if env is None:
         raise RuntimeError(f"could not create environment for {game}")
     if agent is None:
-        agent = AGENTS[agent_name](seed=seed)
+        cls = AGENTS[agent_name]
+        agent = cls(seed=seed, game=game) if getattr(cls, "per_game", False) else cls(seed=seed)
 
     obs = env.reset()
     assert obs is not None

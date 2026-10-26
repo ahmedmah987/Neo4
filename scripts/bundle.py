@@ -70,6 +70,7 @@ def _materialise() -> None:
 _materialise()
 
 from neo4.library import LibraryAgent  # noqa: E402
+from neo4.model_agent import ModelAgent  # noqa: E402
 
 # -- the framework adapter ------------------------------------------------------
 # The ARC-AGI-3-Agents framework uses the engine's own types (the starter kit's
@@ -103,7 +104,8 @@ class MyAgent(Agent):
     an agent that never stops would time the whole submission out. Two caps:
     ``NEO4_MAX_ACTIONS`` actions per game and ``NEO4_TIME_BUDGET`` seconds of
     wall clock per game, counted from the agent's construction, so that every
-    game's agent stops together whatever the number of games.
+    game's agent stops together whatever the number of games. ``NEO4_AGENT=model``
+    plays the model-guided agent alone, without the family solvers (an ablation).
     """
 
     MAX_ACTIONS = int(os.environ.get("NEO4_MAX_ACTIONS", "40000"))
@@ -112,7 +114,7 @@ class MyAgent(Agent):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         seed = random.Random(f"{{self.game_id}}").randrange(1 << 30)
-        self._neo4 = LibraryAgent(seed=seed)
+        self._neo4 = ModelAgent(seed=seed) if os.environ.get("NEO4_AGENT") == "model" else LibraryAgent(seed=seed)
         self._steps = 0
         self._started = time.monotonic()
 

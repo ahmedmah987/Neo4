@@ -7,7 +7,10 @@ dummy submission.parquet otherwise. One cell is added: in the commit run only, t
 two public games offline inside the same framework, so an error shows before a submission is
 spent (the competition allows one a day). CPU only, no internet.
 
-    python scripts/kaggle_notebook.py <owner>/<slug> "<title>"   # writes kaggle/notebook/
+    python scripts/kaggle_notebook.py <owner>/<slug> "<title>" [NAME=VALUE ...]   # writes kaggle/notebook/
+
+NAME=VALUE pairs are set for the agent in both runs, e.g. NEO4_AGENT=model for the
+model-guided agent alone (the commit check then asks only that it plays).
 """
 import json
 import sys
@@ -16,6 +19,7 @@ from textwrap import dedent
 
 ROOT = Path(__file__).resolve().parent.parent
 kernel_id, title = sys.argv[1:3]
+env = dict(a.split("=", 1) for a in sys.argv[3:])
 out = ROOT / "kaggle" / "notebook"
 out.mkdir(parents=True, exist_ok=True)
 agent_body = (ROOT / "kaggle" / "my_agent.py").read_text()
@@ -100,10 +104,10 @@ run_cell = code_cell(dedent(
 
         # Run it. The gateway records every action and emits submission.parquet.
         !cd /kaggle/working/ARC-AGI-3-Agents && \\
-            MPLBACKEND=agg \\
+            MPLBACKEND=agg ENV_VARS\\
             python main.py --agent myagent
     """
-))
+).replace("ENV_VARS", "".join(f"{k}={v} " for k, v in env.items())))
 dummy_submission_cell = code_cell(dedent(
     """\
     import os
@@ -126,6 +130,7 @@ check_cell = code_cell(dedent(
         # Commit run only: the agent plays two public games offline inside the framework the
         # rerun uses, so an error fails the commit here, before a submission is spent on it.
         import shutil, sys, time
+        os.environ.update(ENV_DICT)
         import arc_agi
         COMP = '/kaggle/input/competitions/arc-prize-2026-arc-agi-3'
         fw = '/tmp/check/ARC-AGI-3-Agents'
@@ -149,10 +154,10 @@ check_cell = code_cell(dedent(
             last = agent.frames[-1]
             print(f'{game}: {last.levels_completed} levels in {agent.action_counter} actions, '
                   f'{last.state.name}, {time.time() - t:.0f}s', flush=True)
-            assert last.levels_completed >= 1, game
+            assert last.levels_completed >= 1 or os.environ.get('NEO4_AGENT') == 'model' and agent.action_counter > 0, game
         print('commit check passed')
     """
-).replace("f.write(SLIM_INIT)", "f.write(" + repr(SLIM_INIT) + ")"))
+).replace("f.write(SLIM_INIT)", "f.write(" + repr(SLIM_INIT) + ")").replace("ENV_DICT", repr(env)))
 
 notebook = {
     "metadata": {

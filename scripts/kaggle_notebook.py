@@ -18,6 +18,7 @@ NEO4_ADVISOR=auto:<variation> the agent finds it under /kaggle/input and asks it
 for them, once without the advisor and once with it, in the same process, and prints both.
 """
 import json
+import shlex
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -117,7 +118,7 @@ run_cell = code_cell(dedent(
             MPLBACKEND=agg ENV_VARS\\
             python main.py --agent myagent
     """
-).replace("ENV_VARS", "".join(f"{k}={v} " for k, v in env.items())))
+).replace("ENV_VARS", "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())))
 dummy_submission_cell = code_cell(dedent(
     """\
     import os

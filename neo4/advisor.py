@@ -249,6 +249,13 @@ class ModelAdvisor(Advisor):
             native_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
             dtype = getattr(torch, os.environ.get("NEO4_ADVISOR_DTYPE", "") or
                             ("bfloat16" if native_bf16 else "float16"))
+            # Spread the weights over every GPU, each filled to at most 70%, so that the activations of
+            # a long prompt still fit (device_map="auto" alone filled the first T4 and ran out of memory)
+            max_memory = None
+            if torch.cuda.is_available():
+                max_memory = {i: int(torch.cuda.get_device_properties(i).total_memory * 0.70)
+                              for i in range(torch.cuda.device_count())}
+                max_memory["cpu"] = 64 * 2**30
             errors = []
             # image-text models first; a text-only model is shown the object list without the image
             for cls_name, image in (("AutoModelForImageTextToText", True), ("AutoModelForMultimodalLM", True),
@@ -257,7 +264,8 @@ class ModelAdvisor(Advisor):
                 if cls is None:
                     continue
                 try:
-                    self.model = cls.from_pretrained(path, torch_dtype=dtype, device_map="auto")
+                    self.model = cls.from_pretrained(path, torch_dtype=dtype, device_map="auto",
+                                                     max_memory=max_memory)
                     self.use_image = self.use_image and image
                     self.stats["model_class"] = cls_name
                     break

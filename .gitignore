@@ -17,3 +17,6 @@ results/raw/
 
 # Scratch logs
 *.log
+
+# The generated Kaggle notebook (scripts/kaggle_notebook.py)
+kaggle/notebook/

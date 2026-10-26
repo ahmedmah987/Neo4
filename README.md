@@ -167,6 +167,26 @@ To submit:
    `NEO4_TIME_BUDGET` (seconds per game, wall clock) at the top of the agent file; at the
    measured 100–300 actions per second, 40,000 actions take 2–7 minutes of CPU per game.
 
+Or from this repository, with the official `kaggle` library (`pip install "kaggle>=2.2"`):
+
+1. `python scripts/kaggle_notebook.py <owner>/<slug> "<title>"` writes `kaggle/notebook/`:
+   the starter kit's notebook, on CPU, with one more cell. In the commit run only, it plays
+   `ls20` and `ar25` offline inside the competition's own copy of the framework, so an error
+   fails the commit instead of a submission.
+2. `python scripts/kaggle_submit.py push`, then `status <owner>/<slug>` until the commit run is
+   complete, and `output <owner>/<slug> <dir>` for its log.
+3. `python scripts/kaggle_submit.py submit <owner>/<slug> <version> "<message>"`, and
+   `submissions` for the score.
+
+The competition allows **one submission a day**, and the final deadline is 2 November 2026,
+23:59 UTC. The kit's commit run never runs the agent (it only writes a dummy submission), so
+the check cell is the only test made on Kaggle's own machine before a submission is spent.
+The first submission (26 October 2026, the bundle of commit `b3eb926`) passed it: `ls20` gave
+six levels in 300 actions and `ar25` all eight in 253, under Kaggle's Python 3.12, `arc-agi`
+0.9.8 and `arcengine` 0.9.3. With the same versions installed here (and `numpy` 2.4.4) the
+bundle wins `ls20` and `ar25` too. Over 40,000 actions, one game's process peaked at 226–241 MB
+(`ka59`, `sk48`).
+
 The dependencies the notebook installs offline are `arc-agi` (with `arcengine`) and
 `python-dotenv`; `numpy` and `scipy` are part of the Kaggle image, and the frame code
 falls back to a pure-Python labeller if `scipy` is ever missing.
@@ -205,6 +225,8 @@ neo4/
 results/          summarised result tables (raw per-run JSON lines are git-ignored)
 results/diagnosis/ every level's solution for the games Phase 54 diagnosed, with the humans' counts
 scripts/bundle.py builds the single-file Kaggle agent
+scripts/kaggle_notebook.py builds the submission notebook from it (kaggle/notebook/, git-ignored)
+scripts/kaggle_submit.py pushes the notebook, follows its runs, submits it and lists the scores
 scripts/replay_diagnosis.py replays a diagnosed game's solutions from the reset to the win
 scripts/families.py the public games by mechanic family, with each family's share of the score
 kaggle/           my_agent.py — the generated submission file (do not edit by hand)

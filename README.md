@@ -2742,6 +2742,12 @@ loses two second levels that took over 3,400 actions each and were worth nothing
 the default and the second submission. A single holdout sweep differs from another by about
 ±0.02 from hash order alone, so smaller differences are noise.
 
+**Phase 56 under the same control.** `ft09` with the count goals on and off, three hash seeds
+× five seeds: off, no second level in 15 runs (0.003 on average); on, a second level under
+every hash seed, in 22 actions (hash seed 1, the run Phase 56 reported) or 448 (seeds 2 and
+3), 0.193 on average. The count goals are what gives `ft09` its second levels, but Phase 56's
++0.023 was the lucky tie order: the expected gain from `ft09` is +0.008 on the mean.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

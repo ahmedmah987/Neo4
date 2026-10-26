@@ -1,6 +1,6 @@
 # Search is not the bottleneck: a mechanics library for ARC-AGI-3, and what it fails to transfer
 
-*Draft for the ARC Prize 2026 Paper Track. Code (MIT-0): https://github.com/ahmedmah987/neo4.
+*Code (MIT-0): https://github.com/ahmedmah987/neo4.
 Kaggle submission: ARC Prize 2026 – ARC-AGI-3, notebook `ahmedabdalatef/neo4-arc-agi-3`.*
 
 ## Abstract
@@ -26,7 +26,7 @@ quadratically: a level finished in ten times the human count is worth 1%. And la
 where a learned rule can be reused, weigh the most.
 
 We started from graph-based exploration [1] and asked how far an agent without a language
-model can go. Over 56 measured phases we answer two questions: how well can such an agent
+model can go. Over 57 measured phases we answer two questions: how well can such an agent
 play once it understands a mechanic, and how much of that understanding transfers?
 
 ## 2. Prior work
@@ -63,14 +63,12 @@ perception step, an exact model and a planner. Examples:
 
 A solver claims a game only when its perception reads a consistent scene, which we check on
 every public game for false positives. It plays only while the frames match its predictions,
-then hands back to the explorer. Three design rules mattered most:
+then hands back to the explorer. Two design rules mattered most:
 1. **Plan where things end.** When nothing collides, the search runs over final placements,
    not action sequences: `ar25` is solved in the fewest possible actions, in under three
    seconds a level.
 2. **States hold only what can still matter.** Leaving out tiles sealed in a wall and toggles
    set just before use took one level's search from out of memory to 88 states.
-3. **Every solver is tested on a toy game** written apart from it, with other colours,
-   sizes and layouts.
 
 **Diagnoses.** Before writing a solver we read each hard game's source and played every level,
 by search on a hand-built model or by hand. This bounds what perfect understanding is worth.
@@ -100,7 +98,7 @@ The holdout score matches the explorer's and predicts the hidden score. The solv
 help nor hurt a game they were not built for. They claim such games briefly and give way,
 and do not transfer between public games at all. Within a mechanic they do transfer: each of
 the eighteen plays a toy game written apart from it, with other colours, sizes and layouts.
-What they encode is a mechanic, and the public games share almost none. [Ablation on the hidden set: explorer alone, TBD.]
+What they encode is a mechanic, and the public games share almost none.
 
 ## 5. Analysis: why the gap
 
@@ -127,9 +125,12 @@ The library contains the skills; what is missing is knowing which applies. As a 
 goal hypotheses now narrow from level to level. Each completed level proposes candidates:
 gaps between kinds, and counts of a kind or a colour that only ever moved towards where they
 ended. Hypotheses an earlier level also supported rank first. Together they direct click
-ordering and frontier choice on the next level. On the holdout this raises the score from
-0.448 to 0.471. On the toggle game `ft09`, a colour count makes one second level take 22
-actions, against the humans' 12. On `r11l`, a wrong count costs two second levels. The
+ordering and frontier choice on the next level. On the toggle game `ft09`, a colour count
+gives a second level under every hash seed we tried and none without it, in 22 to 448
+actions (humans 12). One holdout sweep
+rose from 0.448 to 0.471, but sweeps vary by about ±0.02 with Python's hash order; under
+fixed hash seeds the expected gain is +0.01. Skipping actions the explorer
+can see are wasted, an undo key and keys that never change anything, adds +0.003. The
 direction is right, but one short solution path leaves too many hypotheses standing. Beyond
 that, we see two steps.
 * Split each solver into perception and skill, so that a skill (navigate, push, select and

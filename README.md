@@ -126,7 +126,11 @@ python scripts/bundle.py                      # writes kaggle/my_agent.py (also 
 at import time, so the submitted code is byte-for-byte what the tests cover; a `MyAgent`
 class runs the `library` agent (the family solvers in front of the model-guided agent),
 adapts the framework's `FrameData`/`GameAction` to the engine types and never stops on
-`GAME_OVER` (the agent resets the level and carries on).
+`GAME_OVER` (the agent resets the level and carries on). An exception does not end a game
+either: a solver that raises is switched off for the rest of the game, and if the agent itself
+raises, a fresh model-guided agent takes over from the current frame (a random available action
+if that fails too). No public run has raised; the hidden games are frames the solvers were not
+written for.
 `tests/test_bundle.py` runs the bundle through a stand-in for the framework's `Agent`
 loop against the local engine, and the dry run below ran it through the real one.
 
@@ -142,7 +146,9 @@ bundled agent stops a game at `NEO4_MAX_ACTIONS` (40,000) actions or at
 `NEO4_TIME_BUDGET` (three hours) of wall clock counted from its construction, so that
 all games stop together whatever their number. More actions never lower the score —
 a level's score counts only the actions until it was completed — so the cap is a
-safety margin, not a strategy.
+safety margin, not a strategy. Nor can a game be played twice: the package's scorecard keeps
+a game's best play, but in competition mode the gateway refuses a second play of a game and
+ignores a `RESET` that would start one (`arc_agi/api.py`), so every game is played once.
 
 **Dry run through the official framework.** The starter kit's `scripts/play_local.py`
 drives `agent/my_agent.py` with the framework's own `Agent.main()` loop against the

@@ -74,6 +74,7 @@ class ModelAgent(GraphAgent):
     imagine_clicks = False  # plan clicks in imagination towards a confirmed goal (Phase 60; a variant)
     experiment = True  # with no confirmed goal, test one hypothesis at a time (Phase 61)
     experiment_after = 60  # actions into a level before the first test (a cheap level is left alone)
+    experiment_after_avatar = 60  # the same where the keys move an avatar (Phase 63 measures 10)
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
@@ -191,6 +192,11 @@ class ModelAgent(GraphAgent):
         # Copies read from clicks (Phase 62): the level's evidence for each rule of correspondence.
         self.copy_evidence: hy.CopyEvidence | None = None
         self.copy_hyps = 0
+        # Where a level's actions went (Phase 63): per completed level, [actions, deaths, actions
+        # in the life that completed it].
+        self.level_deaths = 0
+        self.life_start = 0
+        self.level_log: list[list[int]] = []
         self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
@@ -253,6 +259,8 @@ class ModelAgent(GraphAgent):
         self.stalled = Counter()
         self.copy_evidence = None
         self.copy_hyps = 0
+        self.level_deaths = 0
+        self.life_start = 0
         self.node_values = {}
         self.node_rel = {}
 
@@ -485,6 +493,8 @@ class ModelAgent(GraphAgent):
             if self.track_hypotheses:
                 self._track_hypotheses(action, data, outcome, after, grid)
             if outcome == LEVEL_UP:
+                self.level_log.append([self.level_actions, self.level_deaths, self.level_actions - self.life_start])
+                self.stats["level_log"] = self.level_log
                 self._learn_relations(self.level_start_objs, self.last_objs)
             elif outcome == OK and self.relations and data is not None and after is not None:
                 # Credit the clicked kind with the change in the goal gap it produced.
@@ -519,6 +529,10 @@ class ModelAgent(GraphAgent):
 
         action, data = super().act(obs)
         self.level_actions += 1
+        if obs.state == GameState.GAME_OVER:
+            self.level_deaths += 1
+        if action is GameAction.RESET:
+            self.life_start = self.level_actions
 
         if action is GameAction.RESET or grid is None:
             if obs.state != GameState.GAME_OVER:
@@ -824,7 +838,8 @@ class ModelAgent(GraphAgent):
                 self.trial_quiet += 1
                 if self.trial_quiet >= self.experiment_patience << self.stalled[self.trial.key]:
                     self._end_trial("trials_stuck")
-        if self.trial is None and self.hyps and self.level_actions >= self.experiment_after \
+        after = self.experiment_after_avatar if self.dyn.avatar() is not None else self.experiment_after
+        if self.trial is None and self.hyps and self.level_actions >= after \
                 and not self.relations and not self._confirmed_present():
             order = {"copy": -1, "reach": 0, "match": 1, "clear": 2, "unify": 3}
             pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)

@@ -2986,6 +2986,18 @@ an avatar, the 60th elsewhere. Holdout 14.20 → **15.50** (`sp80` 2.71 → 3.94
 16 and 24 actions on two seeds against the humans' 39; `bp35` 0.09 → 0.21, two more first levels;
 `lf52` 0.16 → 0.21; `sc25` 0.07 → 0.03); public library 80.02 → 80.02, no game loses.
 
+### Phase 64 — walks planned to a reach goal, and the tests' settings
+
+**Walks planned to what a reach hypothesis names** (`plan_trials`, a variant, off). With an avatar,
+the reach hypothesis steered by (a test of Phase 61, or a kind confirmed by Phase 59) can be walked
+to with the model of moves and hazards instead of searched for at the frontier. Holdout 15.50 →
+15.60: `dc22` 0.07 → 0.12 and `tu93` 4.14 → 4.22, `ls20` 0.05 → 0.03; on `tu93` it made one first
+level cheaper (152 → 69) and three dearer (41 → 546 at worst), the planner knowing walls and
+patrols but not watchers that catch by sight. Within noise; off.
+
+**Patience.** A test given up after 20 actions without progress instead of 40: 15.50 → 15.04
+(`tu93` 4.14 → 3.75, `ft09` 0.07 → 0.01); 40 stays.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

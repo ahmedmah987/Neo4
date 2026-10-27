@@ -14,8 +14,9 @@ scores 0.33. We measure the gap offline with a holdout protocol, in which each p
 played without the solvers built for it. That gives 0.45, which predicts the hidden score.
 Sixteen public games were diagnosed by search on hand-built models of their rules, and every
 level was won in no more actions than humans took. Search, then, is not the bottleneck:
-acquiring the model is. Goals guessed from the screen and confirmed by play raise the
-holdout by 17%, where a language model's guesses lowered it.
+acquiring the model is: once a level is learned, the agent replays it at 1.3 times the human
+count, but learning costs 92% of its actions. Goals guessed from the screen and tested by play
+raise the holdout by 37%, where a language model's guesses lowered it.
 
 ## 1. Introduction
 
@@ -26,7 +27,7 @@ quadratically: a level finished in ten times the human count is worth 1%. And la
 where a learned rule can be reused, weigh the most.
 
 We started from graph-based exploration [1] and asked how far an agent without a language
-model can go. Over 59 measured phases we answer two questions: how well can such an agent
+model can go. Over 64 measured phases we answer two questions: how well can such an agent
 play once it understands a mechanic, and how much of that understanding transfers?
 
 ## 2. Prior work
@@ -60,17 +61,13 @@ perception step, an exact model and a planner. Examples:
 * *gravity*, *pour*, *spells*, *panel*, *replay* (ghosts that re-walk a run), *program*, *translate*,
   *bit-program*, *clue board*, *connector*, *carry*, *meet*, *painter*, *pointer*, *marker*.
 
-A solver claims a game only when its perception reads a consistent scene, which we check on
-every public game for false positives. It plays only while the frames match its predictions,
-then hands back to the explorer. Two design rules mattered most:
-1. **Plan where things end.** When nothing collides, the search runs over final placements,
-   not action sequences: `ar25` is solved in the fewest possible actions, in under three
-   seconds a level.
-2. **States hold only what can still matter.** Leaving out tiles sealed in a wall and toggles
-   set just before use took one level's search from out of memory to 88 states.
+A solver claims a game only when its perception reads a consistent scene (checked on every
+public game for false positives) and plays only while the frames match its predictions. When
+nothing collides, it searches over final placements rather than action sequences: `ar25` is
+solved in the fewest possible actions, in under three seconds a level.
 
-**Diagnoses.** Before writing a solver we read each hard game's source and played every level,
-by search on a hand-built model or by hand. This bounds what perfect understanding is worth.
+**Diagnoses.** Before writing a solver we played every level of each hard game by search on a
+hand-built model of its rules, bounding what perfect understanding is worth.
 
 **Holdout evaluation.** To estimate performance on unseen games offline, each public game is
 played with the solvers built or tuned on it removed; everything else stays.
@@ -88,16 +85,14 @@ Official-style score, 25 public games, 4,000 actions, 5 seeds:
 | **hidden games (Kaggle public leaderboard)** | — | **0.33** |
 | hidden games, with goal hypotheses (§6) | — | **0.36** |
 
-Sixteen of the 25 games are played at or near the cap. Examples: `ar25`, all eight levels in
-253 actions (humans 748); `bp35`, all nine in 448 (651). Sixteen games were diagnosed while the library could not yet play them. Every level of
-each was won in no more than the humans' actions; the last eight took 2,398 actions against
-6,608.
+Sixteen of the 25 games are played at or near the cap (`ar25`, eight levels in 253 actions;
+humans 748). Every level of the sixteen diagnosed games was won in no more than the humans'
+actions.
 
-The holdout score matches the explorer's and predicts the hidden score. The solvers neither
-help nor hurt a game they were not built for. They do not transfer between
-public games. Within a mechanic they do transfer: each of
-the eighteen plays a toy game written apart from it, with other colours, sizes and layouts.
-What they encode is a mechanic, and the public games share almost none.
+The holdout score matches the explorer's and predicts the hidden score: the solvers neither
+help nor hurt a game they were not built for. Within a mechanic they transfer (each plays a toy
+game written apart from it, with other colours, sizes and layouts), but the public games share
+almost no mechanics.
 
 ## 5. Analysis: why the gap
 
@@ -106,27 +101,24 @@ Three findings explain the numbers.
 1. **Understanding is worth everything, and search is cheap.** For every diagnosed game,
    search on the right model finds solutions within human action counts; our solvers' plans
    take seconds. Where the explorer lacks the model, its levels cost 10–50 times the human
-   count and score nothing.
-2. **The explorer's points come from first levels with few relevant actions.** It finishes
-   some first levels near human cost (`vc33`, `r11l`, `lp85`, `sp80`). Second levels often
-   cost hundreds to thousands of actions: `r11l` 645–1,934 against the humans' 33, and `sp80`
-   429–2,402 against 58. What the agent learned about the goal does not survive the new
-   layout.
+   count and score nothing. Logging where actions go makes this exact: over 111 holdout levels,
+   the life that completed a level took 1.3 times the humans' actions; all lives, 16.6 times.
+2. **The explorer's points come from cheap first levels** (`vc33`, `r11l`, `lp85`, `sp80`).
+   Second levels often cost hundreds to thousands of actions (`r11l` 645–1,934 against the
+   humans' 33): what it learned about the goal does not survive the new layout.
 3. **Goals, not mechanics, are what the explorer fails to learn.** Its rules capture movement
    and blocking well. Its goal is guessed from one level-up as a gap between two kinds, and a
    level-1 solution path is only 3–8 actions long, so many measures change together along it.
 
 ## 6. Towards closing it
 
-The library contains the skills; what is missing is what a level asks. We tested two ways of
-supplying it, on the holdout under fixed hash seeds (sweeps otherwise vary by ±0.02 with Python's
-hash order).
+The library contains the skills; what is missing is what a level asks. We tested ways of
+supplying it on the holdout, under fixed hash seeds.
 
 **A language model as advisor.** Shown the frame, the objects and what the agent has learned, a
-local model names objects to reach or click, and its answer only orders exploration. On Kaggle's
-T4s, 15 public games without their own solvers, it lowered the score with every model that ran:
-Gemma 3 4B by 6%, Qwen2.5 3B by 42%, Gemma 3 12B by 20%, at 58 s an answer. Its goals were
-generic guesses, and following them cost the cheap levels the score comes from.
+local model names objects to reach or click; its answer only orders exploration. On 15 public
+games without their own solvers it lowered the score with every model: Gemma 3 4B by 6%,
+Qwen2.5 3B by 42%, Gemma 3 12B by 20%. Its goals were generic guesses that cost the cheap levels.
 
 **Guesses read from the screen, tested by acting.** The agent proposes goals from structure alone:
 reach a kind seen once, clear a repeated kind, make two equal panels match, give a shape one
@@ -136,8 +128,13 @@ went from start to goal (the mirror game's panels, 63 cells apart to 0). Steerin
 holdout from 0.452 to 0.529 and, under a second hash seed, 0.474 to 0.551, with the public score
 unchanged; on the hidden games, 0.33 to 0.36.
 
-What remains is the step a person takes first: testing a guess before any level has ended, which
-so far costs the cheap levels as much as it finds on hard ones.
+**Testing a guess before any level has ended.** With no goal known, the agent tests its guesses
+one at a time, from a level's 10th action where an avatar moves and its 60th elsewhere (earlier,
+it spoils cheap click levels). A guess met while the level goes on is dropped; one that stalls is
+retried later with more patience. The holdout rises from 0.529 to 0.620, under both hash seeds,
+with the public score unchanged. Two ways of reading a click's purpose from its result added
+nothing: a model of what clicks do, right in 74–100% of predictions, and pictures on the screen
+that the board might copy, which explain the changes of only two games.
 
 ## 7. Conclusion
 

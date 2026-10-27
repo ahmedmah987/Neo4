@@ -83,7 +83,7 @@ The project has two strands that share one codebase:
 | 56 | **The hidden games, a holdout, and goals that narrow**: the first Kaggle submission; a holdout evaluation that plays each public game without the solvers built or tuned on it; goal hypotheses that narrow from level to level (counts of a kind or a colour that only ever moved towards where they ended, beside the gap relations, those an earlier level supported first) | done — hidden games **0.33** (rank 2,927 of 4,853); holdout 0.45 against the explorer's 0.44, so the solvers neither help nor hurt a game they were not built for; goal hypotheses: holdout 0.448 → **0.471** (`ft09` a second level in 22 actions, humans 12), public score unchanged at 80.01 (652 levels) |
 | 57 | **Waste the explorer can see, and a game that must not stop**: the undo key (ACTION7) recognised by the frame it gives back and no longer explored; a key that never changed anything in eight or more uses predicted a no-op; a solver that raises switched off, and the agent replaced if it raises itself | done — holdout 0.471 → 0.452 in one sweep, all of it `ft09`, whose second level comes and goes with Python's hash seed; on the four games that differed, two hash seeds × five seeds each, on and off: `ft09` identical, `bp35` 1 → 3 first levels, `m0r0` and `lf52` first levels faster, sum of the four 0.40 → 0.48; the second submission |
 | 58 | **A vision-language model as an advisor on goals**: at a level's start and when it drags on, an open-weight model is shown the frame (an image, or one colour code per cell for a text model), the objects and what the agent has learned, and names the player and the objects to reach or click; its answer only orders exploration | done — measured on Kaggle's T4s, 15 public games without their own solvers, 1,000 actions, each played without and with the advisor in one process: Gemma 3 4B 6.68 → 6.26, Qwen2.5 3B 6.68 → 3.87, Gemma 3 12B 6.68 → 5.36 (sum of official-style scores); the models' guesses are mostly generic and cost the cheap levels the score comes from; not submitted |
-| 59 | **Goal hypotheses read from the screen, and a memory of causes**: guesses of a level's goal by structure alone (reach a kind seen once, clear a kind seen several times, make two equal panels match, give a shape one colour), each with a measure; what each action class did to each measure; hypotheses that took a level to its end confirmed by type, and in later levels those of a confirmed type steer the best-first frontier and the order of actions | in progress — diagnosis: 13 of 23 completed levels had a hypothesis that went from its start to its goal; holdout under hash seed 0: 0.452 → **0.529** (`tu93` 1.76 → 3.36) |
+| 59 | **Goal hypotheses read from the screen, and a memory of causes**: guesses of a level's goal by structure alone (reach a kind seen once, clear a kind seen several times, make two equal panels match, give a shape one colour), each with a measure; what each action class did to each measure; hypotheses that took a level to its end confirmed by type, and in later levels those of a confirmed type steer the best-first frontier and the order of actions | done — diagnosis: 13 of 23 completed levels had a hypothesis that went from its start to its goal; holdout 0.452 → **0.529** under hash seed 0 and 0.474 → **0.551** under hash seed 1 (`tu93` 1.77 → 3.36, `sp80` 2.49 → 2.83); public score unchanged at 80.01; the second submission |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2826,19 +2826,27 @@ hypothesis that went from its start to its goal: `ar25`'s two mirrored panels (6
 104 → 0 cells apart), `lp85`'s and `r11l`'s matches, `tu93`'s and `dc22`'s exits. The others
 (`vc33`, `ft09`, `cd82`, `s5i5`, `lf52`) have goals of other kinds.
 
-**Results (holdout, 4,000 steps, 5 seeds, hash seed 0 for all three):**
+**Results (holdout, 4,000 steps, 5 seeds; each column under one fixed hash seed):**
 
-| | official-style score (holdout) |
-|---|---:|
-| hypotheses recorded, not steering | 0.452 |
-| **steering by confirmed hypotheses (default)** | **0.529** |
-| also steering before any level ends, by hypotheses some action moved closer | 0.501 |
+| | hash seed 0 | hash seed 1 |
+|---|---:|---:|
+| hypotheses recorded, not steering | 0.452 | 0.474 |
+| **steering by confirmed hypotheses (default)** | **0.529** | **0.551** |
+| also steering before any level ends, by hypotheses some action moved closer | 0.501 | — |
+
+The gain holds under both hash seeds, game for game: the same games gain and the same lose. The
+library's own score on the public games is unchanged at 80.01 (650 levels).
 
 `tu93`, a maze whose levels each end at the same kind of exit, goes from 1.76 to 3.36: its second and
 third levels are found in fewer actions. `sp80` rises from 2.49 to 2.83. `ar25` and `r11l` lose
 second levels that took hundreds of actions and scored almost nothing. Steering before the first
 level ends finds first levels in `cn04`, `ka59` and `tn36` for the first time, but loses more in
 `sp80` and `bp35`, so it stays a variant.
+
+The first push of the bundle failed Kaggle's commit check: the new module was missing from the
+bundle's list (`scripts/bundle.py`), so the agent could not be imported. Had it been submitted it would
+have scored nothing; the check is why a submission is never sent before it passes. Fixed, it passed
+(`ls20` six levels, `ar25` won) and was submitted on 27 October (Phase 57 and 59, no language model).
 
 ### Where the library stands
 

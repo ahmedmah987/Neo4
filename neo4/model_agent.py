@@ -64,6 +64,7 @@ class ModelAgent(GraphAgent):
     track_hypotheses = True  # goal hypotheses and the memory of what moves them (Phase 59)
     steer_confirmed = True  # steer by hypotheses of the kinds that ended earlier levels (Phase 59)
     steer_first = False  # before any level ends, steer by hypotheses some action moved closer
+    steer_first_after = 300  # ...and only once the level has taken this many actions (when stuck)
 
     def __init__(
         self,
@@ -630,7 +631,7 @@ class ModelAgent(GraphAgent):
         if self.steer_confirmed and self.confirmed:
             types = set(self.confirmed)
             out = [h for h in self.hyps if self._hyp_type(h) in types]
-        if not out and self.steer_first and not self.confirmed:
+        if not out and self.steer_first and not self.confirmed and self.level_actions >= self.steer_first_after:
             out = [h for h in self.hyps if self.causes.helped(h.key)
                    and (self.hyp_values.get(h.key) or 0) > h.goal]
         return out

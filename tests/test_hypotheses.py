@@ -164,3 +164,27 @@ def test_a_copy_rule_is_read_from_clicks_of_two_colours():
     done = after.copy()
     done[20:26, 20:26] = np.kron(ref, np.ones((2, 2), dtype=np.int8))
     assert hy.copy_measure(params, done) == 0
+
+
+def test_goal_priors_order_the_tests_by_what_goals_were_elsewhere():
+    from neo4 import shared
+
+    shared.reset()
+    priors = shared.goal_priors()
+    goal = hy.Hypothesis("reach", ("x",), features=(("reach", "avatar"), ("reach", "rank", 0)))
+    other = hy.Hypothesis("clear", ("y",), features=(("clear", "avatar"), ("clear", "rank", 0)))
+    assert priors.score(goal.features) is None  # too few levels yet
+    for _ in range(3):  # three levels elsewhere, each ended by a reach guess
+        priors.record([goal, other], {goal.key})
+    assert priors.score(goal.features) > 0 > priors.score(other.features)
+
+    ModelAgent.share_priors = True
+    try:
+        agent, a, b = experiment_agent()
+    finally:
+        ModelAgent.share_priors = False
+    a.features, b.features = other.features, goal.features  # a looks like what failed elsewhere
+    agent.hyp_values = {a.key: 5, b.key: 4}  # a is the closer to its goal
+    agent._experiment(agent.hyp_values)
+    assert agent.trial is b  # but b is tested first: guesses like it were goals elsewhere
+    shared.reset()

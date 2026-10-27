@@ -36,6 +36,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 from . import frame as fp
 from .advisor import Advisor, build_prompt, describe_objects, listed_objects
 from . import hypotheses as hy
+from . import shared
 from .effects import EffectModel, imagine
 from .dynamics import GAME_OVER, LEVEL_UP, OK, Dynamics
 from .graph_agent import GraphAgent, LevelGraph, Node
@@ -79,6 +80,7 @@ class ModelAgent(GraphAgent):
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     plan_trials = False  # walk the avatar by plan to what the reach hypothesis steered by names (Phase 64)
+    share_priors = False  # order the tests by what goals were like in the process's other games (Phase 65)
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
 
     def __init__(
@@ -200,6 +202,8 @@ class ModelAgent(GraphAgent):
         self.life_start = 0
         self.level_log: list[list[int]] = []
         self.trial_plans = 0
+        # Goals in the process's other games (Phase 65): None unless share_priors.
+        self.priors: shared.GoalPriors | None = shared.goal_priors() if self.share_priors else None
         self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
@@ -670,6 +674,9 @@ class ModelAgent(GraphAgent):
                 self.hyp_reports.append([
                     (h.kind, h.params, h.first, h.best, self.hyp_values.get(h.key), h.goal, self.causes.live(h.key))
                     for h in self.hyps])
+                if self.priors is not None:
+                    self.priors.record(self.hyps, {h.key for h in self.hyps
+                                                   if self._explains(h, self.hyp_values.get(h.key))})
                 for h in self.hyps:
                     last = self.hyp_values.get(h.key)
                     if self._explains(h, last):
@@ -855,7 +862,10 @@ class ModelAgent(GraphAgent):
                 def rank(h: hy.Hypothesis) -> tuple:
                     v = values[h.key]
                     share = (v - h.goal) / max(1, (h.first if h.first is not None else v) - h.goal)
-                    return (self.stalled[h.key], share, order.get(h.kind, 9), repr(h.params))
+                    # what guesses like this one were in other games comes first (Phase 65)
+                    prior = self.priors.score(h.features) if self.priors is not None else None
+                    return (self.stalled[h.key], -prior if prior is not None else 0.0, share,
+                            order.get(h.kind, 9), repr(h.params))
                 self.trial = min(pool, key=rank)
                 self.trial_log.append([self.level_no, self.trial.kind, repr(self.trial.params)[:50],
                                        self.level_actions, None, None])

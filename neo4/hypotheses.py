@@ -50,6 +50,7 @@ class Hypothesis:
     goal: int = 0
     first: int | None = None  # the measure when the level began
     best: int | None = None  # the lowest value seen in this level
+    features: tuple = ()  # what it is like, in terms any game shares (Phase 65)
 
     @property
     def key(self) -> tuple:
@@ -90,28 +91,52 @@ def panels(grid: np.ndarray) -> list[tuple[int, int, int, int]]:
     return out[:MAX_PANELS]
 
 
+def _bucket(n: int, edges: tuple[int, ...]) -> int:
+    """The index of the first edge n does not exceed (len(edges) past the last)."""
+    return next((i for i, e in enumerate(edges) if n <= e), len(edges))
+
+
+def _size_vs(o: Obj, me: Obj) -> str:
+    return "same" if o.area == me.area else ("smaller" if o.area < me.area else "larger")
+
+
 def propose(objs: list[Obj], grid: np.ndarray, avatar_sig: tuple | None) -> list[Hypothesis]:
-    """Guesses from a level's first frame."""
+    """Guesses from a level's first frame, each with features any game shares (Phase 65): its
+    kind, whether the keys move an avatar, and how its object looks beside the others and the
+    avatar. What the goal turned out to be in other games is kept in these terms."""
     free = [o for o in objs if not o.scenery]
     counts = Counter(o.sig for o in free)
+    me = next((o for o in free if o.sig == avatar_sig), None) if avatar_sig is not None else None
+    style = "avatar" if me is not None else "click"
     out: list[Hypothesis] = []
     singles = sorted((o for o in free if counts[o.sig] == 1 and o.sig != avatar_sig),
                      key=lambda o: (o.area, o.y1, o.x1))
-    for o in singles[:MAX_REACH]:
-        out.append(Hypothesis("reach", (o.sig,)))
+    for rank, o in enumerate(singles[:MAX_REACH]):
+        f = [("reach", style), ("reach", "rank", min(rank, 3)), ("reach", "hollow", o.area < o.w * o.h)]
+        if me is not None:
+            f += [("reach", "colour of avatar", o.color == me.color), ("reach", "size", _size_vs(o, me))]
+        out.append(Hypothesis("reach", (o.sig,), features=tuple(f)))
     many = sorted((s for s, n in counts.items() if 2 <= n <= 40 and s != avatar_sig),
                   key=lambda s: (-counts[s], repr(s)))
-    for s in many[:MAX_CLEAR_KINDS]:
-        out.append(Hypothesis("clear", (s,)))
+    for rank, s in enumerate(many[:MAX_CLEAR_KINDS]):
+        one = next(o for o in free if o.sig == s)
+        f = [("clear", style), ("clear", "rank", min(rank, 3)), ("clear", "count", _bucket(counts[s], (2, 3, 8))),
+             ("clear", "area", _bucket(one.area, (1, 9)))]
+        if me is not None:
+            f += [("clear", "colour of avatar", one.color == me.color), ("clear", "size", _size_vs(one, me))]
+        out.append(Hypothesis("clear", (s,), features=tuple(f)))
     shapes = Counter(o.sig[1:] for o in free)
     for shape, n in sorted(shapes.items(), key=lambda kv: (-kv[1], repr(kv[0]))):
         if n >= 3 and len({o.color for o in free if o.sig[1:] == shape}) >= 2:
-            out.append(Hypothesis("unify", (shape,), goal=1))
+            f = (("unify", style), ("unify", "count", _bucket(n, (3, 8))))
+            out.append(Hypothesis("unify", (shape,), goal=1, features=f))
     rects = panels(grid)
     for i, a in enumerate(rects):
         for b in rects[i + 1:]:
             if a[2:] == b[2:] and not np.array_equal(_cut(grid, a), _cut(grid, b)):
-                out.append(Hypothesis("match", (a, b)))
+                same = set(np.unique(_cut(grid, a))) == set(np.unique(_cut(grid, b)))
+                f = (("match", style), ("match", "area", _bucket(a[2] * a[3], (16, 100))), ("match", "same colours", same))
+                out.append(Hypothesis("match", (a, b), features=f))
     return out
 
 

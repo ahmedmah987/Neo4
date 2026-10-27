@@ -84,6 +84,8 @@ The project has two strands that share one codebase:
 | 57 | **Waste the explorer can see, and a game that must not stop**: the undo key (ACTION7) recognised by the frame it gives back and no longer explored; a key that never changed anything in eight or more uses predicted a no-op; a solver that raises switched off, and the agent replaced if it raises itself | done — holdout 0.471 → 0.452 in one sweep, all of it `ft09`, whose second level comes and goes with Python's hash seed; on the four games that differed, two hash seeds × five seeds each, on and off: `ft09` identical, `bp35` 1 → 3 first levels, `m0r0` and `lf52` first levels faster, sum of the four 0.40 → 0.48; the second submission |
 | 58 | **A vision-language model as an advisor on goals**: at a level's start and when it drags on, an open-weight model is shown the frame (an image, or one colour code per cell for a text model), the objects and what the agent has learned, and names the player and the objects to reach or click; its answer only orders exploration | done — measured on Kaggle's T4s, 15 public games without their own solvers, 1,000 actions, each played without and with the advisor in one process: Gemma 3 4B 6.68 → 6.26, Qwen2.5 3B 6.68 → 3.87, Gemma 3 12B 6.68 → 5.36 (sum of official-style scores); the models' guesses are mostly generic and cost the cheap levels the score comes from; not submitted |
 | 59 | **Goal hypotheses read from the screen, and a memory of causes**: guesses of a level's goal by structure alone (reach a kind seen once, clear a kind seen several times, make two equal panels match, give a shape one colour), each with a measure; what each action class did to each measure; hypotheses that took a level to its end confirmed by type, and in later levels those of a confirmed type steer the best-first frontier and the order of actions | done — diagnosis: 13 of 23 completed levels had a hypothesis that went from its start to its goal; holdout 0.452 → **0.529** under hash seed 0 and 0.474 → **0.551** under hash seed 1 (`tu93` 1.77 → 3.36, `sp80` 2.49 → 2.83); public score unchanged at 80.01; the second submission: hidden games **0.36** (from 0.33; rank 2,925 of 4,897) |
+| 60 | **What a click does, and clicks tried in imagination**: every click recorded as the cells it changed, relative to the clicked object and in screen positions, grouped by shape; an effect known when its clicks agree, each prediction checked against the next frame; a best-first search over predicted frames towards a confirmed goal | done — effects predicted right in 74–100% of 27–1,877 predictions in five games; imagination finds plans only in `bp35`, whose clicks depend on the state: holdout unchanged (13.22); a variant, off |
+| 61 | **Testing a guess before any level has ended**: with no goal known, the hypotheses some action moved closer tested one at a time from a level's 60th action, each dropped when met without a level-up or after 40 actions without progress, and taken again later with twice the patience | done — holdout 13.22 → **14.20** summed over the 25 games (0.529 → 0.568), levels 107 → 111; 33 of 72 first levels cheaper, 16 dearer; `ft09` and `sc25` a first level they did not complete before |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2895,6 +2897,41 @@ over the 25 games either way; in all 125 runs it found plans only in `bp35` (12,
 11 missed). It stays a variant, off; the effects are still learned and reported. The games
 where effects are learned best (`tn36`, `ft09`) are the ones whose goal no hypothesis of Phase 59
 expresses: the agent now knows what its clicks do there, and not what they are for.
+
+### Phase 61 — testing a guess before any level has ended
+
+Phase 59 steers only by a kind of goal that has already ended a level, so a game's first level is
+still left to exploration, which is where most of its cost goes. A person tests a guess first. With
+no goal known — no confirmed kind on the screen and no goal relation learned at a level-up — the
+agent now tests the hypotheses of Phase 59 one at a time: it steers by one alone (the frontier
+ordered by that measure, actions by what moved it before) and drops it when its measure reaches
+its goal and the level does not end (it is not the goal, or not all of it), or when it has not come
+closer for 40 actions. A test given up for want of progress goes back to the queue behind the fresh
+ones with twice the patience (a maze's detour looks like no progress: in `tu93` the true goal was
+given up after 40 actions and the level took 911; taken again, 151). Tests begin at a level's 60th
+action, so a level the explorer ends cheaply is left alone; from the 30th they cost `r11l` and
+`lp85` the first levels the score comes from. Each node's readings are kept, so the frontier is
+measured again whenever the hypothesis under test changes.
+
+Holdout, 5 seeds, 4,000 steps, hash seed 0 (sum of the official-style scores of the 25 games):
+
+| | sum | levels |
+|---|---:|---:|
+| Phase 59 (steering by confirmed kinds) | 13.22 | 107 |
+| + tests from the 30th action | 13.32 | |
+| + tests from the 60th action | 14.09 | |
+| + tests taken again with more patience | 14.16 | |
+| + no tests while a learned goal relation is in hand (**default**) | **14.20** | 111 |
+| the same, Phase 59's steering kept out of levels with a learned relation | 11.54 | |
+
+Of the 72 first levels both agents completed, 33 are cheaper with tests and 16 dearer; `ft09` and
+`sc25` complete a first level they did not before; `tu93` 3.36 → 4.17, `lf52` 0.08 → 0.16, `ft09`
+0.00 → 0.07, `ls20` 0.02 → 0.06, `sp80` 2.83 → 2.71. In the 125 runs 1,094 tests were made: 183
+met without ending a level, 871 given up for want of progress, and 40 under test when a level
+or the run ended. The energy
+toy shows the effect at its plainest: its first level falls in 118 actions instead of 3,008 (the
+goal, a tile seen once, is the first guess tested), though its second then costs more, the refills
+not yet learned.
 
 ### Where the library stands
 

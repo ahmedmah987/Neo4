@@ -33,6 +33,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 
 from . import frame as fp
 from .advisor import Advisor, build_prompt, describe_objects, listed_objects
+from . import hypotheses as hy
 from .dynamics import GAME_OVER, LEVEL_UP, OK, Dynamics
 from .graph_agent import GraphAgent, LevelGraph, Node
 from .objects import Obj, at, erase, extract, find
@@ -60,6 +61,9 @@ class ModelAgent(GraphAgent):
     near_clicks = False
     goal_counts = True  # count goals beside the gap relations (Phase 56)
     skip_undo = True  # the undo key, once seen to restore the frame before the last action, is not explored
+    track_hypotheses = True  # goal hypotheses and the memory of what moves them (Phase 59)
+    steer_confirmed = True  # steer by hypotheses of the kinds that ended earlier levels (Phase 59)
+    steer_first = False  # before any level ends, steer by hypotheses some action moved closer
 
     def __init__(
         self,
@@ -132,6 +136,8 @@ class ModelAgent(GraphAgent):
         # The goal advisor (Phase 58): None or an Advisor; what it advised in this level.
         self.advisor: Advisor | None = None
         self.available: list[int] = []
+        self.hyps = None
+        self.hyp_values = None
         self.level_actions = 0
         self.advice_queries = 0
         self.advice_next = 0  # the next scheduled question (ADVICE_AT)
@@ -142,6 +148,13 @@ class ModelAgent(GraphAgent):
         self.advice_plans = 0
         self.advice_tried: list[str] = []
         self.advice_log: list[str] = []
+        # Goal hypotheses read from the screen and what each action class did to their measures
+        # (Phase 59); hyp_reports keeps each completed level's hypotheses for diagnosis.
+        self.hyps: list[hy.Hypothesis] | None = None
+        self.hyp_values: dict[tuple, int | None] | None = None
+        self.causes = hy.CauseMemory()
+        self.hyp_reports: list[list[tuple]] = []
+        self.confirmed: list[tuple] = []  # kinds of hypotheses that ended a level, most recent first
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -343,11 +356,12 @@ class ModelAgent(GraphAgent):
 
     def _heuristic(self, objs: list[Obj]) -> float | None:
         """Over the goal hypotheses, how far a frame is from each, as a share of how far
-        the level started from it."""
+        the level started from it; plus the screen hypotheses steered by (Phase 59)."""
+        extra = self._hyp_heuristic() if self.track_hypotheses else None
         if not self.relations:
-            return None
-        total = 0.0
-        found = False
+            return extra
+        total = extra or 0.0
+        found = extra is not None
         for h in self.relations:
             v = self._measure(h, objs)
             if v is None:
@@ -403,6 +417,8 @@ class ModelAgent(GraphAgent):
                 action, data, self.last_objs, self.last_grid, after, outcome,
                 after_grid=grid, mask=self.mask,
             )
+            if self.track_hypotheses:
+                self._track_hypotheses(action, data, outcome, after, grid)
             if outcome == LEVEL_UP:
                 self._learn_relations(self.level_start_objs, self.last_objs)
             elif outcome == OK and self.relations and data is not None and after is not None:
@@ -463,8 +479,10 @@ class ModelAgent(GraphAgent):
         me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
         if node.summary is None:
             node.summary = self._summary(objs)
-        if node.h is None and self.relations:
+        if node.h is None and (self.relations or self.confirmed or self.steer_first):
             node.h = self._heuristic(objs)
+            if node.h is not None:
+                self.best_first = True
         self.last_h = node.h
         idx = self._replay_step(node)
         if idx is not None:
@@ -534,6 +552,123 @@ class ModelAgent(GraphAgent):
             return False
         tries = self.undo_tries.get(aid, 0)
         return tries >= 2 and self.undo_hits.get(aid, 0) == tries
+
+    # -- goal hypotheses and the memory of causes (Phase 59) -----------------------
+
+    def _me(self, objs: list[Obj]) -> Obj | None:
+        avatar = self.dyn.avatar()
+        return self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
+
+    def _measures(self, objs: list[Obj], grid: np.ndarray) -> dict[tuple, int | None]:
+        me = self._me(objs)
+        return {h.key: hy.measure(h, objs, grid, me) for h in self.hyps or []}
+
+    def _track_hypotheses(self, action, data, outcome: str, after: list[Obj] | None,
+                          grid: np.ndarray | None) -> None:
+        """Credit the last action with what it did to every hypothesis's measure; at a level's
+        end, keep the hypotheses' readings on its last frame."""
+        if outcome == LEVEL_UP:
+            if self.hyps and self.hyp_values is not None:
+                self.hyp_reports.append([
+                    (h.kind, h.params, h.first, h.best, self.hyp_values.get(h.key), h.goal, self.causes.live(h.key))
+                    for h in self.hyps])
+                for h in self.hyps:
+                    last = self.hyp_values.get(h.key)
+                    if self._explains(h, last):
+                        t = self._hyp_type(h)
+                        if t in self.confirmed:
+                            self.confirmed.remove(t)
+                        self.confirmed.insert(0, t)
+                        self.stats["hyp_confirmed"] = self.stats.get("hyp_confirmed", 0) + 1
+            self.hyps = None
+            self.hyp_values = None
+            return
+        if outcome != OK or after is None or grid is None:
+            self.hyp_values = None  # a restart: measured again on the next frame
+            return
+        if self.hyps is None:
+            self.hyps = hy.propose(after, grid, self.dyn.avatar())
+            self.hyp_values = None
+        values = self._measures(after, grid)
+        if self.hyp_values is not None:
+            if data is not None:
+                target = at(self.last_objs, data["x"], data["y"]) if self.last_objs else None
+                cls: object = ("click", target.esig if target is not None else None)
+            else:
+                cls = action.value
+            for h in self.hyps:
+                self.causes.record(h.key, cls, self.hyp_values.get(h.key), values.get(h.key))
+        for h in self.hyps:
+            v = values.get(h.key)
+            if v is not None:
+                if h.first is None:
+                    h.first = v
+                h.best = v if h.best is None else min(h.best, v)
+        self.hyp_values = values
+
+    @staticmethod
+    def _explains(h: hy.Hypothesis, last: int | None) -> bool:
+        """The hypothesis moved from where the level began to (or within a step of) its goal."""
+        return (h.first is not None and last is not None and last < h.first
+                and last - h.goal <= max(1, (h.first - h.goal) // 4))
+
+    @staticmethod
+    def _hyp_type(h: hy.Hypothesis) -> tuple:
+        """A hypothesis up to recolouring and placement: what carries over to the next level."""
+        if h.kind == "match":
+            return ("match",)
+        if h.kind == "unify":
+            return ("unify", h.params[0])
+        return (h.kind, h.params[0][1:])  # reach / clear: the kind's size and shape
+
+    def _steering(self) -> list[hy.Hypothesis]:
+        """This level's hypotheses to steer by: those of a kind that ended an earlier level, else
+        (steer_first) those some action has moved closer and that are not met yet."""
+        if not self.hyps or self.hyp_values is None:
+            return []
+        out = []
+        if self.steer_confirmed and self.confirmed:
+            types = set(self.confirmed)
+            out = [h for h in self.hyps if self._hyp_type(h) in types]
+        if not out and self.steer_first and not self.confirmed:
+            out = [h for h in self.hyps if self.causes.helped(h.key)
+                   and (self.hyp_values.get(h.key) or 0) > h.goal]
+        return out
+
+    def _hyp_heuristic(self) -> float | None:
+        """The steering hypotheses' distance from their goals, each as a share of where it began."""
+        steer = self._steering()
+        if not steer or self.hyp_values is None:
+            return None
+        total, found = 0.0, False
+        for h in steer:
+            v = self.hyp_values.get(h.key)
+            if v is None or h.first is None:
+                continue
+            total += max(0, v - h.goal) / max(1, h.first - h.goal)
+            found = True
+        return total if found else None
+
+    def _steer_candidates(self, node: Node, pool: list[int]) -> list[int]:
+        """Candidates whose action class has, on average, moved a steering hypothesis closer."""
+        steer = self._steering()
+        if not steer:
+            return []
+        objs = self.cur_objs()
+        best, out = 0.0, []
+        for i in pool:
+            c = node.cands[i]
+            if c.data is not None:
+                t = at(objs, c.data["x"], c.data["y"])
+                cls: object = ("click", t.esig if t is not None else None)
+            else:
+                cls = c.action.value
+            g = max((self.causes.mean_gain(h.key, cls) for h in steer), default=0.0)
+            if g > best:
+                best, out = g, [i]
+            elif g == best and g > 0:
+                out.append(i)
+        return out
 
     # -- the goal advisor (Phase 58) ---------------------------------------------
 
@@ -1024,6 +1159,11 @@ class ModelAgent(GraphAgent):
         if advised is not None:
             self.stats["advice_clicks"] += 1
             return advised
+        if self.track_hypotheses:
+            steer = self._steer_candidates(node, [i for i in local if self._verdicts.get(i, "unknown") == "unknown"] or local)
+            if steer:
+                self.stats["hyp_steps"] = self.stats.get("hyp_steps", 0) + 1
+                return self.rng.choice(steer)
         unknown = [i for i in local if self._verdicts.get(i, "unknown") == "unknown"]
         pool = unknown or local
         if self.relations and self.kind_tries:

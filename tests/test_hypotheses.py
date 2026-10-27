@@ -122,3 +122,18 @@ def test_without_the_flag_no_experiment_runs():
     agent.experiment = False
     agent.hyp_values = {a.key: 5, b.key: 4}
     assert agent._steering() == []
+
+
+def test_experiments_end_a_first_level_that_exploration_takes_thousands_of_actions_to_end():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_energy import EnergyRoom, level_steps
+
+    explorer = ModelAgent(seed=0)
+    explorer.experiment = False
+    tester = ModelAgent(seed=0)
+    first = level_steps(explorer, EnergyRoom(), 4000)[0]
+    tested = level_steps(tester, EnergyRoom(), 4000)[0]
+    assert tested < 200 < first  # 118 against 3,008: the goal (reach a tile seen once) tested first
+    assert any(row[5] == "level" for row in tester.trial_log)

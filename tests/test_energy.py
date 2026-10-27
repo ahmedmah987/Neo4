@@ -94,6 +94,9 @@ def level_steps(agent, env, steps):
 
 def test_model_agent_reads_the_energy_bar_and_refills_on_the_way():
     agent = ModelAgent(seed=0)
+    # The second level is cheap once the first was explored in full; goal experiments (Phase 61)
+    # end the first in a few dozen actions, before the refills are learned (tests/test_hypotheses.py).
+    agent.experiment = False
     steps = level_steps(agent, EnergyRoom(), 8000)
     dyn = agent.dyn
     res = dyn.resource()

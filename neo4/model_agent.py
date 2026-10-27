@@ -70,9 +70,10 @@ class ModelAgent(GraphAgent):
     steer_first_after = 300  # ...and only once the level has taken this many actions (when stuck)
     carry_causes = True  # what moved a goal of a type in earlier levels orders the first tries in the next
     narrow_confirmed = True  # steer by the confirmed kinds that ended the most levels
+    steer_with_relations = True  # screen hypotheses order clicks even where a level-up taught a goal relation
     imagine_clicks = False  # plan clicks in imagination towards a confirmed goal (Phase 60; a variant)
-    experiment = False  # with no confirmed goal, test one hypothesis at a time (Phase 61; a variant)
-    experiment_after = 30  # actions into a level before the first test
+    experiment = True  # with no confirmed goal, test one hypothesis at a time (Phase 61)
+    experiment_after = 60  # actions into a level before the first test (a cheap level is left alone)
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
 
@@ -762,7 +763,9 @@ class ModelAgent(GraphAgent):
         """Test one hypothesis at a time: steer by it alone until its measure reaches its goal
         (and the level did not end: not the goal, or not all of it), or until it has not come
         closer for ``experiment_patience`` actions; then take the next one some action has moved
-        closer. A test given up for want of progress (a detour in a maze looks like no progress)
+        closer. Only while nothing is known of the goal: no kind of hypothesis that ended an
+        earlier level is on the screen, and no goal relation was learned at a level-up (Phase 22).
+        A test given up for want of progress (a detour in a maze looks like no progress)
         is taken again once the fresh ones are spent, with twice the patience. A hypothesis that
         ends the level is confirmed as in Phase 59."""
         if self.trial is not None:
@@ -777,7 +780,7 @@ class ModelAgent(GraphAgent):
                 if self.trial_quiet >= self.experiment_patience << self.stalled[self.trial.key]:
                     self._end_trial("trials_stuck")
         if self.trial is None and self.hyps and self.level_actions >= self.experiment_after \
-                and not self._confirmed_present():
+                and not self.relations and not self._confirmed_present():
             order = {"reach": 0, "match": 1, "clear": 2, "unify": 3}
             pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)
                     and self.stalled[h.key] < self.experiment_retries
@@ -1359,7 +1362,7 @@ class ModelAgent(GraphAgent):
         if advised is not None:
             self.stats["advice_clicks"] += 1
             return advised
-        if self.track_hypotheses:
+        if self.track_hypotheses and (self.steer_with_relations or not self.relations):
             steer = self._steer_candidates(node, [i for i in local if self._verdicts.get(i, "unknown") == "unknown"] or local)
             if steer:
                 self.stats["hyp_steps"] = self.stats.get("hyp_steps", 0) + 1

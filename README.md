@@ -82,6 +82,7 @@ The project has two strands that share one codebase:
 | 55 | **Mirror family** (`ar25`): mirror lines read as the rows and columns in which no cell shows the background, pieces and their reflections as the two colours that are each other's reflections in the lines, targets, the selection and the fixed lines; the plan is every object's final place, the cheapest that covers every target, searched over the lines' places and, for each, the pieces' places combined by the targets they cover | done — official-style score 75.56 → **80.01**, levels 619 → 653; `ar25` 3.55 → 115.00: every level on every seed, 253 actions against the humans' 748, the fewest possible; no game loses |
 | 56 | **The hidden games, a holdout, and goals that narrow**: the first Kaggle submission; a holdout evaluation that plays each public game without the solvers built or tuned on it; goal hypotheses that narrow from level to level (counts of a kind or a colour that only ever moved towards where they ended, beside the gap relations, those an earlier level supported first) | done — hidden games **0.33** (rank 2,927 of 4,853); holdout 0.45 against the explorer's 0.44, so the solvers neither help nor hurt a game they were not built for; goal hypotheses: holdout 0.448 → **0.471** (`ft09` a second level in 22 actions, humans 12), public score unchanged at 80.01 (652 levels) |
 | 57 | **Waste the explorer can see, and a game that must not stop**: the undo key (ACTION7) recognised by the frame it gives back and no longer explored; a key that never changed anything in eight or more uses predicted a no-op; a solver that raises switched off, and the agent replaced if it raises itself | done — holdout 0.471 → 0.452 in one sweep, all of it `ft09`, whose second level comes and goes with Python's hash seed; on the four games that differed, two hash seeds × five seeds each, on and off: `ft09` identical, `bp35` 1 → 3 first levels, `m0r0` and `lf52` first levels faster, sum of the four 0.40 → 0.48; the second submission |
+| 58 | **A vision-language model as an advisor on goals**: at a level's start and when it drags on, an open-weight model is shown the frame (an image, or one colour code per cell for a text model), the objects and what the agent has learned, and names the player and the objects to reach or click; its answer only orders exploration | done — measured on Kaggle's T4s, 15 public games without their own solvers, 1,000 actions, each played without and with the advisor in one process: Gemma 3 4B 6.68 → 6.26, Qwen2.5 3B 6.68 → 3.87 (sum of official-style scores); the small models' guesses are mostly generic and cost the cheap levels the score comes from; not submitted |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2748,6 +2749,46 @@ is the default and the second submission. A single holdout sweep differs from an
 every hash seed, in 22 actions (hash seed 1, the run Phase 56 reported) or 448 (seeds 2 and
 3), 0.193 on average. The count goals are what gives `ft09` its second levels, but Phase 56's
 +0.023 was the lucky tie order: the expected gain from `ft09` is +0.008 on the mean.
+
+### Phase 58 — a vision-language model as an advisor on goals
+
+The leading entries run a local language or vision model, and the analysis above says what the
+explorer lacks is the goal, not the mechanics. Phase 58 puts a model in for exactly that and
+nothing else (`neo4/advisor.py`). At a level's start, after 40 and 250 actions, and again once its
+advice has been carried out without ending the level, the model is shown:
+* the frame, as an image, or for a text-only model as one hexadecimal colour code per cell;
+* the objects the agent sees, numbered, with colour, size and place;
+* what the agent has learned: which object the keys move and how, what blocks it, which clicks
+  change nothing, what ended earlier levels, and what it already tried in this level.
+
+It answers in JSON with the player's object and up to six objects to reach or click, in order.
+Advised objects are planned to (the avatar) or clicked before the other untested actions, after
+anything the agent's own evidence says completed a level before. Without a model, or after five
+failures in a row, the agent plays exactly as before (`tests/test_advisor.py`).
+
+**Getting a model to run on Kaggle.** Gemma models mount only after the account accepts Google's
+licence on the model page. The RTX 6000 cannot be chosen through the API (`machine_shape` falls
+back to two T4s), and the T4s have no bfloat16. Qwen2.5-7B split over the two T4s answered once
+and then failed with a CUDA launch error on every question. `bitsandbytes` is not in the image, so
+it cannot be quantised to one T4. What ran: Gemma 3 4B (image, float32, over both T4s) and
+Qwen2.5 3B (text, float16, one T4).
+
+**Results.** 15 public games, each without the solvers built for it, 1,000 actions, played without
+and with the advisor in the same process (same hash order). Official-style score, summed:
+
+| advisor | without | with | answers |
+|---|---:|---:|---|
+| Gemma 3 4B, image | 6.68 | 6.26 | 142 of 143, 11 s each |
+| Qwen2.5 3B, text | 6.68 | 3.87 | 115 of 121, 10 s each |
+
+The small models' goals are mostly generic ("move the player to the exit at the top right" in
+games without one), and following them costs actions on the levels the explorer already finds
+cheaply. Those levels are where the score comes from: `vc33`'s first level went from 15 actions to
+18 and 24, and `tu93`'s second level, 21 actions without the advisor, took 46 with Qwen's.
+Where an answer was right (Gemma on `r11l` and `sp80`, 44 → 38 and 121 → 106 actions), it helped.
+The advisor stays in the code, off unless `NEO4_ADVISOR` names a model, and was not submitted. A
+model large enough to read these games (12–30B, the size the leading entries run) needs the RTX
+6000, which only the Kaggle editor can select.
 
 ### Where the library stands
 

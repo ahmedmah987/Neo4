@@ -91,6 +91,7 @@ The project has two strands that share one codebase:
 | 64 | **Walks planned to a reach goal, and the tests' settings**: the reach hypothesis steered by walked to with the model of moves and hazards; patience; when tests begin | done — planned walks 15.50 → 15.60 (within noise, off); patience 20: 15.04; tests from the 0th or 20th action where an avatar moves: 13.51 and 13.13, from the 45th or 90th elsewhere: 15.31 and 15.45; the defaults stay (`sp80` makes the avatar setting noisy) |
 | 65 | **What the goals were like in the other games**: hypotheses carry features any game shares; process-wide counts of which ended levels order a new game's tests | done — measured with the 25 games interleaved in one process, as the competition plays them: 15.50 → 15.41 (`ka59` a first level for the first time), within noise; a run ends only about 22 levels, too few for the counts to order much; a variant, off |
 | 66 | **A library of situations shared across games**: pairs of a hypothesis met first and the one that then ended a level, in shared features; a test met without ending its level sends the agent to what came first in such situations, then back | done — interleaved, 5 seeds: 15.50 → 15.52; used in 8 games, opened no level in the games at zero; a variant, off |
+| 67 | **The goal priors seeded from the public games**: counts from the 114 level-ups the full library reaches on the public games; each game seeded from the other 24 | done — the priors first: 14.63 (`ls20` doubled, `tr87` a first level, `tu93` and `sp80` lower); weighed against distance: 15.50, no change; a variant, off |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3052,6 +3053,27 @@ filled (64–82 situations a run, about 28 distinct) and was used in 8 games (69
 12 returns to the goal, most in `sb26`, `dc22` and `ka59`), but it opened no level in the games
 still at zero, and moved no score beyond noise (`dc22` 0.07 → 0.08, in fewer actions). Situations
 read in terms of the four kinds of goal carry little that the kinds themselves did not. Off.
+
+### Phase 67 — the goal priors seeded from the public games (a variant, off)
+
+Phase 65's counts started empty in every run, and a run ends only about 22 levels. They can start
+instead from the competition's training games: at the 114 level-ups the full library reaches on the
+public games, the features of the hypotheses on the screen and of those that ended the level
+(`neo4/priors_data.py`, written by `scripts/collect_priors.py`). The counts say something: where an
+avatar moves, a reach guess at an object larger than the avatar ended its level 70 times in 125; in
+the click games reach and clear guesses ended theirs 8% of the time. Measured honestly — each public
+game played without its own solvers and seeded from the other 24 games only:
+
+| order of a level's tests | holdout |
+|---|---:|
+| closest to its goal first (Phase 61, default) | 15.50 |
+| the seeded priors first | 14.63 |
+| expected cost: distance over the priors' probability | 15.50 |
+
+Put first, the priors give `ls20` 0.05 → 0.10 and `tr87` its first level ever on the holdout, and
+take more: `tu93` 4.14 → 3.68, `sp80` 3.94 → 3.58, `sc25` 0.03 → 0. Weighed against distance they
+change no test's order. What the goals were like in other games does not say which of this game's
+guesses is its goal better than which guess is nearest to being met. Off.
 
 ### Where the library stands
 

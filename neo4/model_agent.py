@@ -65,6 +65,7 @@ class ModelAgent(GraphAgent):
     steer_confirmed = True  # steer by hypotheses of the kinds that ended earlier levels (Phase 59)
     steer_first = False  # before any level ends, steer by hypotheses some action moved closer
     steer_first_after = 300  # ...and only once the level has taken this many actions (when stuck)
+    carry_causes = True  # what moved a goal of a type in earlier levels orders the first tries in the next
 
     def __init__(
         self,
@@ -598,7 +599,8 @@ class ModelAgent(GraphAgent):
             else:
                 cls = action.value
             for h in self.hyps:
-                self.causes.record(h.key, cls, self.hyp_values.get(h.key), values.get(h.key))
+                self.causes.record(h.key, cls, self.hyp_values.get(h.key), values.get(h.key),
+                                   self._hyp_type(h) if self.carry_causes else None)
         for h in self.hyps:
             v = values.get(h.key)
             if v is not None:
@@ -664,7 +666,8 @@ class ModelAgent(GraphAgent):
                 cls: object = ("click", t.esig if t is not None else None)
             else:
                 cls = c.action.value
-            g = max((self.causes.mean_gain(h.key, cls) for h in steer), default=0.0)
+            g = max((self.causes.mean_gain(h.key, cls, self._hyp_type(h) if self.carry_causes else None)
+                     for h in steer), default=0.0)
             if g > best:
                 best, out = g, [i]
             elif g == best and g > 0:

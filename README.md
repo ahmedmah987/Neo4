@@ -2841,7 +2841,10 @@ library's own score on the public games is unchanged at 80.01 (650 levels).
 third levels are found in fewer actions. `sp80` rises from 2.49 to 2.83. `ar25` and `r11l` lose
 second levels that took hundreds of actions and scored almost nothing. Steering before the first
 level ends finds first levels in `cn04`, `ka59` and `tn36` for the first time, but loses more in
-`sp80` and `bp35`, so it stays a variant.
+`sp80` and `bp35`, so it stays a variant. Steering before the first level ends only once a level has
+taken 300 actions (when the agent is stuck; the lesson of Phase 58) keeps the cheap levels: 13.19
+against 13.22 summed (hash seed 0), five more levels, first levels in `cn04`, `ka59` and `tr87`
+never found before without their solvers, but each after 3,000 actions, so worth almost nothing.
 
 The first push of the bundle failed Kaggle's commit check: the new module was missing from the
 bundle's list (`scripts/bundle.py`), so the agent could not be imported. Had it been submitted it would

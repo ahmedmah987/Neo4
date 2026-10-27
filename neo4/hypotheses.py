@@ -137,23 +137,37 @@ def _gap(a: Obj, b: Obj) -> int:
     return dx + dy
 
 
+def generalise(action_class: object) -> object:
+    """An action class up to colour: a click on a kind becomes a click on its size and shape."""
+    if isinstance(action_class, tuple) and action_class and action_class[0] == "click" and action_class[1]:
+        return ("click", tuple(action_class[1][1:]))
+    return action_class
+
+
 @dataclass
 class CauseMemory:
     """For each action class, how often it moved each hypothesis's measure, and which way."""
 
     moves: dict[tuple, Counter] = field(default_factory=dict)  # (hyp key, action class) -> Counter
+    # The same by hypothesis type and action kind, kept across levels: what a click on a kind of
+    # that size and shape (any colour) did to a goal of that type in earlier levels.
+    by_type: dict[tuple, Counter] = field(default_factory=dict)
 
-    def record(self, hyp_key: tuple, action_class: object, before: int | None, after: int | None) -> None:
+    def record(self, hyp_key: tuple, action_class: object, before: int | None, after: int | None,
+               hyp_type: tuple | None = None) -> None:
         if before is None or after is None:
             return
-        c = self.moves.setdefault((hyp_key, action_class), Counter())
-        c["n"] += 1
-        if after < before:
-            c["closer"] += 1
-            c["gain"] += before - after
-        elif after > before:
-            c["farther"] += 1
-            c["loss"] += after - before
+        counters = [self.moves.setdefault((hyp_key, action_class), Counter())]
+        if hyp_type is not None:
+            counters.append(self.by_type.setdefault((hyp_type, generalise(action_class)), Counter()))
+        for c in counters:
+            c["n"] += 1
+            if after < before:
+                c["closer"] += 1
+                c["gain"] += before - after
+            elif after > before:
+                c["farther"] += 1
+                c["loss"] += after - before
 
     def live(self, hyp_key: tuple) -> bool:
         """Some action has moved this measure at least once."""
@@ -163,8 +177,12 @@ class CauseMemory:
         """Some action has moved this measure closer to its goal."""
         return any(k[0] == hyp_key and c["closer"] for k, c in self.moves.items())
 
-    def mean_gain(self, hyp_key: tuple, action_class: object) -> float:
+    def mean_gain(self, hyp_key: tuple, action_class: object, hyp_type: tuple | None = None) -> float:
+        """Mean progress of an action class on a hypothesis in this level; until it has been tried
+        here, what actions of its kind did to goals of the hypothesis's type in earlier levels."""
         c = self.moves.get((hyp_key, action_class))
+        if (not c or not c["n"]) and hyp_type is not None:
+            c = self.by_type.get((hyp_type, generalise(action_class)))
         if not c or not c["n"]:
             return 0.0
         return (c["gain"] - c["loss"]) / c["n"]

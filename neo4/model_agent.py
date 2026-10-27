@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import os
 
+from collections import Counter
+
 import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
 
@@ -66,6 +68,7 @@ class ModelAgent(GraphAgent):
     steer_first = False  # before any level ends, steer by hypotheses some action moved closer
     steer_first_after = 300  # ...and only once the level has taken this many actions (when stuck)
     carry_causes = True  # what moved a goal of a type in earlier levels orders the first tries in the next
+    narrow_confirmed = True  # steer by the confirmed kinds that ended the most levels
 
     def __init__(
         self,
@@ -157,6 +160,7 @@ class ModelAgent(GraphAgent):
         self.causes = hy.CauseMemory()
         self.hyp_reports: list[list[tuple]] = []
         self.confirmed: list[tuple] = []  # kinds of hypotheses that ended a level, most recent first
+        self.confirm_count: Counter = Counter()  # how many levels each kind ended
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -581,6 +585,7 @@ class ModelAgent(GraphAgent):
                         if t in self.confirmed:
                             self.confirmed.remove(t)
                         self.confirmed.insert(0, t)
+                        self.confirm_count[t] += 1
                         self.stats["hyp_confirmed"] = self.stats.get("hyp_confirmed", 0) + 1
             self.hyps = None
             self.hyp_values = None
@@ -631,8 +636,13 @@ class ModelAgent(GraphAgent):
             return []
         out = []
         if self.steer_confirmed and self.confirmed:
-            types = set(self.confirmed)
-            out = [h for h in self.hyps if self._hyp_type(h) in types]
+            present = {self._hyp_type(h) for h in self.hyps} & set(self.confirmed)
+            if self.narrow_confirmed and present:
+                # the kinds that ended the most levels: a kind that ended one level along with the
+                # true goal does not dilute the steering once the goal has ended two
+                top = max(self.confirm_count[t] for t in present)
+                present = {t for t in present if self.confirm_count[t] == top}
+            out = [h for h in self.hyps if self._hyp_type(h) in present]
         if not out and self.steer_first and not self.confirmed and self.level_actions >= self.steer_first_after:
             out = [h for h in self.hyps if self.causes.helped(h.key)
                    and (self.hyp_values.get(h.key) or 0) > h.goal]

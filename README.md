@@ -89,6 +89,7 @@ The project has two strands that share one codebase:
 | 62 | **Why a click is made, read from what it changed (copies)**: the cells a click changed vote for the rules of correspondence (a shift, a picture 2–8 times smaller, a mirror) that brought them into agreement with unchanged cells elsewhere, kept by colour over the level; a rule explaining cells of two colours becomes a hypothesis that the board is to copy that picture | done — diagnosis: a picture explains a level's changes only in `cd82` (already the `match` of Phase 59) and `dc22`'s first level; holdout 14.20 → 14.08; a variant, off |
 | 63 | **Where a level's actions go, and tests begun early where an avatar moves**: per completed level, its actions, deaths and the actions of the life that completed it; Phase 61's tests from the 10th action where the keys move an avatar | done — the lives that completed the 111 holdout levels took 1.3 times the humans' actions, all actions 16.6 times: 92% is learning in lives that end; holdout 14.20 → **15.50**, public library 80.02 unchanged |
 | 64 | **Walks planned to a reach goal, and the tests' settings**: the reach hypothesis steered by walked to with the model of moves and hazards; patience; when tests begin | done — planned walks 15.50 → 15.60 (within noise, off); patience 20: 15.04; tests from the 0th or 20th action where an avatar moves: 13.51 and 13.13, from the 45th or 90th elsewhere: 15.31 and 15.45; the defaults stay (`sp80` makes the avatar setting noisy) |
+| 65 | **What the goals were like in the other games**: hypotheses carry features any game shares; process-wide counts of which ended levels order a new game's tests | done — measured with the 25 games interleaved in one process, as the competition plays them: 15.50 → 15.41 (`ka59` a first level for the first time), within noise; a run ends only about 22 levels, too few for the counts to order much; a variant, off |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3015,6 +3016,27 @@ The avatar setting is not smooth (13.51, 15.50, 13.13), almost all of it `sp80` 
 1.92), whose first level comes in 16–24 actions or several hundred depending on which test runs
 first: part of Phase 63's gain is that game's luck, and the honest estimate of the gain over
 Phase 61 is between 0 and +1.3.
+
+### Phase 65 — what the goals were like in the other games (a variant, off)
+
+Every game used to start from nothing: what the agent had learned in one game was gone in the
+next, though games that differ in their goals share situations. Hypotheses now carry features any
+game shares — their kind, whether the keys move an avatar, how their object looks beside the
+others and the avatar (its size and colour against the avatar's, its rank among the objects seen
+once, whether it is hollow; for a kind seen several times, how many) — and at each level-up the
+agent adds to process-wide counts which features were on the screen and which ended the level
+(`neo4/shared.py`). With `share_priors`, a game's tests (Phase 61) are ordered by how often
+guesses like them were goals elsewhere. Only counts are kept, never a layout or a solution.
+
+**Measured as the competition plays.** The 25 public games in one process, one action each in
+turn (the competition plays all games at once, one thread each, so the counts fill as the run goes
+on), each without its own solvers; without the counts this reproduces the holdout sweep exactly
+(25 of 25 games, seed 0). With them, 5 seeds: 15.50 → 15.41 — `ka59` a first level for the first
+time, `ls20` 0.05 → 0.02, `ft09` 0.07 → 0.03, `sc25` 0.03 → 0.01; within noise. The counts learn
+sensible things (in a run, reach guesses ended 10 of the 18 levels of avatar games where one was
+on the screen, 4 of 5 when the target was the avatar's size), but a whole run ends only about 22
+levels across the 25 games, too few for counts of this kind to order much, and the goal is often
+none of the four kinds at all. Off.
 
 ### Where the library stands
 

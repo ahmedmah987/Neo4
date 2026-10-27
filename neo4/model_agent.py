@@ -55,6 +55,7 @@ ADVICE_AT = tuple(int(a) for a in os.environ.get("NEO4_ADVICE_AT", "40,250").spl
 MAX_ADVICE_PER_LEVEL = 5  # with the re-asks that follow advice carried out to its end
 MAX_ADVICE_PER_GAME = 40
 MAX_ADVICE_PLANS_PER_LEVEL = 12
+MAX_TRIAL_PLANS_PER_LEVEL = 12  # walks planned to what a reach hypothesis names (Phase 64)
 
 
 class ModelAgent(GraphAgent):
@@ -77,6 +78,7 @@ class ModelAgent(GraphAgent):
     experiment_after_avatar = 10  # ...and where the keys move an avatar, from its 10th (Phase 63)
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
+    plan_trials = False  # walk the avatar by plan to what the reach hypothesis steered by names (Phase 64)
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
 
     def __init__(
@@ -197,6 +199,7 @@ class ModelAgent(GraphAgent):
         self.level_deaths = 0
         self.life_start = 0
         self.level_log: list[list[int]] = []
+        self.trial_plans = 0
         self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
@@ -261,6 +264,7 @@ class ModelAgent(GraphAgent):
         self.copy_hyps = 0
         self.level_deaths = 0
         self.life_start = 0
+        self.trial_plans = 0
         self.node_values = {}
         self.node_rel = {}
 
@@ -580,6 +584,8 @@ class ModelAgent(GraphAgent):
             idx = self._follow_plan(node, me)
             if idx is None and not self.plan:
                 idx = self._make_plan(node, me, "goal")
+            if idx is None and not self.plan and self.plan_trials and self.track_hypotheses:
+                idx = self._make_plan(node, me, "trial")
             if idx is None and not self.plan and self.advice_targets:
                 idx = self._make_plan(node, me, "advice")
             if idx is not None:
@@ -1185,7 +1191,8 @@ class ModelAgent(GraphAgent):
             # The final move touches the target; whether it goes through or not, the
             # plan is done, so do not hold the next step to a predicted position.
             self.plan_expect[0] = (-1, -1)
-        self.stats[{"explore": "explore_steps", "advice": "advice_steps"}.get(self.plan_kind, "plan_steps")] += 1
+        key = {"explore": "explore_steps", "advice": "advice_steps", "trial": "trial_steps"}.get(self.plan_kind, "plan_steps")
+        self.stats[key] = self.stats.get(key, 0) + 1
         return idx
 
     def _make_plan(self, node: Node, me: Obj | None, kind: str) -> int | None:
@@ -1230,6 +1237,21 @@ class ModelAgent(GraphAgent):
                 tests.append(lambda cols, coords: bool(cols & goals))
             if not tests:
                 return None
+        elif kind == "trial":
+            # the reach hypothesis under test, or of a kind that ended a level: walk to what it
+            # names by the model of moves and hazards instead of searching the frontier for it
+            if self.trial_plans >= MAX_TRIAL_PLANS_PER_LEVEL:
+                return None
+            sigs = {h.params[0] for h in self._steering() if h.kind == "reach"}
+            if not sigs:
+                return None
+            target = np.zeros(self.cur_grid.shape, dtype=bool)
+            for o in self.cur_objs():
+                if o.sig in sigs and o.sig != me.sig:
+                    target[o.pixels[:, 0], o.pixels[:, 1]] = True
+            if not target.any():
+                return None
+            tests = [lambda cols, coords: any(target[y, x] for y, x in coords)]
         elif kind == "advice":
             if self.advice_plans >= MAX_ADVICE_PLANS_PER_LEVEL:
                 return None
@@ -1275,11 +1297,14 @@ class ModelAgent(GraphAgent):
             self.goal_plans_by_state[state] = self.goal_plans_by_state.get(state, 0) + 1
         elif kind == "advice":
             self.advice_plans += 1
+        elif kind == "trial":
+            self.trial_plans += 1
         else:
             self.explore_plans_this_level += 1
         self.plan, self.plan_expect = found
         self.plan_kind = kind
-        self.stats[{"goal": "plans", "advice": "advice_plans"}.get(kind, "explore_plans")] += 1
+        key = {"goal": "plans", "advice": "advice_plans", "trial": "trial_plans"}.get(kind, "explore_plans")
+        self.stats[key] = self.stats.get(key, 0) + 1
         return self._plan_step(node)
 
     def _make_switch_plan(self, node: Node, me: Obj, state: frozenset) -> int | None:

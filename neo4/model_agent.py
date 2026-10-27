@@ -26,6 +26,7 @@ the current level's graph is rebuilt under the new identity.
 
 from __future__ import annotations
 
+import math
 import os
 
 from collections import Counter
@@ -81,6 +82,7 @@ class ModelAgent(GraphAgent):
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     plan_trials = False  # walk the avatar by plan to what the reach hypothesis steered by names (Phase 64)
     share_priors = False  # order the tests by what goals were like in the process's other games (Phase 65)
+    prior_blend = False  # weigh a test's distance by its prior instead of ordering by the prior first
     seed_priors = True  # ...starting from what the goals were like in the public games (Phase 67)
     share_situations = False  # what was met first where goals like a test's ended a level (Phase 66)
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
@@ -892,6 +894,11 @@ class ModelAgent(GraphAgent):
                     share = (v - h.goal) / max(1, (h.first if h.first is not None else v) - h.goal)
                     # what guesses like this one were in other games comes first (Phase 65)
                     prior = self.priors.score(h.features) if self.priors is not None else None
+                    if prior is not None and self.prior_blend:
+                        # the expected cost of the test: how far it is, over how likely guesses
+                        # like it were goals elsewhere
+                        p = 1.0 / (1.0 + math.exp(-prior))
+                        return (self.stalled[h.key], share / max(p, 0.05), order.get(h.kind, 9), repr(h.params))
                     return (self.stalled[h.key], -prior if prior is not None else 0.0, share,
                             order.get(h.kind, 9), repr(h.params))
                 self._start_trial(min(pool, key=rank), values)

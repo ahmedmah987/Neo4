@@ -11,7 +11,12 @@ learn which actions move which measure and steer by the ones that move:
   how many are left;
 * ``match``: two panels of the same size are to become the same (a reference and a board);
   measured by the number of cells in which they differ;
-* ``unify``: objects of one shape are to take one colour; measured by how many colours they show.
+* ``unify``: objects of one shape are to take one colour; measured by how many colours they show;
+* ``copy``: a board is to look like a picture elsewhere on the screen, the same size or k times
+  smaller, or like its own mirror image; measured by the board's cells that differ from their
+  places in the picture. These are not guessed from the first frame but read from what clicks
+  change (Phase 62): a click whose changed cells came to agree with unchanged cells elsewhere,
+  by one rule of correspondence, is evidence for that rule.
 
 Nothing here is specific to a public game: the guesses come from the structure of the first frame
 of a level (rarity, repetition, equal sizes), and none is kept that no action has ever moved.
@@ -30,6 +35,10 @@ MAX_CLEAR_KINDS = 6  # kinds with several instances proposed as "clear", the mos
 MAX_REACH = 6  # single-instance kinds proposed as "reach", the smallest first
 MIN_PANEL = 3  # a panel's smaller side, in cells
 MAX_PANELS = 12
+COPY_SCALES = (1, 2, 3, 4, 8)  # a picture the board's size, or this many times smaller
+COPY_MAX_CELLS = 64  # changed cells read per click
+COPY_MIN_GAIN = 4  # cells a rule must have brought into agreement, over the level's clicks
+COPY_MIN_CLICKS = 2  # ...in at least this many clicks
 
 
 @dataclass(slots=True)
@@ -128,7 +137,167 @@ def measure(h: Hypothesis, objs: list[Obj], grid: np.ndarray, me: Obj | None) ->
     if h.kind == "match":
         a, b = h.params
         return int((_cut(grid, a) != _cut(grid, b)).sum())
+    if h.kind == "copy":
+        return copy_measure(h.params, grid)
     return None
+
+
+# -- copies read from what clicks change (Phase 62) -----------------------------------------
+
+def copy_image(rule: tuple, ys: np.ndarray, xs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Where a rule sends board cells: (``"copy"``, k, dy, dx) to a picture k times smaller at
+    (y // k + dy, x // k + dx); (``"mirror-x"``, 1, s, 0) to (y, s - x); (``"mirror-y"``, 1, s, 0)
+    to (s - y, x)."""
+    kind, k, a, b = rule
+    if kind == "copy":
+        return ys // k + a, xs // k + b
+    if kind == "mirror-x":
+        return ys, a - xs
+    return a - ys, xs
+
+
+def _board_cells(rect: tuple[int, int, int, int], rule: tuple, shape: tuple[int, int]):
+    y, x, h, w = rect
+    ys, xs = np.mgrid[y:y + h, x:x + w]
+    ys, xs = ys.ravel(), xs.ravel()
+    ty, tx = copy_image(rule, ys, xs)
+    ok = (ty >= 0) & (ty < shape[0]) & (tx >= 0) & (tx < shape[1])
+    ok &= ~((ty >= y) & (ty < y + h) & (tx >= x) & (tx < x + w))  # the picture lies outside the board
+    return ys[ok], xs[ok], ty[ok], tx[ok]
+
+
+def copy_measure(params: tuple, grid: np.ndarray) -> int | None:
+    """The board's cells that differ from their places in the picture."""
+    rule, rect = params[:4], params[4]
+    ys, xs, ty, tx = _board_cells(rect, rule, grid.shape)
+    if not len(ys):
+        return None
+    return int((grid[ys, xs] != grid[ty, tx]).sum())
+
+
+def copy_picture_ok(params: tuple, grid: np.ndarray) -> bool:
+    """The rule sends most of the board outside it, onto a picture of more than one colour (a
+    picture of one colour is no picture: any changed cell of that colour would agree with it)."""
+    rule, rect = params[:4], params[4]
+    ys, xs, ty, tx = _board_cells(rect, rule, grid.shape)
+    return 2 * len(ys) >= rect[2] * rect[3] and len(np.unique(grid[ty, tx])) >= 2
+
+
+@dataclass
+class CopyEvidence:
+    """What a level's clicks have said for each rule of correspondence: for every rule, the changed
+    cells it brought into agreement, by their new colour, less those it took out of agreement, and
+    the clicks that spoke for it. One click paints one colour, which agrees with every place of that
+    colour, so a rule counts only once it explains cells of two colours or more (each a fifth)."""
+
+    shape: tuple[int, int]
+    gain: dict = field(default_factory=dict)  # family -> int array [16, bins]
+    loss: dict = field(default_factory=dict)  # family -> int array [bins]
+    clicks: dict = field(default_factory=dict)  # family -> int array [bins]
+
+    def _bins(self, family: tuple) -> int:
+        H, W = self.shape
+        if family[0] == "copy":
+            return (2 * H - 1) * (2 * W - 1)
+        return 2 * (W if family[0] == "mirror-x" else H) - 1
+
+    def add(self, before: np.ndarray, after: np.ndarray, mask: np.ndarray | None) -> bool:
+        """Fold one click's changes in; False when it changed nothing readable."""
+        if before.shape != self.shape or after.shape != self.shape:
+            return False
+        changed = before != after
+        if mask is not None:
+            changed &= ~mask
+        ys, xs = np.nonzero(changed)
+        if not len(ys) or len(ys) > 400:
+            return False
+        if len(ys) > COPY_MAX_CELLS:
+            pick = np.linspace(0, len(ys) - 1, COPY_MAX_CELLS).astype(int)
+            ys, xs = ys[pick], xs[pick]
+        stable = ~changed if mask is None else ~changed & ~mask
+        H, W = self.shape
+        new, old = after[ys, xs], before[ys, xs]
+        colours = sorted({int(c) for c in np.concatenate([new, old])})
+        where = {c: np.nonzero(stable & (after == c)) for c in colours}
+        families = [("copy", k) for k in COPY_SCALES] + [("mirror-x",), ("mirror-y",)]
+        for fam in families:
+            n = self._bins(fam)
+            gain = self.gain.setdefault(fam, np.zeros((16, n), dtype=np.int32))
+            loss = self.loss.setdefault(fam, np.zeros(n, dtype=np.int32))
+            spoke = np.zeros(n, dtype=np.int32)
+            for c in colours:
+                qy, qx = where[c]
+                if not len(qy):
+                    continue
+                for sign, sel in ((1, new == c), (-1, old == c)):
+                    if not sel.any():
+                        continue
+                    if fam[0] == "copy":
+                        k = fam[1]
+                        dy = qy[None, :] - (ys[sel] // k)[:, None] + H - 1
+                        dx = qx[None, :] - (xs[sel] // k)[:, None] + W - 1
+                        idx = (dy * (2 * W - 1) + dx).ravel()
+                    else:
+                        idx_parts = []
+                        for py, px in zip(ys[sel], xs[sel]):
+                            same = (qy == py) if fam[0] == "mirror-x" else (qx == px)
+                            idx_parts.append((qx[same] + px) if fam[0] == "mirror-x" else (qy[same] + py))
+                        idx = np.concatenate(idx_parts) if idx_parts else np.zeros(0, dtype=np.int64)
+                    if not len(idx):
+                        continue
+                    counts = np.bincount(idx, minlength=n).astype(np.int32)
+                    if sign > 0:
+                        gain[c % 16] += counts
+                        spoke += counts > 0
+                    else:
+                        loss += counts
+            self.clicks.setdefault(fam, np.zeros(n, dtype=np.int32))
+            self.clicks[fam] += spoke > 0
+        return True
+
+    def best(self) -> tuple[tuple, int] | None:
+        """The rule with the most net agreement among those that explain cells of two colours or
+        more (each a fifth of what it explains) over two clicks or more, and enough cells."""
+        H, W = self.shape
+        out: tuple[tuple, int] | None = None
+        for fam, gain in self.gain.items():
+            total_gain = gain.sum(axis=0)
+            net = total_gain - self.loss[fam]
+            if fam == ("copy", 1):
+                net[(H - 1) * (2 * W - 1) + W - 1] = 0  # no shift is no picture
+            second = np.partition(gain, -2, axis=0)[-2]
+            ok = (net >= COPY_MIN_GAIN) & (self.clicks[fam] >= COPY_MIN_CLICKS) & (5 * second >= total_gain)
+            if not ok.any():
+                continue
+            cand = np.where(ok, net, -1)
+            i = int(np.argmax(cand))
+            v = int(cand[i])
+            if fam[0] == "copy":
+                rule: tuple = ("copy", fam[1], i // (2 * W - 1) - (H - 1), i % (2 * W - 1) - (W - 1))
+            else:
+                rule = (fam[0], 1, i, 0)
+            if out is None or v > out[1]:
+                out = (rule, v)
+        return out
+
+
+def board_rect(before: np.ndarray, after: np.ndarray, mask: np.ndarray | None) -> tuple[int, int, int, int] | None:
+    """The panel holding most of the cells a click changed: the board being drawn on."""
+    changed = before != after
+    if mask is not None:
+        changed &= ~mask
+    if not changed.any():
+        return None
+    best, out = 0, None
+    for r in panels(after):
+        y, x, h, w = r
+        n = int(changed[y:y + h, x:x + w].sum())
+        if n > best:
+            best, out = n, r
+    if out is None:
+        ys, xs = np.nonzero(changed)
+        out = (int(ys.min()), int(xs.min()), int(ys.max() - ys.min() + 1), int(xs.max() - xs.min() + 1))
+    return out
 
 
 def _gap(a: Obj, b: Obj) -> int:

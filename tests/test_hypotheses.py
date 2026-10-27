@@ -137,3 +137,30 @@ def test_experiments_end_a_first_level_that_exploration_takes_thousands_of_actio
     tested = level_steps(tester, EnergyRoom(), 4000)[0]
     assert tested < 200 < first  # 118 against 3,008: the goal (reach a tile seen once) tested first
     assert any(row[5] == "level" for row in tester.trial_log)
+
+
+def test_a_copy_rule_is_read_from_clicks_of_two_colours():
+    ref = np.array([[1, 2, 1], [2, 1, 2], [1, 2, 1]], dtype=np.int8)
+    g = np.zeros((64, 64), dtype=np.int8)
+    g[2:5, 2:5] = ref  # a picture
+    g[20:26, 20:26] = 5  # a board twice its size
+    ev = hy.CopyEvidence(g.shape)
+
+    def paint(grid, i, j):
+        out = grid.copy()
+        out[20 + 2 * i:22 + 2 * i, 20 + 2 * j:22 + 2 * j] = ref[i, j]
+        return out
+
+    after = paint(g, 0, 0)
+    ev.add(g, after, None)
+    assert ev.best() is None  # one click, one colour: it agrees with every place of that colour
+    g, after = after, paint(after, 0, 1)
+    ev.add(g, after, None)
+    rule, gain = ev.best()
+    assert rule == ("copy", 2, -8, -8) and gain >= 8
+    params = rule + ((20, 20, 6, 6),)
+    assert hy.copy_picture_ok(params, after)
+    assert hy.copy_measure(params, after) == 36 - 8
+    done = after.copy()
+    done[20:26, 20:26] = np.kron(ref, np.ones((2, 2), dtype=np.int8))
+    assert hy.copy_measure(params, done) == 0

@@ -76,6 +76,7 @@ class ModelAgent(GraphAgent):
     experiment_after = 60  # actions into a level before the first test (a cheap level is left alone)
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
+    read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
 
     def __init__(
         self,
@@ -187,6 +188,9 @@ class ModelAgent(GraphAgent):
         self.node_values: dict[str, dict] = {}
         self.node_rel: dict[str, float | None] = {}
         self.trial_log: list[list] = []  # [level, kind, params, first action, last action, outcome]
+        # Copies read from clicks (Phase 62): the level's evidence for each rule of correspondence.
+        self.copy_evidence: hy.CopyEvidence | None = None
+        self.copy_hyps = 0
         self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
@@ -247,6 +251,8 @@ class ModelAgent(GraphAgent):
         self.trial_quiet = 0
         self.tried = set()
         self.stalled = Counter()
+        self.copy_evidence = None
+        self.copy_hyps = 0
         self.node_values = {}
         self.node_rel = {}
 
@@ -474,6 +480,8 @@ class ModelAgent(GraphAgent):
                 target = at(self.last_objs, data["x"], data["y"])
                 if target is not None:
                     self.effects.observe(target, self.last_grid, grid, self.mask)
+                if self.read_copies and self.track_hypotheses:
+                    self._read_copies(self.last_grid, grid, target)
             if self.track_hypotheses:
                 self._track_hypotheses(action, data, outcome, after, grid)
             if outcome == LEVEL_UP:
@@ -693,6 +701,8 @@ class ModelAgent(GraphAgent):
             return ("match",)
         if h.kind == "unify":
             return ("unify", h.params[0])
+        if h.kind == "copy":
+            return ("copy", h.params[0], h.params[1])  # the kind of rule and its scale
         return (h.kind, h.params[0][1:])  # reach / clear: the kind's size and shape
 
     def _steering(self) -> list[hy.Hypothesis]:
@@ -753,6 +763,41 @@ class ModelAgent(GraphAgent):
                 out.append(i)
         return out
 
+    # -- copies read from what clicks change (Phase 62) ------------------------------
+
+    def _read_copies(self, before: np.ndarray, after: np.ndarray, target: Obj | None) -> None:
+        """What a click changed is evidence for the rules of correspondence that brought the changed
+        cells into agreement with unchanged cells elsewhere; a rule with enough evidence over two
+        clicks or more becomes a hypothesis that the board is to copy the picture it points at."""
+        if self.hyps is None or self.copy_hyps >= 3:
+            return
+        if self.copy_evidence is None:
+            self.copy_evidence = hy.CopyEvidence(after.shape)
+        if not self.copy_evidence.add(before, after, self.mask):
+            return
+        found = self.copy_evidence.best()
+        if found is None:
+            return
+        rule = found[0]
+        rect = hy.board_rect(before, after, self.mask)
+        if rect is None:
+            return
+        params = rule + (rect,)
+        if any(h.kind == "copy" and h.params[:4] == rule for h in self.hyps):
+            return
+        if not hy.copy_picture_ok(params, after):
+            return
+        was, now = hy.copy_measure(params, before), hy.copy_measure(params, after)
+        if now is None or now == 0:
+            return
+        h = hy.Hypothesis("copy", params)
+        self.hyps.append(h)
+        self.copy_hyps += 1
+        self.stats["copy_hyps"] = self.stats.get("copy_hyps", 0) + 1
+        # the click that made the rule's case moved the new measure: credit it
+        self.causes.record(h.key, ("click", target.esig if target is not None else None), was, now,
+                           self._hyp_type(h) if self.carry_causes else None)
+
     # -- goal experiments (Phase 61) ---------------------------------------------
 
     def _confirmed_present(self) -> bool:
@@ -781,7 +826,7 @@ class ModelAgent(GraphAgent):
                     self._end_trial("trials_stuck")
         if self.trial is None and self.hyps and self.level_actions >= self.experiment_after \
                 and not self.relations and not self._confirmed_present():
-            order = {"reach": 0, "match": 1, "clear": 2, "unify": 3}
+            order = {"copy": -1, "reach": 0, "match": 1, "clear": 2, "unify": 3}
             pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)
                     and self.stalled[h.key] < self.experiment_retries
                     and values.get(h.key) is not None and values[h.key] > h.goal]

@@ -141,3 +141,19 @@ def test_bundle_keeps_playing_when_the_agent_raises(bundle_path: Path):
     agent.main()
     assert agent.action_counter >= 50 and agent._errors == 1
     assert type(agent._neo4).__name__ == "ModelAgent"
+
+
+def test_every_module_the_package_imports_is_bundled():
+    """A module missing from the bundle's list is found locally (the package is installed), so the
+    bundle imports here and fails on Kaggle: check the list against the package's own imports."""
+    import re
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from bundle import MODULES
+
+    for name in MODULES:
+        text = (ROOT / "neo4" / f"{name}.py").read_text()
+        for dep in re.findall(r"^from \.(\w+) import|^from \. import (\w+)", text, re.M):
+            dep = dep[0] or dep[1]
+            assert dep in MODULES, f"{name} imports {dep}, which is not bundled"
+            assert MODULES.index(dep) < MODULES.index(name), f"{dep} must come before {name}"

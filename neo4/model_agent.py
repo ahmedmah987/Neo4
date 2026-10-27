@@ -36,6 +36,7 @@ from arcengine import FrameDataRaw, GameAction, GameState
 from . import frame as fp
 from .advisor import Advisor, build_prompt, describe_objects, listed_objects
 from . import hypotheses as hy
+from .effects import EffectModel, imagine
 from .dynamics import GAME_OVER, LEVEL_UP, OK, Dynamics
 from .graph_agent import GraphAgent, LevelGraph, Node
 from .objects import Obj, at, erase, extract, find
@@ -69,6 +70,7 @@ class ModelAgent(GraphAgent):
     steer_first_after = 300  # ...and only once the level has taken this many actions (when stuck)
     carry_causes = True  # what moved a goal of a type in earlier levels orders the first tries in the next
     narrow_confirmed = True  # steer by the confirmed kinds that ended the most levels
+    imagine_clicks = False  # plan clicks in imagination towards a confirmed goal (Phase 60; a variant)
 
     def __init__(
         self,
@@ -143,6 +145,10 @@ class ModelAgent(GraphAgent):
         self.available: list[int] = []
         self.hyps = None
         self.hyp_values = None
+        self.click_plan = []
+        self.click_expect = None
+        self.imagined_this_level = 0
+        self.imagined_known = -1
         self.level_actions = 0
         self.advice_queries = 0
         self.advice_next = 0  # the next scheduled question (ADVICE_AT)
@@ -161,6 +167,11 @@ class ModelAgent(GraphAgent):
         self.hyp_reports: list[list[tuple]] = []
         self.confirmed: list[tuple] = []  # kinds of hypotheses that ended a level, most recent first
         self.confirm_count: Counter = Counter()  # how many levels each kind ended
+        self.effects = EffectModel()  # what a click on each shape does (Phase 60)
+        self.click_plan: list[Obj] = []  # imagined clicks still to make, in order
+        self.click_expect: np.ndarray | None = None  # the frame the last planned click should give
+        self.imagined_this_level = 0
+        self.imagined_known = -1  # effects known at the last search: search again when it grows
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -423,6 +434,11 @@ class ModelAgent(GraphAgent):
                 action, data, self.last_objs, self.last_grid, after, outcome,
                 after_grid=grid, mask=self.mask,
             )
+            if (outcome == OK and data is not None and grid is not None and self.last_grid is not None
+                    and grid.shape == self.last_grid.shape):
+                target = at(self.last_objs, data["x"], data["y"])
+                if target is not None:
+                    self.effects.observe(target, self.last_grid, grid, self.mask)
             if self.track_hypotheses:
                 self._track_hypotheses(action, data, outcome, after, grid)
             if outcome == LEVEL_UP:
@@ -493,6 +509,10 @@ class ModelAgent(GraphAgent):
         idx = self._replay_step(node)
         if idx is not None:
             return idx
+        if self.imagine_clicks and self.track_hypotheses:
+            idx = self._imagined_click(node, objs)
+            if idx is not None:
+                return idx
         if self.planning:
             idx = self._follow_plan(node, me)
             if idx is None and not self.plan:
@@ -683,6 +703,61 @@ class ModelAgent(GraphAgent):
             elif g == best and g > 0:
                 out.append(i)
         return out
+
+    # -- clicks planned in imagination (Phase 60) ---------------------------------
+
+    def _imagined_click(self, node: Node, objs: list[Obj]) -> int | None:
+        """The next click of a plan made in imagination towards a confirmed goal; a new plan when
+        none is under way and the level has a confirmed goal and clicks of known effect."""
+        if self.click_plan and self.click_expect is not None:
+            mask = self.mask
+            same = (np.array_equal(np.where(mask, 0, self.cur_grid), np.where(mask, 0, self.click_expect))
+                    if mask is not None else np.array_equal(self.cur_grid, self.click_expect))
+            if not same:
+                self.click_plan = []
+                self.stats["imagined_misses"] = self.stats.get("imagined_misses", 0) + 1
+        self.click_expect = None
+        if not self.click_plan:
+            if self.imagined_this_level >= 8 or self.cur_grid is None:
+                return None
+            # a search is worth making again only when the model of clicks has learned something
+            known = self.effects.known_count()
+            if known == 0 or known <= self.imagined_known:
+                return None
+            steer = self._steering()
+            if not steer:
+                return None
+            self.imagined_known = known
+            self.imagined_this_level += 1
+
+            def measure(o: list[Obj], g: np.ndarray) -> int | None:
+                me = self._me(o)
+                total = 0
+                for h in steer:
+                    v = hy.measure(h, o, g, me)
+                    if v is None:
+                        return None
+                    total += max(0, v - h.goal)
+                return total
+
+            plan = imagine(self.cur_grid, self.mask, self.effects, extract, measure)
+            self.stats["imagined_searches"] = self.stats.get("imagined_searches", 0) + 1
+            if not plan:
+                return None
+            self.stats["imagined_plans"] = self.stats.get("imagined_plans", 0) + 1
+            self.click_plan = list(plan)
+        target = self.click_plan.pop(0)
+        here = self._locate(target, objs)
+        if here is None:
+            self.click_plan = []
+            return None
+        for i, c in enumerate(node.cands):
+            if c.data is not None and here.contains(c.data["x"], c.data["y"]):
+                self.click_expect = self.effects.predict(here, self.cur_grid, self.mask)
+                self.stats["imagined_clicks"] = self.stats.get("imagined_clicks", 0) + 1
+                return i
+        self.click_plan = []
+        return None
 
     # -- the goal advisor (Phase 58) ---------------------------------------------
 

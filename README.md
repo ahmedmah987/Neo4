@@ -2864,6 +2864,36 @@ level in the diagnosis and were dropped. `tu93`'s third and fourth levels, still
 against the humans' 34 and 42, are lost to deaths on the way (17 in one run of the third), not to
 the goal, which is known.
 
+### Phase 60 — what a click does, and clicks tried in imagination
+
+To plan with clicks the agent must know not only *whether* a click changes something but *what*
+(`neo4/effects.py`). Every click is recorded as the cells it changed, with their colours before and
+after, relative to the clicked object and in screen positions; objects are grouped by size and shape,
+since a click often recolours the object itself. A shape's effect is known when its clicks agree in
+one frame of reference, and each prediction is checked against the next frame.
+
+**Diagnosis** (the explorer alone, 2,000 actions, seed 0): shapes whose clicks change something and
+whose effect became known, and how often the predicted frame was the real one:
+
+| game | predictions | right |
+|---|---:|---:|
+| `tn36` | 1,877 | 100% |
+| `bp35` | 27 | 96% |
+| `ft09` | 896 | 92% |
+| `r11l` | 47 | 89% |
+| `su15` | 862 | 74% |
+| `dc22`, `sb26`, `cn04`, `ka59`, `vc33` | 1,000+ in all | 7–37% (effects that depend on the state) |
+
+**Clicks in imagination.** With a confirmed goal (Phase 59) and clicks of known effect, a best-first
+search over predicted frames looks for clicks that bring the goal's measure to zero, and the agent
+makes them, abandoning the plan at the first frame that differs from the prediction. It searches
+again whenever a new effect becomes known. On the holdout it rarely finds a plan: at a second level's
+start no effect is known yet (first levels were solved in 41–58 actions, too few clicks to learn
+from), and the plans it found in `bp35` failed at their first click, whose effect there depends on
+the state (gravity). It stays a variant, off; the effects are still learned and reported. The games
+where effects are learned best (`tn36`, `ft09`) are the ones whose goal no hypothesis of Phase 59
+expresses: the agent now knows what its clicks do there, and not what they are for.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

@@ -88,6 +88,7 @@ The project has two strands that share one codebase:
 | 61 | **Testing a guess before any level has ended**: with no goal known, the hypotheses some action moved closer tested one at a time from a level's 60th action, each dropped when met without a level-up or after 40 actions without progress, and taken again later with twice the patience | done — holdout 13.22 → **14.20** summed over the 25 games (0.529 → 0.568), levels 107 → 111; 33 of 72 first levels cheaper, 16 dearer; `ft09` and `sc25` a first level they did not complete before |
 | 62 | **Why a click is made, read from what it changed (copies)**: the cells a click changed vote for the rules of correspondence (a shift, a picture 2–8 times smaller, a mirror) that brought them into agreement with unchanged cells elsewhere, kept by colour over the level; a rule explaining cells of two colours becomes a hypothesis that the board is to copy that picture | done — diagnosis: a picture explains a level's changes only in `cd82` (already the `match` of Phase 59) and `dc22`'s first level; holdout 14.20 → 14.08; a variant, off |
 | 63 | **Where a level's actions go, and tests begun early where an avatar moves**: per completed level, its actions, deaths and the actions of the life that completed it; Phase 61's tests from the 10th action where the keys move an avatar | done — the lives that completed the 111 holdout levels took 1.3 times the humans' actions, all actions 16.6 times: 92% is learning in lives that end; holdout 14.20 → **15.50**, public library 80.02 unchanged |
+| 64 | **Walks planned to a reach goal, and the tests' settings**: the reach hypothesis steered by walked to with the model of moves and hazards; patience; when tests begin | done — planned walks 15.50 → 15.60 (within noise, off); patience 20: 15.04; tests from the 0th or 20th action where an avatar moves: 13.51 and 13.13, from the 45th or 90th elsewhere: 15.31 and 15.45; the defaults stay (`sp80` makes the avatar setting noisy) |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2997,6 +2998,23 @@ patrols but not watchers that catch by sight. Within noise; off.
 
 **Patience.** A test given up after 20 actions without progress instead of 40: 15.50 → 15.04
 (`tu93` 4.14 → 3.75, `ft09` 0.07 → 0.01); 40 stays.
+
+**When tests begin.** The defaults (10 actions where an avatar moves, 60 elsewhere) are the best
+of the settings tried:
+
+| where an avatar moves | elsewhere | holdout |
+|---:|---:|---:|
+| 0 | 60 | 13.51 |
+| **10** | **60** | **15.50** |
+| 20 | 60 | 13.13 |
+| 60 | 60 | 14.20 |
+| 10 | 45 | 15.31 |
+| 10 | 90 | 15.45 |
+
+The avatar setting is not smooth (13.51, 15.50, 13.13), almost all of it `sp80` (2.56, 3.94,
+1.92), whose first level comes in 16–24 actions or several hundred depending on which test runs
+first: part of Phase 63's gain is that game's luck, and the honest estimate of the gain over
+Phase 61 is between 0 and +1.3.
 
 ### Where the library stands
 

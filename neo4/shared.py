@@ -27,6 +27,23 @@ class GoalPriors:
         self.seen: Counter = Counter()
         self.ended: Counter = Counter()
         self.levels = 0
+        self.seeded = False
+
+    def seed(self, counts: dict, exclude: str | None = None) -> None:
+        """Start from what the goals were like in the public games (Phase 67): ``counts`` maps a
+        game to its (levels, seen, ended) at the level-ups the full library reaches there; a game
+        named by ``exclude`` is left out, so that a public game played as an unseen one does not
+        learn from itself."""
+        with self._lock:
+            for game, (levels, seen, ended) in counts.items():
+                if game == exclude:
+                    continue
+                self.levels += levels
+                for f, n in seen:
+                    self.seen[f] += n
+                for f, n in ended:
+                    self.ended[f] += n
+            self.seeded = True
 
     def record(self, hyps: Iterable, ended: set) -> None:
         """A level ended: ``hyps`` were on the screen, those with a key in ``ended`` ended it."""
@@ -53,6 +70,14 @@ class GoalPriors:
 
 
 _PRIORS = GoalPriors()
+
+
+def seed_from_public(exclude: str | None = None) -> None:
+    """Seed the process's priors from the public games' counts, once."""
+    from .priors_data import COUNTS
+
+    if not _PRIORS.seeded:
+        _PRIORS.seed(COUNTS, exclude)
 
 
 def goal_priors() -> GoalPriors:

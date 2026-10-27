@@ -81,6 +81,7 @@ class ModelAgent(GraphAgent):
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     plan_trials = False  # walk the avatar by plan to what the reach hypothesis steered by names (Phase 64)
     share_priors = False  # order the tests by what goals were like in the process's other games (Phase 65)
+    seed_priors = True  # ...starting from what the goals were like in the public games (Phase 67)
     share_situations = False  # what was met first where goals like a test's ended a level (Phase 66)
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
 
@@ -204,6 +205,8 @@ class ModelAgent(GraphAgent):
         self.level_log: list[list[int]] = []
         self.trial_plans = 0
         # Goals in the process's other games (Phase 65): None unless share_priors.
+        if self.share_priors and self.seed_priors:
+            shared.seed_from_public()
         self.priors: shared.GoalPriors | None = shared.goal_priors() if self.share_priors else None
         # Situations (Phase 66): when each hypothesis was first met in the current life, and the
         # test to go back to once the one under way, met first in a known situation, is met.

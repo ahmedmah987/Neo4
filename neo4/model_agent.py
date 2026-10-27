@@ -26,6 +26,8 @@ the current level's graph is rebuilt under the new identity.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from arcengine import FrameDataRaw, GameAction, GameState
 
@@ -42,9 +44,10 @@ MAX_EXPLORE_PLANS_PER_LEVEL = 40
 MAX_SWITCH_PLANS_PER_LEVEL = 30
 PLAN_COOLDOWN = 20  # exploration steps after a failed plan before planning again
 HORIZON = 40  # moves ahead over which a patrol's motion is extrapolated for planning
-# The goal advisor (Phase 58) is asked at a level's start and again once the level has taken
-# this many actions without ending; a game's questions are capped.
-ADVICE_AT = (0, 40, 250)
+# The goal advisor (Phase 58) is asked once a level has taken this many actions without ending:
+# not at its start, since advice followed there cost the cheap levels the explorer finds alone
+# (NEO4_ADVICE_AT overrides, e.g. "0,40,250"); a game's questions are capped.
+ADVICE_AT = tuple(int(a) for a in os.environ.get("NEO4_ADVICE_AT", "40,250").split(","))
 MAX_ADVICE_PER_LEVEL = 5  # with the re-asks that follow advice carried out to its end
 MAX_ADVICE_PER_GAME = 40
 MAX_ADVICE_PLANS_PER_LEVEL = 12

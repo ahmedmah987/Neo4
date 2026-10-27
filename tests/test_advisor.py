@@ -6,6 +6,7 @@ import json
 import numpy as np
 from arcengine import GameAction
 
+import neo4.model_agent as model_agent
 from neo4.advisor import Advisor, ScriptedAdvisor, build_prompt, parse, render
 from neo4.model_agent import ModelAgent
 from neo4.run import arcade
@@ -43,7 +44,8 @@ def first_target(prompt: str) -> str:
     return '{"goal": "click it", "player": null, "targets": [1, 2]}'
 
 
-def test_an_advised_object_is_clicked_first():
+def test_an_advised_object_is_clicked_first(monkeypatch):
+    monkeypatch.setattr(model_agent, "ADVICE_AT", (0, 40, 250))  # asked at the level's start
     agent = ModelAgent(seed=0)
     agent.advisor = ScriptedAdvisor(first_target)
     actions = play(agent, "vc33", 3)
@@ -53,7 +55,8 @@ def test_an_advised_object_is_clicked_first():
     assert "objects on the screen" in agent.advisor.prompts[0].lower()
 
 
-def test_the_avatar_is_walked_to_an_advised_object():
+def test_the_avatar_is_walked_to_an_advised_object(monkeypatch):
+    monkeypatch.setattr(model_agent, "ADVICE_AT", (0, 40, 250))
     agent = ModelAgent(seed=0)
     agent.advisor = ScriptedAdvisor(lambda p: '{"goal": "go there", "player": null, "targets": [1, 2, 3]}')
     play(agent, "ls20", 200)
@@ -67,4 +70,11 @@ def test_without_a_model_nothing_changes():
     agent = ModelAgent(seed=0)
     agent.advisor = Advisor()  # no model: never available
     assert play(agent, "vc33", 60) == plain
+    assert agent.stats["advice_queries"] == 0
+
+
+def test_by_default_the_advisor_is_asked_only_once_a_level_drags_on():
+    agent = ModelAgent(seed=0)
+    agent.advisor = ScriptedAdvisor(first_target)
+    play(agent, "vc33", 12)  # vc33's first level falls in 15 actions: no question before 40
     assert agent.stats["advice_queries"] == 0

@@ -265,6 +265,8 @@ class ModelAdvisor(Advisor):
                         for i in range(torch.cuda.device_count())}
                     max_memory["cpu"] = 64 * 2**30
                     placement["max_memory"] = max_memory
+            if os.environ.get("NEO4_ADVISOR_ATTN"):  # e.g. eager, where a fused kernel misbehaves
+                placement["attn_implementation"] = os.environ["NEO4_ADVISOR_ATTN"]
             quant = os.environ.get("NEO4_ADVISOR_QUANT", "")
             if quant in ("4bit", "8bit"):
                 placement["quantization_config"] = transformers.BitsAndBytesConfig(

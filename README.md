@@ -2890,7 +2890,9 @@ makes them, abandoning the plan at the first frame that differs from the predict
 again whenever a new effect becomes known. On the holdout it rarely finds a plan: at a second level's
 start no effect is known yet (first levels were solved in 41–58 actions, too few clicks to learn
 from), and the plans it found in `bp35` failed at their first click, whose effect there depends on
-the state (gravity). It stays a variant, off; the effects are still learned and reported. The games
+the state (gravity). Measured on the holdout (5 seeds, hash seed 0) it changes nothing: 13.22 summed
+over the 25 games either way; in all 125 runs it found plans only in `bp35` (12, of whose 13 clicks
+11 missed). It stays a variant, off; the effects are still learned and reported. The games
 where effects are learned best (`tn36`, `ft09`) are the ones whose goal no hypothesis of Phase 59
 expresses: the agent now knows what its clicks do there, and not what they are for.
 

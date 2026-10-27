@@ -74,6 +74,7 @@ class ModelAgent(GraphAgent):
     experiment = False  # with no confirmed goal, test one hypothesis at a time (Phase 61; a variant)
     experiment_after = 30  # actions into a level before the first test
     experiment_patience = 40  # actions without a new best before a test is given up
+    experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
 
     def __init__(
         self,
@@ -181,8 +182,11 @@ class ModelAgent(GraphAgent):
         self.trial_best: int | None = None
         self.trial_quiet = 0
         self.tried: set[tuple] = set()
+        self.stalled: Counter = Counter()  # this level's tests given up for want of progress
         self.node_values: dict[str, dict] = {}
         self.node_rel: dict[str, float | None] = {}
+        self.trial_log: list[list] = []  # [level, kind, params, first action, last action, outcome]
+        self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -241,6 +245,7 @@ class ModelAgent(GraphAgent):
         self.trial_best = None
         self.trial_quiet = 0
         self.tried = set()
+        self.stalled = Counter()
         self.node_values = {}
         self.node_rel = {}
 
@@ -629,6 +634,9 @@ class ModelAgent(GraphAgent):
         """Credit the last action with what it did to every hypothesis's measure; at a level's
         end, keep the hypotheses' readings on its last frame."""
         if outcome == LEVEL_UP:
+            if self.trial is not None and self.trial_log:
+                self.trial_log[-1][4:] = [self.level_actions, "level"]
+            self.level_no += 1
             if self.hyps and self.hyp_values is not None:
                 self.hyp_reports.append([
                     (h.kind, h.params, h.first, h.best, self.hyp_values.get(h.key), h.goal, self.causes.live(h.key))
@@ -754,7 +762,9 @@ class ModelAgent(GraphAgent):
         """Test one hypothesis at a time: steer by it alone until its measure reaches its goal
         (and the level did not end: not the goal, or not all of it), or until it has not come
         closer for ``experiment_patience`` actions; then take the next one some action has moved
-        closer. A hypothesis that ends the level is confirmed as in Phase 59."""
+        closer. A test given up for want of progress (a detour in a maze looks like no progress)
+        is taken again once the fresh ones are spent, with twice the patience. A hypothesis that
+        ends the level is confirmed as in Phase 59."""
         if self.trial is not None:
             v = values.get(self.trial.key)
             if v is not None and v <= self.trial.goal:
@@ -764,19 +774,22 @@ class ModelAgent(GraphAgent):
                 self.trial_quiet = 0
             else:
                 self.trial_quiet += 1
-                if self.trial_quiet >= self.experiment_patience:
+                if self.trial_quiet >= self.experiment_patience << self.stalled[self.trial.key]:
                     self._end_trial("trials_stuck")
         if self.trial is None and self.hyps and self.level_actions >= self.experiment_after \
                 and not self._confirmed_present():
             order = {"reach": 0, "match": 1, "clear": 2, "unify": 3}
             pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)
+                    and self.stalled[h.key] < self.experiment_retries
                     and values.get(h.key) is not None and values[h.key] > h.goal]
             if pool:
                 def rank(h: hy.Hypothesis) -> tuple:
                     v = values[h.key]
                     share = (v - h.goal) / max(1, (h.first if h.first is not None else v) - h.goal)
-                    return (share, order.get(h.kind, 9), repr(h.params))
+                    return (self.stalled[h.key], share, order.get(h.kind, 9), repr(h.params))
                 self.trial = min(pool, key=rank)
+                self.trial_log.append([self.level_no, self.trial.kind, repr(self.trial.params)[:50],
+                                       self.level_actions, None, None])
                 self.trial_best = values[self.trial.key]
                 self.trial_quiet = 0
                 self.stats["trials"] = self.stats.get("trials", 0) + 1
@@ -784,7 +797,12 @@ class ModelAgent(GraphAgent):
 
     def _end_trial(self, why: str) -> None:
         assert self.trial is not None
-        self.tried.add(self.trial.key)
+        if self.trial_log:
+            self.trial_log[-1][4:] = [self.level_actions, why]
+        if why == "trials_stuck":
+            self.stalled[self.trial.key] += 1
+        else:
+            self.tried.add(self.trial.key)
         self.trial = None
         self.trial_best = None
         self.stats[why] = self.stats.get(why, 0) + 1

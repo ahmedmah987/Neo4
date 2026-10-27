@@ -106,6 +106,15 @@ def test_a_test_that_stops_progressing_is_given_up_and_nodes_are_measured_again(
         agent._experiment(agent.hyp_values)  # no new best
     assert agent.trial is b and agent.stats["trials_stuck"] == 1
     assert node.h == 0.2  # and again against the next one
+    agent.hyp_values = {a.key: 5, b.key: 0}  # b met without a level-up: a is taken again
+    agent._experiment(agent.hyp_values)
+    assert agent.trial is a and agent.stalled[a.key] == 1
+    for _ in range(5):
+        agent._experiment(agent.hyp_values)
+    assert agent.trial is a  # twice the patience the second time
+    agent.experiment_retries = 2
+    agent._experiment(agent.hyp_values)
+    assert agent.trial is None and agent.stalled[a.key] == 2  # given up twice: not taken again
 
 
 def test_without_the_flag_no_experiment_runs():

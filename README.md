@@ -2853,6 +2853,17 @@ have scored nothing; the check is why a submission is never sent before it passe
 It scored **0.36** on the hidden games, from the first submission's 0.33 (+9%), rank 2,925 of 4,897;
 the holdout had predicted +16–17%.
 
+**What did not add to it.** Carrying the memory of causes across levels by hypothesis type and
+action kind (what clicks on a kind of that shape did to a goal of that type), and steering only by
+the confirmed kinds that ended the most levels, both left the holdout exactly where it was (13.22
+and 13.78 summed under the two hash seeds): the recorded clicks moved the measures both ways about
+equally, and the kinds pile up only after the fourth level, which 4,000 actions rarely reach. Both
+stay on, harmless. Same-colour pairs as goals (*pair*, *level*: a key and its door, a token and its
+patch) and a reference shown smaller (*match* in blocks of k × k) explained no further completed
+level in the diagnosis and were dropped. `tu93`'s third and fourth levels, still 400–480 actions
+against the humans' 34 and 42, are lost to deaths on the way (17 in one run of the third), not to
+the goal, which is known.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

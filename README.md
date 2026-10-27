@@ -86,6 +86,7 @@ The project has two strands that share one codebase:
 | 59 | **Goal hypotheses read from the screen, and a memory of causes**: guesses of a level's goal by structure alone (reach a kind seen once, clear a kind seen several times, make two equal panels match, give a shape one colour), each with a measure; what each action class did to each measure; hypotheses that took a level to its end confirmed by type, and in later levels those of a confirmed type steer the best-first frontier and the order of actions | done — diagnosis: 13 of 23 completed levels had a hypothesis that went from its start to its goal; holdout 0.452 → **0.529** under hash seed 0 and 0.474 → **0.551** under hash seed 1 (`tu93` 1.77 → 3.36, `sp80` 2.49 → 2.83); public score unchanged at 80.01; the second submission: hidden games **0.36** (from 0.33; rank 2,925 of 4,897) |
 | 60 | **What a click does, and clicks tried in imagination**: every click recorded as the cells it changed, relative to the clicked object and in screen positions, grouped by shape; an effect known when its clicks agree, each prediction checked against the next frame; a best-first search over predicted frames towards a confirmed goal | done — effects predicted right in 74–100% of 27–1,877 predictions in five games; imagination finds plans only in `bp35`, whose clicks depend on the state: holdout unchanged (13.22); a variant, off |
 | 61 | **Testing a guess before any level has ended**: with no goal known, the hypotheses some action moved closer tested one at a time from a level's 60th action, each dropped when met without a level-up or after 40 actions without progress, and taken again later with twice the patience | done — holdout 13.22 → **14.20** summed over the 25 games (0.529 → 0.568), levels 107 → 111; 33 of 72 first levels cheaper, 16 dearer; `ft09` and `sc25` a first level they did not complete before |
+| 62 | **Why a click is made, read from what it changed (copies)**: the cells a click changed vote for the rules of correspondence (a shift, a picture 2–8 times smaller, a mirror) that brought them into agreement with unchanged cells elsewhere, kept by colour over the level; a rule explaining cells of two colours becomes a hypothesis that the board is to copy that picture | done — diagnosis: a picture explains a level's changes only in `cd82` (already the `match` of Phase 59) and `dc22`'s first level; holdout 14.20 → 14.08; a variant, off |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2932,6 +2933,29 @@ or the run ended. The energy
 toy shows the effect at its plainest: its first level falls in 118 actions instead of 3,008 (the
 goal, a tile seen once, is the first guess tested), though its second then costs more, the refills
 not yet learned.
+
+### Phase 62 — why a click is made, read from what it changed: copies (a variant, off)
+
+A click's result says what the click does, not what it is for. One way to read the purpose from the
+result: if the cells a click changed came to agree with unchanged cells elsewhere on the screen, the
+board may be meant to copy what is there. After each click the changed cells vote for the rules of
+correspondence that brought them into agreement — a shift, a picture 2, 3, 4 or 8 times smaller, a
+mirror — and a rule with enough votes becomes a hypothesis, "the board is to look like that
+picture", tested as in Phase 61 (`hypotheses.CopyEvidence`). One click paints one colour, which
+agrees with every place of that colour on the screen, so the votes are kept by colour over the
+level and a rule counts only once it explains cells of two colours or more, each at least a fifth.
+
+**Diagnosis first.** On the 150 levels the library completes, comparing each level's first frame
+with its last: under that condition a picture explains most of the changed cells only in `cd82`
+(the painter) and in `dc22`'s first level. In `cd82` the picture is the canvas's own size, which is
+the `match` of Phase 59 already; what the explorer lacks there is the means (pick a colour, place
+the brush), not the goal. (Without the two-colour condition `ft09` looked explained too: wrongly.)
+
+**Measured** (holdout, 5 seeds, hash seed 0): 14.20 → 14.08. Copy hypotheses were formed in 13
+games and helped none; those read from the brush and the palette cost `cd82` 0.37 → 0.33 and `sc25`
+a level. The variant stays off. What the result of a click can tell about its purpose is bounded
+by what the screen draws of the goal, and in the public games the goal is rarely drawn as a picture
+the board is to become; it is a rule that only the end of a level shows.
 
 ### Where the library stands
 

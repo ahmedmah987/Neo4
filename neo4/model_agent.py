@@ -74,7 +74,7 @@ class ModelAgent(GraphAgent):
     imagine_clicks = False  # plan clicks in imagination towards a confirmed goal (Phase 60; a variant)
     experiment = True  # with no confirmed goal, test one hypothesis at a time (Phase 61)
     experiment_after = 60  # actions into a level before the first test (a cheap level is left alone)
-    experiment_after_avatar = 60  # the same where the keys move an avatar (Phase 63 measures 10)
+    experiment_after_avatar = 10  # ...and where the keys move an avatar, from its 10th (Phase 63)
     experiment_patience = 40  # actions without a new best before a test is given up
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)

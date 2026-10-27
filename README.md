@@ -87,6 +87,7 @@ The project has two strands that share one codebase:
 | 60 | **What a click does, and clicks tried in imagination**: every click recorded as the cells it changed, relative to the clicked object and in screen positions, grouped by shape; an effect known when its clicks agree, each prediction checked against the next frame; a best-first search over predicted frames towards a confirmed goal | done — effects predicted right in 74–100% of 27–1,877 predictions in five games; imagination finds plans only in `bp35`, whose clicks depend on the state: holdout unchanged (13.22); a variant, off |
 | 61 | **Testing a guess before any level has ended**: with no goal known, the hypotheses some action moved closer tested one at a time from a level's 60th action, each dropped when met without a level-up or after 40 actions without progress, and taken again later with twice the patience | done — holdout 13.22 → **14.20** summed over the 25 games (0.529 → 0.568), levels 107 → 111; 33 of 72 first levels cheaper, 16 dearer; `ft09` and `sc25` a first level they did not complete before |
 | 62 | **Why a click is made, read from what it changed (copies)**: the cells a click changed vote for the rules of correspondence (a shift, a picture 2–8 times smaller, a mirror) that brought them into agreement with unchanged cells elsewhere, kept by colour over the level; a rule explaining cells of two colours becomes a hypothesis that the board is to copy that picture | done — diagnosis: a picture explains a level's changes only in `cd82` (already the `match` of Phase 59) and `dc22`'s first level; holdout 14.20 → 14.08; a variant, off |
+| 63 | **Where a level's actions go, and tests begun early where an avatar moves**: per completed level, its actions, deaths and the actions of the life that completed it; Phase 61's tests from the 10th action where the keys move an avatar | done — the lives that completed the 111 holdout levels took 1.3 times the humans' actions, all actions 16.6 times: 92% is learning in lives that end; holdout 14.20 → **15.50**, public library 80.02 unchanged |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -2956,6 +2957,34 @@ games and helped none; those read from the brush and the palette cost `cd82` 0.3
 a level. The variant stays off. What the result of a click can tell about its purpose is bounded
 by what the screen draws of the goal, and in the public games the goal is rarely drawn as a picture
 the board is to become; it is a rule that only the end of a level shows.
+
+### Phase 63 — where a level's actions go, and tests begun early where an avatar moves
+
+**Where the actions go.** The model-guided agent now logs, for every level it completes, its
+actions, its deaths and the actions of the life that completed it. Over the 111 levels of the
+holdout sweep (5 seeds, Phase 61 defaults):
+
+| | actions | × the humans' count |
+|---|---:|---:|
+| the lives that completed the levels | 4,901 | 1.3 |
+| all actions, lives lost included | 63,117 | 16.6 |
+
+In 51 of the 111 levels the winning life took no more actions than the humans did; `tu93`'s
+fourth level, for one, took 561 actions and 29 deaths, of which the winning life took 19 (humans
+42). Once the agent has learned a level it plays it at about human cost; 92% of what it spends is
+learning, in lives that end. Most of those end in the game's own loss (882 of the deaths; in
+the click games, where nothing kills, a move limit that runs out while it explores), not in
+resets of its own, so an undo key would not save them. The official scorecard counts a level's
+actions from the previous level-up, resets and lost lives included (`arc_agi/scorecard.py`), so
+this is the cost the score sees.
+
+**Tests begun early where an avatar moves.** Phase 61 begins its tests at a level's 60th action,
+because from the 30th they cost the click games `r11l` and `lp85` their cheap first levels; but in
+the navigation games an early test was often the right one (`tu93` seed 3: the first level in 41
+actions from the 30th, 659 from the 60th). Tests now begin at the 10th action where the keys move
+an avatar, the 60th elsewhere. Holdout 14.20 → **15.50** (`sp80` 2.71 → 3.94: the first level in
+16 and 24 actions on two seeds against the humans' 39; `bp35` 0.09 → 0.21, two more first levels;
+`lf52` 0.16 → 0.21; `sc25` 0.07 → 0.03); public library 80.02 → 80.02, no game loses.
 
 ### Where the library stands
 

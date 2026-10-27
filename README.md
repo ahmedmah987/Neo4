@@ -90,6 +90,7 @@ The project has two strands that share one codebase:
 | 63 | **Where a level's actions go, and tests begun early where an avatar moves**: per completed level, its actions, deaths and the actions of the life that completed it; Phase 61's tests from the 10th action where the keys move an avatar | done — the lives that completed the 111 holdout levels took 1.3 times the humans' actions, all actions 16.6 times: 92% is learning in lives that end; holdout 14.20 → **15.50**, public library 80.02 unchanged |
 | 64 | **Walks planned to a reach goal, and the tests' settings**: the reach hypothesis steered by walked to with the model of moves and hazards; patience; when tests begin | done — planned walks 15.50 → 15.60 (within noise, off); patience 20: 15.04; tests from the 0th or 20th action where an avatar moves: 13.51 and 13.13, from the 45th or 90th elsewhere: 15.31 and 15.45; the defaults stay (`sp80` makes the avatar setting noisy) |
 | 65 | **What the goals were like in the other games**: hypotheses carry features any game shares; process-wide counts of which ended levels order a new game's tests | done — measured with the 25 games interleaved in one process, as the competition plays them: 15.50 → 15.41 (`ka59` a first level for the first time), within noise; a run ends only about 22 levels, too few for the counts to order much; a variant, off |
+| 66 | **A library of situations shared across games**: pairs of a hypothesis met first and the one that then ended a level, in shared features; a test met without ending its level sends the agent to what came first in such situations, then back | done — interleaved, 5 seeds: 15.50 → 15.52; used in 8 games, opened no level in the games at zero; a variant, off |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3037,6 +3038,20 @@ sensible things (in a run, reach guesses ended 10 of the 18 levels of avatar gam
 on the screen, 4 of 5 when the target was the avatar's size), but a whole run ends only about 22
 levels across the 25 games, too few for counts of this kind to order much, and the goal is often
 none of the four kinds at all. Off.
+
+### Phase 66 — a library of situations shared across games (a variant, off)
+
+A step past Phase 65's counts: at each level-up, the hypotheses met in the winning life before the
+end are paired with the one that explained it ("the key, then the door"), in the features any game
+shares, and added to a process-wide library (`shared.SituationLibrary`). When a test is met and
+the level goes on, and goals like it ended levels elsewhere once something else had been met, the
+agent tests the hypothesis most like that first part, then goes back to the first test.
+
+**Measured** with the 25 games interleaved in one process, 5 seeds: 15.50 → 15.52. The library
+filled (64–82 situations a run, about 28 distinct) and was used in 8 games (69 first parts tested,
+12 returns to the goal, most in `sb26`, `dc22` and `ka59`), but it opened no level in the games
+still at zero, and moved no score beyond noise (`dc22` 0.07 → 0.08, in fewer actions). Situations
+read in terms of the four kinds of goal carry little that the kinds themselves did not. Off.
 
 ### Where the library stands
 

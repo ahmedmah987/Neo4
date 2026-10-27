@@ -62,5 +62,46 @@ def goal_priors() -> GoalPriors:
 
 def reset() -> None:
     """Forget everything (between offline experiments)."""
-    global _PRIORS
+    global _PRIORS, _SITUATIONS
     _PRIORS = GoalPriors()
+    _SITUATIONS = SituationLibrary()
+
+
+def similarity(a: Iterable, b: Iterable) -> float:
+    """The share of features two hypotheses have in common (Jaccard)."""
+    sa, sb = set(a), set(b)
+    return len(sa & sb) / len(sa | sb) if sa or sb else 0.0
+
+
+class SituationLibrary:
+    """Situations seen to end a level, in any game of the process (Phase 66): a hypothesis met in
+    the life that ended a level, before the end, and the hypothesis that explained the end ("the
+    key, then the door"), both in features any game shares. When a test is met and the level goes
+    on, the library says what, met first, made goals like it end a level elsewhere."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.pairs: Counter = Counter()  # (precondition features, goal features) -> times seen
+
+    def record(self, before: Iterable, goal: Iterable) -> None:
+        with self._lock:
+            self.pairs[(frozenset(before), frozenset(goal))] += 1
+
+    def preconditions(self, goal: Iterable, min_similarity: float = 0.5) -> list[tuple[frozenset, float]]:
+        """What came first in situations whose goal was like ``goal``, weighted by how often they
+        were seen and how alike the goals are."""
+        with self._lock:
+            out = []
+            for (pre, g), n in self.pairs.items():
+                s = similarity(g, goal)
+                if s >= min_similarity:
+                    out.append((pre, n * s))
+            return out
+
+
+_SITUATIONS = SituationLibrary()
+
+
+def situations() -> SituationLibrary:
+    """The process's library of situations, shared by every agent in it."""
+    return _SITUATIONS

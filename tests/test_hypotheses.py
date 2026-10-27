@@ -188,3 +188,28 @@ def test_goal_priors_order_the_tests_by_what_goals_were_elsewhere():
     agent._experiment(agent.hyp_values)
     assert agent.trial is b  # but b is tested first: guesses like it were goals elsewhere
     shared.reset()
+
+
+def test_a_situation_seen_elsewhere_sends_the_agent_to_its_first_part_and_back():
+    from neo4 import shared
+
+    shared.reset()
+    key_like = (("reach", "avatar"), ("reach", "size", "smaller"))
+    door_like = (("reach", "avatar"), ("reach", "size", "larger"))
+    shared.situations().record(key_like, door_like)  # elsewhere: a key met, then the door ended it
+    ModelAgent.share_situations = True
+    try:
+        agent, a, b = experiment_agent()
+    finally:
+        ModelAgent.share_situations = False
+    a.features, b.features = door_like, key_like  # a is like the door, b like the key
+    agent.hyp_values = {a.key: 5, b.key: 4}
+    agent._experiment(agent.hyp_values)
+    agent.trial = a  # testing the door
+    agent.hyp_values = {a.key: 0, b.key: 4}  # the door met, and the level goes on
+    agent._experiment(agent.hyp_values)
+    assert agent.trial is b and agent.then_key == a.key  # the key first
+    agent.hyp_values = {a.key: 3, b.key: 0}  # the key met: back to the door
+    agent._experiment(agent.hyp_values)
+    assert agent.trial is a and agent.stats["situation_returns"] == 1
+    shared.reset()

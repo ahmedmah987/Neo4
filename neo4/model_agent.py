@@ -81,6 +81,7 @@ class ModelAgent(GraphAgent):
     experiment_retries = 3  # a test given up is taken again later, with twice the patience each time
     plan_trials = False  # walk the avatar by plan to what the reach hypothesis steered by names (Phase 64)
     share_priors = False  # order the tests by what goals were like in the process's other games (Phase 65)
+    share_situations = False  # what was met first where goals like a test's ended a level (Phase 66)
     read_copies = False  # a board to copy a picture on the screen, read from what clicks change (Phase 62; a variant)
 
     def __init__(
@@ -204,6 +205,11 @@ class ModelAgent(GraphAgent):
         self.trial_plans = 0
         # Goals in the process's other games (Phase 65): None unless share_priors.
         self.priors: shared.GoalPriors | None = shared.goal_priors() if self.share_priors else None
+        # Situations (Phase 66): when each hypothesis was first met in the current life, and the
+        # test to go back to once the one under way, met first in a known situation, is met.
+        self.situations: shared.SituationLibrary | None = shared.situations() if self.share_situations else None
+        self.met_at: dict[tuple, int] = {}
+        self.then_key: tuple | None = None
         self.level_no = 0
 
     def _key(self, grid: np.ndarray) -> str:
@@ -269,6 +275,8 @@ class ModelAgent(GraphAgent):
         self.level_deaths = 0
         self.life_start = 0
         self.trial_plans = 0
+        self.met_at = {}
+        self.then_key = None
         self.node_values = {}
         self.node_rel = {}
 
@@ -541,6 +549,7 @@ class ModelAgent(GraphAgent):
             self.level_deaths += 1
         if action is GameAction.RESET:
             self.life_start = self.level_actions
+            self.met_at = {}
 
         if action is GameAction.RESET or grid is None:
             if obs.state != GameState.GAME_OVER:
@@ -674,9 +683,16 @@ class ModelAgent(GraphAgent):
                 self.hyp_reports.append([
                     (h.kind, h.params, h.first, h.best, self.hyp_values.get(h.key), h.goal, self.causes.live(h.key))
                     for h in self.hyps])
+                ended = {h.key for h in self.hyps if self._explains(h, self.hyp_values.get(h.key))}
                 if self.priors is not None:
-                    self.priors.record(self.hyps, {h.key for h in self.hyps
-                                                   if self._explains(h, self.hyp_values.get(h.key))})
+                    self.priors.record(self.hyps, ended)
+                if self.situations is not None:
+                    # what was met in the winning life before the end, then what explained it
+                    before = [h for h in self.hyps if h.key in self.met_at and h.key not in ended]
+                    for e in self.hyps:
+                        if e.key in ended:
+                            for b in before:
+                                self.situations.record(b.features, e.features)
                 for h in self.hyps:
                     last = self.hyp_values.get(h.key)
                     if self._explains(h, last):
@@ -712,6 +728,11 @@ class ModelAgent(GraphAgent):
                     h.first = v
                 h.best = v if h.best is None else min(h.best, v)
         self.hyp_values = values
+        if self.situations is not None:
+            for h in self.hyps:
+                v = values.get(h.key)
+                if v is not None and v <= h.goal and h.first is not None and h.first > h.goal:
+                    self.met_at.setdefault(h.key, self.level_actions)
         if self.experiment:
             self._experiment(values)
 
@@ -843,7 +864,11 @@ class ModelAgent(GraphAgent):
         if self.trial is not None:
             v = values.get(self.trial.key)
             if v is not None and v <= self.trial.goal:
+                done = self.trial
                 self._end_trial("trials_met")
+                follow = self._situation_next(done, values)
+                if follow is not None:
+                    self._start_trial(follow, values)
             elif v is not None and (self.trial_best is None or v < self.trial_best):
                 self.trial_best = v
                 self.trial_quiet = 0
@@ -866,13 +891,47 @@ class ModelAgent(GraphAgent):
                     prior = self.priors.score(h.features) if self.priors is not None else None
                     return (self.stalled[h.key], -prior if prior is not None else 0.0, share,
                             order.get(h.kind, 9), repr(h.params))
-                self.trial = min(pool, key=rank)
-                self.trial_log.append([self.level_no, self.trial.kind, repr(self.trial.params)[:50],
-                                       self.level_actions, None, None])
-                self.trial_best = values[self.trial.key]
-                self.trial_quiet = 0
-                self.stats["trials"] = self.stats.get("trials", 0) + 1
-                self._remeasure()
+                self._start_trial(min(pool, key=rank), values)
+
+    def _start_trial(self, h: hy.Hypothesis, values: dict) -> None:
+        self.trial = h
+        self.trial_log.append([self.level_no, h.kind, repr(h.params)[:50], self.level_actions, None, None])
+        self.trial_best = values[h.key]
+        self.trial_quiet = 0
+        self.stats["trials"] = self.stats.get("trials", 0) + 1
+        self._remeasure()
+
+    def _situation_next(self, done: hy.Hypothesis, values: dict) -> hy.Hypothesis | None:
+        """A test was met and the level goes on (Phase 66). If it was met as the first part of a
+        known situation, go back to the test it was met for; else, if goals like it ended levels
+        elsewhere once something else had been met, test the hypothesis most like that first."""
+        if self.situations is None:
+            return None
+        if self.then_key is not None:
+            key, self.then_key = self.then_key, None
+            back = next((h for h in self.hyps or [] if h.key == key), None)
+            v = values.get(key)
+            if back is not None and key != done.key and v is not None and v > back.goal:
+                self.tried.discard(key)
+                self.stats["situation_returns"] = self.stats.get("situation_returns", 0) + 1
+                return back
+            return None
+        pres = self.situations.preconditions(done.features)
+        if not pres:
+            return None
+        best, score = None, 0.0
+        for h in self.hyps or []:
+            v = values.get(h.key)
+            if h.key == done.key or h.key in self.tried or v is None or v <= h.goal:
+                continue
+            for pre, weight in pres:
+                sim = shared.similarity(h.features, pre)
+                if sim >= 0.5 and sim * weight > score:
+                    best, score = h, sim * weight
+        if best is not None:
+            self.then_key = done.key
+            self.stats["situation_tests"] = self.stats.get("situation_tests", 0) + 1
+        return best
 
     def _end_trial(self, why: str) -> None:
         assert self.trial is not None
@@ -880,6 +939,7 @@ class ModelAgent(GraphAgent):
             self.trial_log[-1][4:] = [self.level_actions, why]
         if why == "trials_stuck":
             self.stalled[self.trial.key] += 1
+            self.then_key = None  # the first part of a situation could not be met: drop the plan
         else:
             self.tried.add(self.trial.key)
         self.trial = None

@@ -86,6 +86,7 @@ Official-style score, 25 public games, 4,000 actions, 5 seeds:
 | + mechanics library (eighteen solvers) | 653 | **80.01** |
 | holdout: each game without its own solvers | — | 0.45 |
 | **hidden games (Kaggle public leaderboard)** | — | **0.33** |
+| hidden games, with goal hypotheses (§6) | — | **0.36** |
 
 Sixteen of the 25 games are played at or near the cap. Examples: `ar25`, all eight levels in
 253 actions (humans 748); `bp35`, all nine in 448 (651). Sixteen games were diagnosed while the library could not yet play them. Every level of
@@ -133,7 +134,7 @@ colour. It records what each action does to each measure, confirms by type a gue
 a level's start to its goal, and steers later levels by it. In 13 of 23 completed levels a guess
 went from start to goal (the mirror game's panels, 63 cells apart to 0). Steering raises the
 holdout from 0.452 to 0.529 and, under a second hash seed, 0.474 to 0.551, with the public score
-unchanged.
+unchanged; on the hidden games, 0.33 to 0.36.
 
 What remains is the step a person takes first: testing a guess before any level has ended, which
 so far costs the cheap levels as much as it finds on hard ones.

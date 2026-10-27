@@ -14,8 +14,8 @@ scores 0.33. We measure the gap offline with a holdout protocol, in which each p
 played without the solvers built for it. That gives 0.45, which predicts the hidden score.
 Sixteen public games were diagnosed by search on hand-built models of their rules, and every
 level was won in no more actions than humans took. Search, then, is not the bottleneck:
-acquiring the model is. We report what transfers, what does not, and a first step towards
-learning the goal from completed levels.
+acquiring the model is. Goals guessed from the screen and confirmed by play raise the
+holdout by 17%, where a language model's guesses lowered it.
 
 ## 1. Introduction
 
@@ -26,7 +26,7 @@ quadratically: a level finished in ten times the human count is worth 1%. And la
 where a learned rule can be reused, weigh the most.
 
 We started from graph-based exploration [1] and asked how far an agent without a language
-model can go. Over 57 measured phases we answer two questions: how well can such an agent
+model can go. Over 59 measured phases we answer two questions: how well can such an agent
 play once it understands a mechanic, and how much of that understanding transfers?
 
 ## 2. Prior work
@@ -50,15 +50,14 @@ size, shape), matched between frames; status bars and action-independent noise a
 Before trying a candidate action, the agent asks the model. Predicted no-ops and deaths are
 skipped; unpredictable actions go first. After a level-up the agent plans towards what
 completed it (the colour the avatar entered, the kind that was clicked) through cells known to
-be passable. It also orders clicks by how much each kind closed a learned goal relation.
+be passable.
 
 **The mechanics library.** Eighteen family solvers sit in front of the explorer, each a
 perception step, an exact model and a planner. Examples:
 * *maze*: an avatar to an exit past watchers whose rules are learned by watching;
 * *keys*: a key turned, recoloured and reshaped on tiles until it matches a door, partly in fog;
-* *gravity*: a shaft taller than the screen, with clicks that clear, turn, toggle or grow tiles;
 * *mirror*: pieces and mirror lines moved until pieces and reflections cover every target;
-* *pour*, *spells*, *panel*, *replay* (ghosts that re-walk a run), *program*, *translate*,
+* *gravity*, *pour*, *spells*, *panel*, *replay* (ghosts that re-walk a run), *program*, *translate*,
   *bit-program*, *clue board*, *connector*, *carry*, *meet*, *painter*, *pointer*, *marker*.
 
 A solver claims a game only when its perception reads a consistent scene, which we check on
@@ -89,14 +88,13 @@ Official-style score, 25 public games, 4,000 actions, 5 seeds:
 | **hidden games (Kaggle public leaderboard)** | — | **0.33** |
 
 Sixteen of the 25 games are played at or near the cap. Examples: `ar25`, all eight levels in
-253 actions (humans 748); `bp35`, all nine in 448 (651); `tu93` in the fewest moves its mazes
-allow. Sixteen games were diagnosed while the library could not yet play them. Every level of
+253 actions (humans 748); `bp35`, all nine in 448 (651). Sixteen games were diagnosed while the library could not yet play them. Every level of
 each was won in no more than the humans' actions; the last eight took 2,398 actions against
 6,608.
 
 The holdout score matches the explorer's and predicts the hidden score. The solvers neither
-help nor hurt a game they were not built for. They claim such games briefly and give way,
-and do not transfer between public games at all. Within a mechanic they do transfer: each of
+help nor hurt a game they were not built for. They do not transfer between
+public games. Within a mechanic they do transfer: each of
 the eighteen plays a toy game written apart from it, with other colours, sizes and layouts.
 What they encode is a mechanic, and the public games share almost none.
 
@@ -116,26 +114,29 @@ Three findings explain the numbers.
 3. **Goals, not mechanics, are what the explorer fails to learn.** Its rules capture movement
    and blocking well. Its goal is guessed from one level-up as a gap between two kinds, and a
    level-1 solution path is only 3–8 actions long, so many measures change together along it.
-   Replaying the last solution transfers nothing; ordering clicks by a learned relation helps
-   only where the guessed relation is the true one.
 
 ## 6. Towards closing it
 
-The library contains the skills; what is missing is knowing which applies. As a first step,
-goal hypotheses now narrow from level to level. Each completed level proposes candidates:
-gaps between kinds, and counts of a kind or a colour that only ever moved towards where they
-ended. Hypotheses an earlier level also supported rank first. Together they direct click
-ordering and frontier choice on the next level. On the toggle game `ft09`, a colour count
-gives a second level under every hash seed we tried and none without it, in 22 to 448
-actions (humans 12). One holdout sweep
-rose from 0.448 to 0.471, but sweeps vary by about ±0.02 with Python's hash order; under
-fixed hash seeds the expected gain is +0.01. Skipping actions the explorer
-can see are wasted, an undo key and keys that never change anything, adds +0.003. The
-direction is right, but one short solution path leaves too many hypotheses standing. Beyond
-that, we see two steps.
-* Split each solver into perception and skill, so that a skill (navigate, push, select and
-  move, toggle, cover) can be bound to roles learned by interaction.
-* Measure transfer with holdouts during development, not after.
+The library contains the skills; what is missing is what a level asks. We tested two ways of
+supplying it, on the holdout under fixed hash seeds (sweeps otherwise vary by ±0.02 with Python's
+hash order).
+
+**A language model as advisor.** Shown the frame, the objects and what the agent has learned, a
+local model names objects to reach or click, and its answer only orders exploration. On Kaggle's
+T4s, 15 public games without their own solvers, it lowered the score with every model that ran:
+Gemma 3 4B by 6%, Qwen2.5 3B by 42%, Gemma 3 12B by 20%, at 58 s an answer. Its goals were
+generic guesses, and following them cost the cheap levels the score comes from.
+
+**Guesses read from the screen, tested by acting.** The agent proposes goals from structure alone:
+reach a kind seen once, clear a repeated kind, make two equal panels match, give a shape one
+colour. It records what each action does to each measure, confirms by type a guess that went from
+a level's start to its goal, and steers later levels by it. In 13 of 23 completed levels a guess
+went from start to goal (the mirror game's panels, 63 cells apart to 0). Steering raises the
+holdout from 0.452 to 0.529 and, under a second hash seed, 0.474 to 0.551, with the public score
+unchanged.
+
+What remains is the step a person takes first: testing a guess before any level has ended, which
+so far costs the cheap levels as much as it finds on hard ones.
 
 ## 7. Conclusion
 

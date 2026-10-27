@@ -71,6 +71,9 @@ class ModelAgent(GraphAgent):
     carry_causes = True  # what moved a goal of a type in earlier levels orders the first tries in the next
     narrow_confirmed = True  # steer by the confirmed kinds that ended the most levels
     imagine_clicks = False  # plan clicks in imagination towards a confirmed goal (Phase 60; a variant)
+    experiment = False  # with no confirmed goal, test one hypothesis at a time (Phase 61; a variant)
+    experiment_after = 30  # actions into a level before the first test
+    experiment_patience = 40  # actions without a new best before a test is given up
 
     def __init__(
         self,
@@ -172,6 +175,14 @@ class ModelAgent(GraphAgent):
         self.click_expect: np.ndarray | None = None  # the frame the last planned click should give
         self.imagined_this_level = 0
         self.imagined_known = -1  # effects known at the last search: search again when it grows
+        # Goal experiments (Phase 61): the hypothesis under test, its best value, the actions since
+        # the last new best, the hypotheses of this level already tested, and each node's readings.
+        self.trial: hy.Hypothesis | None = None
+        self.trial_best: int | None = None
+        self.trial_quiet = 0
+        self.tried: set[tuple] = set()
+        self.node_values: dict[str, dict] = {}
+        self.node_rel: dict[str, float | None] = {}
 
     def _key(self, grid: np.ndarray) -> str:
         if not self.abstract:
@@ -222,6 +233,16 @@ class ModelAgent(GraphAgent):
         self.advice_current = None
         self.advice_plans = 0
         self.advice_tried = []
+        self.click_plan = []
+        self.click_expect = None
+        self.imagined_this_level = 0
+        self.imagined_known = -1
+        self.trial = None
+        self.trial_best = None
+        self.trial_quiet = 0
+        self.tried = set()
+        self.node_values = {}
+        self.node_rel = {}
 
     # -- difference reduction ---------------------------------------------------
 
@@ -375,10 +396,18 @@ class ModelAgent(GraphAgent):
         """Over the goal hypotheses, how far a frame is from each, as a share of how far
         the level started from it; plus the screen hypotheses steered by (Phase 59)."""
         extra = self._hyp_heuristic() if self.track_hypotheses else None
+        return self._combine(self._rel_heuristic(objs), extra)
+
+    @staticmethod
+    def _combine(a: float | None, b: float | None) -> float | None:
+        return None if a is None and b is None else (a or 0.0) + (b or 0.0)
+
+    def _rel_heuristic(self, objs: list[Obj]) -> float | None:
+        """The goal relations learned at level-ups (Phase 22): the sum of their shares."""
         if not self.relations:
-            return extra
-        total = extra or 0.0
-        found = extra is not None
+            return None
+        total = 0.0
+        found = False
         for h in self.relations:
             v = self._measure(h, objs)
             if v is None:
@@ -501,7 +530,13 @@ class ModelAgent(GraphAgent):
         me = self.dyn.body(find(objs, avatar), objs) if avatar is not None else None
         if node.summary is None:
             node.summary = self._summary(objs)
-        if node.h is None and (self.relations or self.confirmed or self.steer_first):
+        if node.h is None and (self.relations or self.confirmed or self.steer_first or self.experiment):
+            if self.experiment:
+                # each node's readings are kept, so that its distance can be measured again
+                # against the next hypothesis tested
+                self.node_rel[node.key] = self._rel_heuristic(objs)
+                if self.hyp_values is not None:
+                    self.node_values[node.key] = dict(self.hyp_values)
             node.h = self._heuristic(objs)
             if node.h is not None:
                 self.best_first = True
@@ -633,6 +668,8 @@ class ModelAgent(GraphAgent):
                     h.first = v
                 h.best = v if h.best is None else min(h.best, v)
         self.hyp_values = values
+        if self.experiment:
+            self._experiment(values)
 
     @staticmethod
     def _explains(h: hy.Hypothesis, last: int | None) -> bool:
@@ -663,19 +700,22 @@ class ModelAgent(GraphAgent):
                 top = max(self.confirm_count[t] for t in present)
                 present = {t for t in present if self.confirm_count[t] == top}
             out = [h for h in self.hyps if self._hyp_type(h) in present]
+        if not out and self.experiment and self.trial is not None:
+            out = [self.trial]
         if not out and self.steer_first and not self.confirmed and self.level_actions >= self.steer_first_after:
             out = [h for h in self.hyps if self.causes.helped(h.key)
                    and (self.hyp_values.get(h.key) or 0) > h.goal]
         return out
 
-    def _hyp_heuristic(self) -> float | None:
+    def _hyp_heuristic(self, values: dict | None = None) -> float | None:
         """The steering hypotheses' distance from their goals, each as a share of where it began."""
         steer = self._steering()
-        if not steer or self.hyp_values is None:
+        values = self.hyp_values if values is None else values
+        if not steer or values is None:
             return None
         total, found = 0.0, False
         for h in steer:
-            v = self.hyp_values.get(h.key)
+            v = values.get(h.key)
             if v is None or h.first is None:
                 continue
             total += max(0, v - h.goal) / max(1, h.first - h.goal)
@@ -703,6 +743,59 @@ class ModelAgent(GraphAgent):
             elif g == best and g > 0:
                 out.append(i)
         return out
+
+    # -- goal experiments (Phase 61) ---------------------------------------------
+
+    def _confirmed_present(self) -> bool:
+        return bool(self.steer_confirmed and self.confirmed and self.hyps
+                    and {self._hyp_type(h) for h in self.hyps} & set(self.confirmed))
+
+    def _experiment(self, values: dict) -> None:
+        """Test one hypothesis at a time: steer by it alone until its measure reaches its goal
+        (and the level did not end: not the goal, or not all of it), or until it has not come
+        closer for ``experiment_patience`` actions; then take the next one some action has moved
+        closer. A hypothesis that ends the level is confirmed as in Phase 59."""
+        if self.trial is not None:
+            v = values.get(self.trial.key)
+            if v is not None and v <= self.trial.goal:
+                self._end_trial("trials_met")
+            elif v is not None and (self.trial_best is None or v < self.trial_best):
+                self.trial_best = v
+                self.trial_quiet = 0
+            else:
+                self.trial_quiet += 1
+                if self.trial_quiet >= self.experiment_patience:
+                    self._end_trial("trials_stuck")
+        if self.trial is None and self.hyps and self.level_actions >= self.experiment_after \
+                and not self._confirmed_present():
+            order = {"reach": 0, "match": 1, "clear": 2, "unify": 3}
+            pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)
+                    and values.get(h.key) is not None and values[h.key] > h.goal]
+            if pool:
+                def rank(h: hy.Hypothesis) -> tuple:
+                    v = values[h.key]
+                    share = (v - h.goal) / max(1, (h.first if h.first is not None else v) - h.goal)
+                    return (share, order.get(h.kind, 9), repr(h.params))
+                self.trial = min(pool, key=rank)
+                self.trial_best = values[self.trial.key]
+                self.trial_quiet = 0
+                self.stats["trials"] = self.stats.get("trials", 0) + 1
+                self._remeasure()
+
+    def _end_trial(self, why: str) -> None:
+        assert self.trial is not None
+        self.tried.add(self.trial.key)
+        self.trial = None
+        self.trial_best = None
+        self.stats[why] = self.stats.get(why, 0) + 1
+        self._remeasure()
+
+    def _remeasure(self) -> None:
+        """The steering changed: every known node's distance is measured again."""
+        for key, node in self.graph.nodes.items():
+            vals = self.node_values.get(key)
+            node.h = self._combine(self.node_rel.get(key), self._hyp_heuristic(vals) if vals is not None else None)
+        self.graph._dist_cache.clear()
 
     # -- clicks planned in imagination (Phase 60) ---------------------------------
 

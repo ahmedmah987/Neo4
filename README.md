@@ -92,6 +92,7 @@ The project has two strands that share one codebase:
 | 65 | **What the goals were like in the other games**: hypotheses carry features any game shares; process-wide counts of which ended levels order a new game's tests | done — measured with the 25 games interleaved in one process, as the competition plays them: 15.50 → 15.41 (`ka59` a first level for the first time), within noise; a run ends only about 22 levels, too few for the counts to order much; a variant, off |
 | 66 | **A library of situations shared across games**: pairs of a hypothesis met first and the one that then ended a level, in shared features; a test met without ending its level sends the agent to what came first in such situations, then back | done — interleaved, 5 seeds: 15.50 → 15.52; used in 8 games, opened no level in the games at zero; a variant, off |
 | 67 | **The goal priors seeded from the public games**: counts from the 114 level-ups the full library reaches on the public games; each game seeded from the other 24 | done — the priors first: 14.63 (`ls20` doubled, `tr87` a first level, `tu93` and `sp80` lower); weighed against distance: 15.50, no change; a variant, off |
+| 68 | **A large open model as goal advisor (feasibility)**: Qwen3.8-Flash-Next (AutoRound 4-bit, 181 GB) on the competition's RTX Pro 6000, offline; its 95 GiB n-gram table read row by row from its files, the rest (~73 GiB) on the GPU | in progress — offline install, file layout, table (320,001,536 rows, 16,000 random rows in 2 s) and processor checked on CPU; the GPU run pending |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3078,6 +3079,22 @@ Put first, the priors give `ls20` 0.05 → 0.10 and `tr87` its first level ever 
 take more: `tu93` 4.14 → 3.68, `sp80` 3.94 → 3.58, `sc25` 0.03 → 0. Weighed against distance they
 change no test's order. What the goals were like in other games does not say which of this game's
 guesses is its goal better than which guess is nearest to being met. Off.
+
+### Phase 68 — can a large open model advise on goals here? (feasibility, in progress)
+
+Phase 58's advisor was a small open model. A much larger one is on Kaggle: Qwen3.8-Flash-Next, 4-bit
+(AutoRound), 181 GB — of which 95 GiB is a single n-gram embedding table (the model's per-layer
+embeddings, looked up a few rows per token) and the rest, ~73 GiB, fits the 96 GB of the
+competition's RTX Pro 6000. That card runs only with internet off, so `auto-round` comes from a
+dataset of wheels. Loaded the usual way the table's 128 pieces and their concatenation need ~190 GiB
+of RAM at once, and on a single GPU the automatic placement moves the whole model off it. So the
+table is left out of the load and read from its files row by row (`scripts/ple_lazy.py`, 32 threads
+of `os.pread`), and everything else goes to the GPU with an explicit device map. On a tiny random
+model of the same architecture the logits and a greedy generation agree exactly with the usual load
+(`scripts/check_ple_lazy.py`). A run without a GPU (`scripts/qwen_probe_notebook.py`) checks the rest
+on the real files: the table has the 320,001,536 rows the model expects, 16,000 random rows read in
+2 s (78 s from memory-mapped files), and a game's first frame makes a 275-token prompt. The GPU run —
+load time, memory, seconds per answer and whether its goals are sensible — is next.
 
 ### Where the library stands
 

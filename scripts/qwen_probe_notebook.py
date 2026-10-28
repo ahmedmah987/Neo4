@@ -168,10 +168,13 @@ open("/kaggle/working/probe.py", "w").write(PROBE)
 import glob, os, subprocess, sys
 # The competition's large accelerator runs without internet: auto-round, which loading the
 # AutoRound model requires, comes from a dataset of wheels (torch and transformers as the image has them).
-wheels = sorted(glob.glob("/kaggle/input/**/*.whl", recursive=True))
+wheels = sorted(w for w in glob.glob("/kaggle/input/**/*.whl", recursive=True)
+                if os.path.basename(w).split("-")[0] in ("auto_round", "py_cpuinfo", "threadpoolctl"))
 print("wheels:", wheels)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-index", "--no-deps", "--target", "/tmp/pkgs", *wheels])
 env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
+print(subprocess.run([sys.executable, "-c", "import auto_round; print('auto_round', auto_round.__version__)"],
+                     env=env, capture_output=True, text=True).stdout or "auto_round not importable")
 r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
 print("exit code", r.returncode)
 ''' % (PROBE % {"frames": json.dumps(frames())})

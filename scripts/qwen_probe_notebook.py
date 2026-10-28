@@ -170,9 +170,9 @@ r = subprocess.run([sys.executable, "/kaggle/working/probe.py"])
 print("first pass exit code", r.returncode)
 if r.returncode != 0:
     print("installing the newest transformers, accelerate and auto-round, then trying once more")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "--target", "/kaggle/working/pkgs",
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "--target", "/tmp/pkgs",
                     "transformers", "accelerate", "auto-round"])
-    env = dict(os.environ, PYTHONPATH="/kaggle/working/pkgs")
+    env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
     r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
     print("second pass exit code", r.returncode)
 ''' % (PROBE % {"frames": json.dumps(frames())})

@@ -45,7 +45,7 @@ def main() -> None:
         raise SystemExit(__doc__)
     cmd, args, a = sys.argv[1], sys.argv[2:], api()
     if cmd == "push":
-        r = a.kernels_push(str(ROOT / "kaggle" / "notebook"))
+        r = a.kernels_push(str(ROOT / args[0]) if args else str(ROOT / "kaggle" / "notebook"))
         print("ref:", r.ref, "| version:", r.version_number, "| url:", r.url, "| error:", r.error)
     elif cmd == "status":
         r = a.kernels_status(args[0])

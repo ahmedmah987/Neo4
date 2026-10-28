@@ -3145,6 +3145,7 @@ like the others, with three limits, each found by measuring:
 | ...and kept at a level-up only where no first-frame guess explains it | 15.49 | 113 |
 | ...from the 150th action (**default**) | **15.52** | 113 |
 | ...and sooner when the progress seen would meet it in 12 actions or fewer | 14.85 | 113 |
+| ...from the 150th action, confirmed only if met exactly when the level ends | 15.52 | 111 |
 
 Tested from a level's start, they took the place of the exploration that ends cheap levels:
 `bp35`'s first level (54–144 actions) was lost in three seeds of five. Confirmed beside the reach
@@ -3171,6 +3172,12 @@ fewer, given up after twice that) is worse: `tu93`'s first level moved from 152 
 the player, and every such test is taken from the exploration that ends those levels. Where a
 generated guess pays is across levels: confirmed at a level-up the first frame did not explain,
 it steers the next level from its first action, as on the sliding-block toy.
+On the public games that happened where it did not pay: `cd82`'s first level was explained by
+"bring the brush to a paint pot" alone — the brush stood a cell from a pot when the picture was
+done — and, generalised over colour, that guess matched three pots and steered the second level
+nowhere (918 actions). Confirming a generated guess only when it is met exactly at the level's
+end removes such cases but measures the same (15.52, two levels fewer), so the looser rule stays.
+Telling a step on the way (pick a colour) from the goal (paint the copy) is the next problem.
 
 ### Where the library stands
 

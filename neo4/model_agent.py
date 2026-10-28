@@ -711,10 +711,9 @@ class ModelAgent(GraphAgent):
                         if e.key in ended:
                             for b in before:
                                 self.situations.record(b.features, e.features)
-                # an event's guess needs the stronger evidence: met exactly when the level ended, not
-                # merely near it (cd82's brush was beside a paint pot when its first level ended)
-                explained = [h for h in self.hyps if self._explains(h, self.hyp_values.get(h.key))
-                             and (not h.event or (self.hyp_values.get(h.key) or 0) <= h.goal)]
+                # (requiring an event's guess to be met exactly when the level ends, not merely near
+                # it, measured the same: 15.52, two levels fewer; Phase 69)
+                explained = [h for h in self.hyps if self._explains(h, self.hyp_values.get(h.key))]
                 if any(not h.event for h in explained):
                     # a guess an event gave rise to is kept only where the screen's guesses had
                     # none for the goal (Phase 69): beside them it would only dilute the steering

@@ -92,7 +92,7 @@ The project has two strands that share one codebase:
 | 65 | **What the goals were like in the other games**: hypotheses carry features any game shares; process-wide counts of which ended levels order a new game's tests | done — measured with the 25 games interleaved in one process, as the competition plays them: 15.50 → 15.41 (`ka59` a first level for the first time), within noise; a run ends only about 22 levels, too few for the counts to order much; a variant, off |
 | 66 | **A library of situations shared across games**: pairs of a hypothesis met first and the one that then ended a level, in shared features; a test met without ending its level sends the agent to what came first in such situations, then back | done — interleaved, 5 seeds: 15.50 → 15.52; used in 8 games, opened no level in the games at zero; a variant, off |
 | 67 | **The goal priors seeded from the public games**: counts from the 114 level-ups the full library reaches on the public games; each game seeded from the other 24 | done — the priors first: 14.63 (`ls20` doubled, `tr87` a first level, `tu93` and `sp80` lower); weighed against distance: 15.50, no change; a variant, off |
-| 68 | **A large open model as goal advisor (feasibility)**: Qwen3.8-Flash-Next (AutoRound 4-bit, 181 GB) on the competition's RTX Pro 6000, offline; its 95 GiB n-gram table read row by row from its files, the rest (~73 GiB) on the GPU | in progress — offline install, file layout, table (320,001,536 rows, 16,000 random rows in 2 s) and processor checked on CPU; the GPU run pending |
+| 68 | **A large open model as goal advisor (feasibility)**: Qwen3.8-Flash-Next (AutoRound 4-bit, 181 GB) on the competition's RTX Pro 6000, offline; its 95 GiB n-gram table read row by row from its files, the rest (68.5 GiB) on the GPU | done — it runs: 27 min to load (11 into RAM, 16 to move to the GPU), 61–81 s an answer (~1 token a second); its goals read like Phase 58's (`tu93` plausible, `vc33` generic); not integrated |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3080,7 +3080,7 @@ take more: `tu93` 4.14 → 3.68, `sp80` 3.94 → 3.58, `sc25` 0.03 → 0. Weighe
 change no test's order. What the goals were like in other games does not say which of this game's
 guesses is its goal better than which guess is nearest to being met. Off.
 
-### Phase 68 — can a large open model advise on goals here? (feasibility, in progress)
+### Phase 68 — can a large open model advise on goals here? (feasibility)
 
 Phase 58's advisor was a small open model. A much larger one is on Kaggle: Qwen3.8-Flash-Next, 4-bit
 (AutoRound), 181 GB — of which 95 GiB is a single n-gram embedding table (the model's per-layer
@@ -3093,8 +3093,26 @@ of `os.pread`), and everything else goes to the GPU with an explicit device map.
 model of the same architecture the logits and a greedy generation agree exactly with the usual load
 (`scripts/check_ple_lazy.py`). A run without a GPU (`scripts/qwen_probe_notebook.py`) checks the rest
 on the real files: the table has the 320,001,536 rows the model expects, 16,000 random rows read in
-2 s (78 s from memory-mapped files), and a game's first frame makes a 275-token prompt. The GPU run —
-load time, memory, seconds per answer and whether its goals are sensible — is next.
+2 s (78 s from memory-mapped files), and a game's first frame makes a 275-token prompt.
+
+**On the RTX Pro 6000** (95 GiB, 176 GiB of RAM, 46 CPUs; the card counts against the same 30 weekly
+GPU hours as the others). Loaded straight onto the GPU, the 222,588 small tensors came in at ~180 a
+second and the allocator ran out a third of the way with 68 GiB reserved but unused. Loaded into RAM
+with the GPU kernels chosen (`tritonv2_zp`) and then moved, it fits: 68.5 GiB on the card, 26 GiB
+free. It takes 27 minutes (11 to read into RAM, 16 to move tensor by tensor). Asked for each game's
+goal from its first frame, it answered in 61–81 s (~1 token a second):
+
+| game | its answer (player → target) |
+|---|---|
+| `ls20` | the blue L-shaped block → the blue square on the robot's chest |
+| `tu93` | the blue square → the green square at the bottom right |
+| `vc33` | the yellow square → click the yellow square on the black bar |
+
+It runs on the competition's hardware, offline. Its goals read like those of Phase 58's 12B model —
+a plausible maze exit for `tu93`, generic for the click game — and Phase 58 found such advice costs
+actions on the levels the explorer finds cheaply. Whether this model is right more often has to be
+measured (its answers against what each public game's goal is) before it steers anything; it is not
+integrated.
 
 ### Where the library stands
 

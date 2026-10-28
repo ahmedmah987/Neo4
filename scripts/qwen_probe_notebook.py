@@ -11,7 +11,7 @@ writes kaggle/qwen_probe/ (push it with scripts/kaggle_submit.py push kaggle/qwe
 The probe runs as a separate script, with auto-round (which loading the AutoRound model requires and
 the image lacks) installed without internet from a dataset of wheels: the competition's large
 accelerator runs only with internet off. The model's ~95 GiB n-gram table is not loaded but read
-from its memory-mapped files (scripts/ple_lazy.py); without a GPU of 80 GiB or more the probe only
+from its files, row by row (scripts/ple_lazy.py); without a GPU of 80 GiB or more the probe only
 checks the files' layout, the table and the processor (a dry run).
 """
 
@@ -91,7 +91,7 @@ def main():
     full = vram >= 80  # the model without its n-gram table is ~73 GiB
     print(f"GPU {vram:.0f} GiB, RAM {ram:.0f} GiB:", "full run" if full else "dry run (layout, table, processor)", flush=True)
 
-    # The ~95 GiB n-gram table stays in its files, memory-mapped, and is read row by row; the
+    # The ~95 GiB n-gram table stays in its files and is read row by row; the
     # rest of the model goes to the GPU. (Loaded the usual way, the table's pieces and their
     # concatenation would need ~190 GiB of RAM at once.)
     t0 = time.time()

@@ -1,5 +1,5 @@
 """Check scripts/ple_lazy.py on a tiny random qwen4_exp (Phase 68): the model is saved in the Kaggle layout
-(n-gram table pieces in files of their own), loaded the normal way and with the table memory-mapped, and
+(n-gram table pieces in files of their own), loaded the normal way and with the table read from its files, and
 the logits and a greedy generation must agree.
 
 usage: python scripts/check_ple_lazy.py <the real model config.json>   (needs torch, transformers>=5.16)

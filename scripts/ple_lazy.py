@@ -1,12 +1,13 @@
 """Load a qwen4_exp checkpoint without its ~95 GiB n-gram table in memory.
 
 The table (layer 1's PLE n-gram embedding, saved as `ngram_embedding.shard_k.weight` pieces in files of
-their own) is left out of the load and read row by row from memory-mapped files instead; everything
+their own) is left out of the load and read row by row from its files instead; everything
 else loads where the device map says.
 """
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -60,47 +61,63 @@ def patch_class(cls) -> None:
     cls._lazy_patched = True
 
 
-def _open(path: str, key: str):
+def _locate(path: str, key: str):
+    """Where a tensor's bytes start in a safetensors file, its shape and its dtypes."""
     with open(path, "rb") as fh:
         n = int.from_bytes(fh.read(8), "little")
         header = json.loads(fh.read(n))
     meta = header[key]
     np_dtype, torch_dtype = DTYPES[meta["dtype"]]
-    start = 8 + n + meta["data_offsets"][0]
-    return np.memmap(path, dtype=np_dtype, mode="r", offset=start, shape=tuple(meta["shape"])), torch_dtype
+    return 8 + n + meta["data_offsets"][0], tuple(meta["shape"]), np_dtype, torch_dtype
 
 
 class MappedRows(nn.Module):
-    """Embedding rows read from memory-mapped pieces of one table (concatenated along rows, in order)."""
+    """Embedding rows read from the files of one table's pieces (concatenated along rows, in order).
 
-    def __init__(self, pieces: list, key_prefix: str):
+    Each distinct row is read once, with `os.pread`, by several threads at a time: the files may sit on
+    network storage, where one random read takes milliseconds."""
+
+    def __init__(self, pieces: list, key_prefix: str, threads: int = 32):
         super().__init__()
-        self.maps, dtype = [], None
+        self.fds, self.offsets, sizes, np_dtype, dtype = [], [], [], None, None
         for number, path in pieces:
-            arr, dtype = _open(path, f"{key_prefix}{SHARD}{number}.weight")
-            self.maps.append(arr)
-        sizes = np.array([m.shape[0] for m in self.maps], dtype=np.int64)
-        self.starts = np.concatenate([[0], np.cumsum(sizes)[:-1]])
-        self.rows = int(sizes.sum())
-        self.dim = self.maps[0].shape[1]
-        self.dtype = dtype
+            offset, shape, np_dtype, dtype = _locate(path, f"{key_prefix}{SHARD}{number}.weight")
+            self.fds.append(os.open(path, os.O_RDONLY))
+            self.offsets.append(offset)
+            sizes.append(shape[0])
+            self.dim = shape[1]
+        self.starts = np.concatenate([[0], np.cumsum(sizes)[:-1]]).astype(np.int64)
+        self.rows = int(sum(sizes))
+        self.np_dtype, self.dtype = np_dtype, dtype
+        self.row_bytes = self.dim * np.dtype(np_dtype).itemsize
+        self.pool = ThreadPoolExecutor(threads)
+        self.threads = threads
         self.weight = nn.Parameter(torch.zeros(1, self.dim, dtype=dtype), requires_grad=False)  # where ids go
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
-        flat = ids.reshape(-1).cpu().numpy()
-        which = np.searchsorted(self.starts, flat, side="right") - 1
-        out = np.empty((flat.size, self.dim), dtype=self.maps[0].dtype)
-        for k in np.unique(which):
-            sel = which == k
-            out[sel] = self.maps[k][flat[sel] - self.starts[k]]
-        t = torch.from_numpy(out)
+        flat = ids.reshape(-1).cpu().numpy().astype(np.int64)
+        uniq, inverse = np.unique(flat, return_inverse=True)
+        which = np.searchsorted(self.starts, uniq, side="right") - 1
+        where = [(self.fds[k], self.offsets[k] + int(u - self.starts[k]) * self.row_bytes) for k, u in zip(which, uniq)]
+        buf = bytearray(len(uniq) * self.row_bytes)
+        rb = self.row_bytes
+
+        def read(lo: int, hi: int) -> None:
+            for i in range(lo, hi):
+                fd, off = where[i]
+                buf[i * rb:(i + 1) * rb] = os.pread(fd, rb, off)
+
+        step = max(1, -(-len(uniq) // self.threads))
+        list(self.pool.map(lambda lo: read(lo, min(lo + step, len(uniq))), range(0, len(uniq), step)))
+        out = np.frombuffer(buf, dtype=self.np_dtype).reshape(len(uniq), self.dim)[inverse.reshape(-1)]
+        t = torch.from_numpy(np.ascontiguousarray(out))
         if self.dtype == torch.bfloat16:
             t = t.view(torch.bfloat16)
         return t.reshape(*ids.shape, self.dim)
 
 
 def attach(model: nn.Module, pieces: dict) -> int:
-    """Put the memory-mapped tables in place of the placeholders; returns the number of rows attached."""
+    """Put the tables read from their files in place of the placeholders; returns the number of rows attached."""
     total = 0
     for name, module in model.named_modules():
         if hasattr(module, "table_rows"):

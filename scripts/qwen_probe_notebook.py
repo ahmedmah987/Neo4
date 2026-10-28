@@ -169,9 +169,9 @@ import os, subprocess, sys
 r = subprocess.run([sys.executable, "/kaggle/working/probe.py"])
 print("first pass exit code", r.returncode)
 if r.returncode != 0:
-    print("installing the newest transformers, accelerate and auto-round, then trying once more")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "--target", "/tmp/pkgs",
-                    "transformers", "accelerate", "auto-round"])
+    print("installing auto-round alone (torch and transformers as the image has them), then trying once more")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "--target", "/tmp/pkgs",
+                    "auto-round", "py-cpuinfo", "threadpoolctl"])
     env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
     r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
     print("second pass exit code", r.returncode)

@@ -3144,6 +3144,7 @@ like the others, with three limits, each found by measuring:
 | ...after the first frame's, from a level's 300th action | 15.12 | 112 |
 | ...and kept at a level-up only where no first-frame guess explains it | 15.49 | 113 |
 | ...from the 150th action (**default**) | **15.52** | 113 |
+| ...and sooner when the progress seen would meet it in 12 actions or fewer | 14.85 | 113 |
 
 Tested from a level's start, they took the place of the exploration that ends cheap levels:
 `bp35`'s first level (54–144 actions) was lost in three seeds of five. Confirmed beside the reach
@@ -3164,6 +3165,12 @@ Why the score barely moves: a level is worth (human actions / agent actions)² o
 first level found after 300 actions where a person needs 60 is worth 4% of it. Generated guesses
 find goals the list lacks, but late; tested early, they crowd out the exploration that is cheap.
 The question has moved from where guesses come from to which to test when.
+Testing a generated guess early when the progress seen so far says it is cheap (12 actions or
+fewer, given up after twice that) is worse: `tu93`'s first level moved from 152 actions to 355
+(median) and `bp35` lost one. The estimate is optimistic where things move by themselves near
+the player, and every such test is taken from the exploration that ends those levels. Where a
+generated guess pays is across levels: confirmed at a level-up the first frame did not explain,
+it steers the next level from its first action, as on the sliding-block toy.
 
 ### Where the library stands
 

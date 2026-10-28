@@ -167,7 +167,9 @@ def test_a_copy_rule_is_read_from_clicks_of_two_colours():
 
 
 def test_goal_priors_order_the_tests_by_what_goals_were_elsewhere():
-    from neo4 import shared
+    # the copy of the module the agent uses: test_bundle drops the package from sys.modules, so a
+    # fresh import here could be another copy
+    shared = ModelAgent.__init__.__globals__["shared"]
 
     shared.reset()
     priors = shared.goal_priors()
@@ -191,7 +193,9 @@ def test_goal_priors_order_the_tests_by_what_goals_were_elsewhere():
 
 
 def test_a_situation_seen_elsewhere_sends_the_agent_to_its_first_part_and_back():
-    from neo4 import shared
+    # the copy of the module the agent uses: test_bundle drops the package from sys.modules, so a
+    # fresh import here could be another copy
+    shared = ModelAgent.__init__.__globals__["shared"]
 
     shared.reset()
     key_like = (("reach", "avatar"), ("reach", "size", "smaller"))
@@ -213,3 +217,51 @@ def test_a_situation_seen_elsewhere_sends_the_agent_to_its_first_part_and_back()
     agent._experiment(agent.hyp_values)
     assert agent.trial is a and agent.stats["situation_returns"] == 1
     shared.reset()
+
+
+def test_what_an_action_changed_gives_new_guesses():
+    g = np.zeros((64, 64), dtype=np.int8)
+    g[20:23, 20:23] = 6  # a block of colour 6
+    g[20:23, 40:43] = 6  # and a mark of its colour, hollow
+    g[21, 41] = 0
+    g[50:52, 10:12] = 3  # two tiles of one shape
+    g[50:52, 20:22] = 3
+    after = g.copy()
+    after[20:23, 20:23] = 0
+    after[20:23, 24:27] = 6  # the block moved towards the mark
+    after[50:52, 10:12] = 4  # a tile changed colour
+    before_objs, after_objs = extract(g), extract(after)
+    block = next(o for o in after_objs if o.color == 6 and o.area == 9)
+    from neo4.objects import diff
+    found = hy.from_events(diff(before_objs, after_objs), after_objs, None, {block.sig})
+    keys = {h.key for h in found}
+    bring = hy.Hypothesis("bring", (block.sig, ("colour", 6)))
+    assert bring.key in keys
+    assert ("paint", (block.sig[1:], 3)) not in keys  # the block did not change colour
+    tile_shape = next(o for o in after_objs if o.color == 4).sig[1:]
+    assert ("paint", (tile_shape, 3)) in keys and ("paint", (tile_shape, 4)) in keys
+    assert hy.measure(bring, before_objs, g, None) > hy.measure(bring, after_objs, after, None) > 0
+    paint = hy.Hypothesis("paint", (tile_shape, 3))
+    assert hy.measure(paint, before_objs, g, None) == 2 and hy.measure(paint, after_objs, after, None) == 1
+    # a kind not known to move by what the player does gives no "bring" guess
+    assert not any(h.kind == "bring" for h in hy.from_events(diff(before_objs, after_objs), after_objs, None, set()))
+
+
+def test_the_agent_generates_guesses_from_what_moved_and_tests_them():
+    agent = ModelAgent(seed=0)
+    agent.generate = True
+    g = np.zeros((64, 64), dtype=np.int8)
+    g[20:23, 20:23] = 6
+    g[20:23, 40:43] = 6
+    g[21, 41] = 0
+    objs = extract(g)
+    agent.hyps = []
+    agent.last_objs = objs
+    agent.last_grid = g
+    agent._generate(objs)  # nothing moved: the block is seen standing still
+    after = g.copy()
+    after[20:23, 20:23] = 0
+    after[20:23, 24:27] = 6
+    new = agent._generate(extract(after))
+    assert any(h.kind == "bring" and h.params[1] == ("colour", 6) for h in new)
+    assert agent.stats["event_hyps"] == len(new) and agent.event_hyps == len(new)

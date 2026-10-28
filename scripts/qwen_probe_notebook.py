@@ -10,7 +10,9 @@ writes kaggle/qwen_probe/ (push it with scripts/kaggle_submit.py push kaggle/qwe
 
 The probe runs as a separate script, with auto-round (which loading the AutoRound model requires and
 the image lacks) installed without internet from a dataset of wheels: the competition's large
-accelerator runs only with internet off.
+accelerator runs only with internet off. The model's ~95 GiB n-gram table is not loaded but read
+from its memory-mapped files (scripts/ple_lazy.py); without a GPU of 80 GiB or more the probe only
+checks the files' layout, the table and the processor (a dry run).
 """
 
 import json
@@ -77,37 +79,58 @@ def find_model():
 
 def main():
     import torch, transformers
+    from transformers import AutoConfig, AutoProcessor
+    from transformers.models.qwen4_exp import modeling_qwen4_exp as mq
+    sys.path.insert(0, "/tmp/probe")
+    import ple_lazy
     print("torch", torch.__version__, "| transformers", transformers.__version__, flush=True)
     path = find_model()
     print("model dir:", path, flush=True)
-    from transformers import AutoProcessor
-    import transformers as tf
-    vram = int(torch.cuda.get_device_properties(0).total_memory / 2**30) if torch.cuda.is_available() else 0
-    ram = int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30)
-    max_memory = {i: f"{int(torch.cuda.get_device_properties(i).total_memory / 2**30 * 0.92)}GiB"
-                  for i in range(torch.cuda.device_count())}
-    max_memory["cpu"] = f"{int(ram * 0.85)}GiB"
-    print("max_memory", max_memory, flush=True)
+    vram = torch.cuda.get_device_properties(0).total_memory / 2**30 if torch.cuda.is_available() else 0
+    ram = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    full = vram >= 80  # the model without its n-gram table is ~73 GiB
+    print(f"GPU {vram:.0f} GiB, RAM {ram:.0f} GiB:", "full run" if full else "dry run (layout, table, processor)", flush=True)
+
+    # The ~95 GiB n-gram table stays in its files, memory-mapped, and is read row by row; the
+    # rest of the model goes to the GPU. (Loaded the usual way, the table's pieces and their
+    # concatenation would need ~190 GiB of RAM at once.)
     t0 = time.time()
+    pieces = ple_lazy.lazy_dir(path, "/tmp/lazy")
+    print("table pieces:", {k: len(v) for k, v in pieces.items()}, f"({time.time() - t0:.1f} s)", flush=True)
+    config = AutoConfig.from_pretrained(path)
+    ple_lazy.patch_class(mq.Qwen4ExpTextNGramEmbedding)
+    tc = config.text_config
+    expected = {}
+    with torch.device("meta"):
+        for layer_id in tc.ple_layer_ids:
+            m = mq.Qwen4ExpTextNGramEmbedding(tc, tc.ple_embed_dim, layer_id - 1, tc.ple_layer_ids.index(layer_id))
+            expected[layer_id - 1] = m.table_rows
+    for prefix, p in pieces.items():
+        rows = ple_lazy.MappedRows(p, prefix)
+        ids = torch.randint(0, rows.rows, (1, 1000, 16))
+        t1 = time.time()
+        out = rows(ids)
+        print(f"{prefix}: {rows.rows} rows (model expects {expected}), {out.dtype} {tuple(out.shape)}, "
+              f"16,000 random rows read in {time.time() - t1:.2f} s, finite {bool(torch.isfinite(out.float()).all())}",
+              flush=True)
     processor = AutoProcessor.from_pretrained(path)
-    model, err = None, []
-    for name in ("AutoModelForMultimodalLM", "AutoModelForImageTextToText", "AutoModelForCausalLM"):
-        cls = getattr(tf, name, None)
-        if cls is None:
-            continue
-        try:
-            model = cls.from_pretrained(path, device_map="auto", max_memory=max_memory, torch_dtype="auto")
-            print("loaded with", name, flush=True)
-            break
-        except Exception as e:
-            err.append(f"{name}: {e!r}"[:800])
-    if model is None:
-        print("LOAD FAILED:\n" + "\n".join(err), flush=True)
-        sys.exit(3)
+    for game, f in FRAMES.items():
+        messages = [{"role": "user", "content": [{"type": "image", "image": image(f["grid"])},
+                                                 {"type": "text", "text": "What is the goal?"}]}]
+        inputs = processor.apply_chat_template(messages, enable_thinking=False, add_generation_prompt=True,
+                                               tokenize=True, return_dict=True, return_tensors="pt")
+        print(game, "prompt tokens", inputs["input_ids"].shape[1], flush=True)
+    if not full:
+        print("dry run done", flush=True)
+        return
+
+    t0 = time.time()
+    model = mq.Qwen4ExpForConditionalGeneration.from_pretrained("/tmp/lazy", device_map={"": 0}, dtype="auto")
+    model.eval()
+    print("table rows attached:", ple_lazy.attach(model, pieces), flush=True)
     print(f"load seconds {time.time() - t0:.0f}", flush=True)
-    if torch.cuda.is_available():
-        print("GPU memory after load (GiB):", [round(torch.cuda.memory_allocated(i) / 2**30, 1)
-                                               for i in range(torch.cuda.device_count())], flush=True)
+    print("GPU memory after load (GiB):", round(torch.cuda.memory_allocated(0) / 2**30, 1),
+          "| free:", round(torch.cuda.mem_get_info(0)[0] / 2**30, 1), flush=True)
     for game, f in FRAMES.items():
         acts = ", ".join(ACTION_TEXT[a] for a in f["actions"] if a in ACTION_TEXT)
         text = ("This is the first frame of a turn-based puzzle game on a 64x64 grid of 16 colours, "
@@ -122,7 +145,7 @@ def main():
             inputs = processor.apply_chat_template(messages, enable_thinking=False, **kwargs)
         except TypeError:
             inputs = processor.apply_chat_template(messages, **kwargs)
-        inputs = inputs.to(model.device)
+        inputs = inputs.to("cuda:0")
         t1 = time.time()
         with torch.no_grad():
             ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
@@ -154,7 +177,7 @@ print(sh("nvidia-smi || echo no GPU"))
 print(sh("free -g"))
 print(sh("df -h /kaggle/working /kaggle/input"))
 print("cpus:", sh("nproc"))
-for pkg in ("torch", "transformers", "accelerate", "auto_round", "vllm", "optimum", "gptqmodel"):
+for pkg in ("torch", "torchvision", "triton", "transformers", "accelerate", "auto_round", "vllm", "optimum", "gptqmodel"):
     try:
         m = __import__(pkg)
         print(pkg, getattr(m, "__version__", "?"))
@@ -164,8 +187,11 @@ print(sh("du -sh /kaggle/input/*/* 2>/dev/null | head"))
 '''
 
 probe_cell = '''PROBE = %r
-open("/kaggle/working/probe.py", "w").write(PROBE)
+LAZY = %r
 import glob, os, subprocess, sys
+os.makedirs("/tmp/probe", exist_ok=True)
+open("/tmp/probe/probe.py", "w").write(PROBE)
+open("/tmp/probe/ple_lazy.py", "w").write(LAZY)
 # The competition's large accelerator runs without internet: auto-round, which loading the
 # AutoRound model requires, comes from a dataset of wheels (torch and transformers as the image has them).
 wheels = sorted(w for w in glob.glob("/kaggle/input/**/*.whl", recursive=True)
@@ -175,9 +201,9 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-index", "--n
 env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
 print(subprocess.run([sys.executable, "-c", "import auto_round; print('auto_round', auto_round.__version__)"],
                      env=env, capture_output=True, text=True).stdout or "auto_round not importable")
-r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
+r = subprocess.run([sys.executable, "/tmp/probe/probe.py"], env=env)
 print("exit code", r.returncode)
-''' % (PROBE % {"frames": json.dumps(frames())})
+''' % (PROBE % {"frames": json.dumps(frames())}, (ROOT / "scripts" / "ple_lazy.py").read_text())
 
 
 def cell(source: str, kind: str = "code") -> dict:

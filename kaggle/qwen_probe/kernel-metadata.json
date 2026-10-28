@@ -11,7 +11,9 @@
   "keywords": [],
   "dataset_sources": [],
   "kernel_sources": [],
-  "competition_sources": [],
+  "competition_sources": [
+    "arc-prize-2026-arc-agi-3"
+  ],
   "model_sources": [
     "dfranzen/intel-qwen3.8-flash-next-w4a16-autoround/transformers/default/1"
   ]

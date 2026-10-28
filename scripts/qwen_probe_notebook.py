@@ -208,7 +208,7 @@ meta = {
     "id": kernel_id, "title": kernel_id.split("/")[1].replace("-", " ").title(), "code_file": "probe.ipynb",
     "language": "python", "kernel_type": "notebook", "is_private": True, "enable_gpu": accelerator != "none",
     "enable_tpu": False, "enable_internet": True, "keywords": [], "dataset_sources": [], "kernel_sources": [],
-    "competition_sources": [], "model_sources": [model],
+    "competition_sources": ["arc-prize-2026-arc-agi-3"], "model_sources": [model],
 }
 if accelerator != "none":
     meta["machine_shape"] = accelerator

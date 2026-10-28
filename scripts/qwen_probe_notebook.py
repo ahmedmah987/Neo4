@@ -9,8 +9,8 @@ is then chosen in the notebook's settings and the notebook run again)
 writes kaggle/qwen_probe/ (push it with scripts/kaggle_submit.py push kaggle/qwen_probe).
 
 The probe runs as a separate script, first with the image's libraries and, if loading fails, once
-more after installing the newest transformers, accelerate and auto-round (the probe notebook has
-internet; a submission does not, so a second pass would mean shipping those wheels).
+more after installing auto-round alone, without its dependencies (the probe notebook has internet;
+a submission does not, so a second pass would mean shipping that wheel).
 """
 
 import json

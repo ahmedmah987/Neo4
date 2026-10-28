@@ -8,9 +8,9 @@ usage: python scripts/qwen_probe_notebook.py <owner>/<slug> <model handle> [--gp
 is then chosen in the notebook's settings and the notebook run again)
 writes kaggle/qwen_probe/ (push it with scripts/kaggle_submit.py push kaggle/qwen_probe).
 
-The probe runs as a separate script, first with the image's libraries and, if loading fails, once
-more after installing auto-round alone, without its dependencies (the probe notebook has internet;
-a submission does not, so a second pass would mean shipping that wheel).
+The probe runs as a separate script, with auto-round (which loading the AutoRound model requires and
+the image lacks) installed without internet from a dataset of wheels: the competition's large
+accelerator runs only with internet off.
 """
 
 import json
@@ -165,16 +165,15 @@ print(sh("du -sh /kaggle/input/*/* 2>/dev/null | head"))
 
 probe_cell = '''PROBE = %r
 open("/kaggle/working/probe.py", "w").write(PROBE)
-import os, subprocess, sys
-r = subprocess.run([sys.executable, "/kaggle/working/probe.py"])
-print("first pass exit code", r.returncode)
-if r.returncode != 0:
-    print("installing auto-round alone (torch and transformers as the image has them), then trying once more")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "--target", "/tmp/pkgs",
-                    "auto-round", "py-cpuinfo", "threadpoolctl"])
-    env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
-    r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
-    print("second pass exit code", r.returncode)
+import glob, os, subprocess, sys
+# The competition's large accelerator runs without internet: auto-round, which loading the
+# AutoRound model requires, comes from a dataset of wheels (torch and transformers as the image has them).
+wheels = sorted(glob.glob("/kaggle/input/**/*.whl", recursive=True))
+print("wheels:", wheels)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-index", "--no-deps", "--target", "/tmp/pkgs", *wheels])
+env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
+r = subprocess.run([sys.executable, "/kaggle/working/probe.py"], env=env)
+print("exit code", r.returncode)
 ''' % (PROBE % {"frames": json.dumps(frames())})
 
 
@@ -189,7 +188,7 @@ notebook = {
     "metadata": {
         "kernelspec": {"language": "python", "display_name": "Python 3", "name": "python3"},
         "language_info": {"name": "python"},
-        "kaggle": {"accelerator": accelerator, "isInternetEnabled": True, "isGpuEnabled": accelerator != "none",
+        "kaggle": {"accelerator": accelerator, "isInternetEnabled": False, "isGpuEnabled": accelerator != "none",
                    "language": "python", "sourceType": "notebook"},
     },
     "nbformat_minor": 4,
@@ -207,7 +206,8 @@ notebook = {
 meta = {
     "id": kernel_id, "title": kernel_id.split("/")[1].replace("-", " ").title(), "code_file": "probe.ipynb",
     "language": "python", "kernel_type": "notebook", "is_private": True, "enable_gpu": accelerator != "none",
-    "enable_tpu": False, "enable_internet": True, "keywords": [], "dataset_sources": [], "kernel_sources": [],
+    "enable_tpu": False, "enable_internet": False, "keywords": [],
+    "dataset_sources": ["ahmedabdalatef/neo4-autoround-wheels"], "kernel_sources": [],
     "competition_sources": ["arc-prize-2026-arc-agi-3"], "model_sources": [model],
 }
 if accelerator != "none":

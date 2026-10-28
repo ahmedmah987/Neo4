@@ -140,17 +140,27 @@ except Exception:
 '''
 
 env_cell = r'''import subprocess, sys, os, shutil
-print(subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout or "no GPU")
-print(subprocess.run(["free", "-g"], capture_output=True, text=True).stdout)
-print(subprocess.run(["df", "-h", "/kaggle/working", "/kaggle/input"], capture_output=True, text=True).stdout)
-print(subprocess.run(["nproc"], capture_output=True, text=True).stdout)
+
+
+def sh(cmd):
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        return (r.stdout + r.stderr).strip() or "(nothing)"
+    except Exception as e:
+        return repr(e)
+
+
+print(sh("nvidia-smi || echo no GPU"))
+print(sh("free -g"))
+print(sh("df -h /kaggle/working /kaggle/input"))
+print("cpus:", sh("nproc"))
 for pkg in ("torch", "transformers", "accelerate", "auto_round", "vllm", "optimum", "gptqmodel"):
     try:
         m = __import__(pkg)
         print(pkg, getattr(m, "__version__", "?"))
     except Exception as e:
         print(pkg, "missing:", type(e).__name__)
-print(subprocess.run("du -sh /kaggle/input/* 2>/dev/null", shell=True, capture_output=True, text=True).stdout)
+print(sh("du -sh /kaggle/input/*/* 2>/dev/null | head"))
 '''
 
 probe_cell = '''PROBE = %r

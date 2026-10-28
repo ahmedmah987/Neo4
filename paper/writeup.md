@@ -16,7 +16,7 @@ Sixteen public games were diagnosed by search on hand-built models of their rule
 level was won in no more actions than humans took. Search, then, is not the bottleneck:
 acquiring the model is: once a level is learned, the agent replays it at 1.3 times the human
 count, but learning costs 92% of its actions. Goals guessed from the screen and tested by play
-raise the holdout by 37%, where a language model's guesses lowered it.
+raise the hidden score from 0.33 to 0.46, where a language model's guesses lowered it.
 
 ## 1. Introduction
 
@@ -84,6 +84,7 @@ Official-style score, 25 public games, 4,000 actions, 5 seeds:
 | holdout: each game without its own solvers | — | 0.45 |
 | **hidden games (Kaggle public leaderboard)** | — | **0.33** |
 | hidden games, with goal hypotheses (§6) | — | **0.36** |
+| hidden games, testing guesses (§6) | — | **0.46** |
 
 Sixteen of the 25 games are played at or near the cap (`ar25`, eight levels in 253 actions;
 humans 748). Every level of the sixteen diagnosed games was won in no more than the humans'
@@ -124,17 +125,17 @@ Qwen2.5 3B by 42%, Gemma 3 12B by 20%. Its goals were generic guesses that cost 
 reach a kind seen once, clear a repeated kind, make two equal panels match, give a shape one
 colour. It records what each action does to each measure, confirms by type a guess that went from
 a level's start to its goal, and steers later levels by it. In 13 of 23 completed levels a guess
-went from start to goal (the mirror game's panels, 63 cells apart to 0). Steering raises the
+went from start to goal. Steering raises the
 holdout from 0.452 to 0.529 and, under a second hash seed, 0.474 to 0.551, with the public score
 unchanged; on the hidden games, 0.33 to 0.36.
 
 **Testing a guess before any level has ended.** With no goal known, the agent tests its guesses
 one at a time, from a level's 10th action where an avatar moves and its 60th elsewhere (earlier,
 it spoils cheap click levels). A guess met while the level goes on is dropped; one that stalls is
-retried later with more patience. The holdout rises from 0.529 to 0.620, under both hash seeds,
-with the public score unchanged. Two ways of reading a click's purpose from its result added
+retried later with more patience. The holdout rises from 0.529 to 0.620 under both hash seeds, the hidden score from 0.36 to
+0.46. Two ways of reading a click's purpose from its result added
 nothing: a model of what clicks do, right in 74–100% of predictions, and pictures on the screen
-that the board might copy, which explain the changes of only two games.
+the board might copy, which explain only two games.
 
 ## 7. Conclusion
 

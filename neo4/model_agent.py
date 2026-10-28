@@ -709,15 +709,18 @@ class ModelAgent(GraphAgent):
                         if e.key in ended:
                             for b in before:
                                 self.situations.record(b.features, e.features)
-                for h in self.hyps:
-                    last = self.hyp_values.get(h.key)
-                    if self._explains(h, last):
-                        t = self._hyp_type(h)
-                        if t in self.confirmed:
-                            self.confirmed.remove(t)
-                        self.confirmed.insert(0, t)
-                        self.confirm_count[t] += 1
-                        self.stats["hyp_confirmed"] = self.stats.get("hyp_confirmed", 0) + 1
+                explained = [h for h in self.hyps if self._explains(h, self.hyp_values.get(h.key))]
+                if any(not h.event for h in explained):
+                    # a guess an event gave rise to is kept only where the screen's guesses had
+                    # none for the goal (Phase 69): beside them it would only dilute the steering
+                    explained = [h for h in explained if not h.event]
+                for h in explained:
+                    t = self._hyp_type(h)
+                    if t in self.confirmed:
+                        self.confirmed.remove(t)
+                    self.confirmed.insert(0, t)
+                    self.confirm_count[t] += 1
+                    self.stats["hyp_confirmed"] = self.stats.get("hyp_confirmed", 0) + 1
             self.hyps = None
             self.hyp_values = None
             return

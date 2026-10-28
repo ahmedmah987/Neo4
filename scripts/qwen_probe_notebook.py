@@ -124,12 +124,25 @@ def main():
         print("dry run done", flush=True)
         return
 
+    # Loaded straight onto the GPU, the 222,588 small tensors came in at ~180 a second and left the
+    # allocator with 68 GiB reserved but unusable at a third of the way (out of memory). So the model
+    # is loaded into RAM (176 GiB here) with the GPU kernels chosen anyway, then moved in one pass.
+    import auto_round.inference.convert_model as arc
+    import transformers.core_model_loading as cml
+    arc.infer_target_device = lambda device_map=None: "cuda"
+    cml.GLOBAL_WORKERS = 16
     t0 = time.time()
-    model = mq.Qwen4ExpForConditionalGeneration.from_pretrained("/tmp/lazy", device_map={"": 0}, dtype="auto")
+    model = mq.Qwen4ExpForConditionalGeneration.from_pretrained("/tmp/lazy", device_map={"": "cpu"}, dtype="auto")
+    print(f"loaded into RAM in {time.time() - t0:.0f} s", flush=True)
+    t1 = time.time()
+    model.to("cuda:0")
+    torch.cuda.synchronize()
     model.eval()
+    print(f"moved to the GPU in {time.time() - t1:.0f} s", flush=True)
     print("table rows attached:", ple_lazy.attach(model, pieces), flush=True)
     print(f"load seconds {time.time() - t0:.0f}", flush=True)
     print("GPU memory after load (GiB):", round(torch.cuda.memory_allocated(0) / 2**30, 1),
+          "| reserved:", round(torch.cuda.memory_reserved(0) / 2**30, 1),
           "| free:", round(torch.cuda.mem_get_info(0)[0] / 2**30, 1), flush=True)
     for game, f in FRAMES.items():
         acts = ", ".join(ACTION_TEXT[a] for a in f["actions"] if a in ACTION_TEXT)
@@ -198,7 +211,7 @@ wheels = sorted(w for w in glob.glob("/kaggle/input/**/*.whl", recursive=True)
                 if os.path.basename(w).split("-")[0] in ("auto_round", "py_cpuinfo", "threadpoolctl"))
 print("wheels:", wheels)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-index", "--no-deps", "--target", "/tmp/pkgs", *wheels])
-env = dict(os.environ, PYTHONPATH="/tmp/pkgs")
+env = dict(os.environ, PYTHONPATH="/tmp/pkgs", PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True")
 print(subprocess.run([sys.executable, "-c", "import auto_round; print('auto_round', auto_round.__version__)"],
                      env=env, capture_output=True, text=True).stdout or "auto_round not importable")
 r = subprocess.run([sys.executable, "/tmp/probe/probe.py"], env=env)

@@ -118,3 +118,31 @@ submission, and that the score is decided by how many levels are reached at all.
   Executable World Models: https://arxiv.org/abs/2605.05138 · Graph-based exploration:
   https://arxiv.org/abs/2512.24156
 * NVIDIA AVO: https://developer.nvidia.com/blog/nvidia-avo-reaches-100-on-arc-agi-3-demonstrating-a-frontier-level-general-purpose-architecture-for-long-horizon-autonomous-agents/
+
+## Prior art for Neo4's own ideas (31 October)
+
+| Neo4's idea (phase) | Published before | What is still Neo4's |
+|---|---|---|
+| The goal, not the dynamics, is the bottleneck (Phases 56–68: 92% of actions before the goal is known, 1.3× a person's actions once it is) | **Twin** (arXiv 2608.14490, Aug 2026, GPT-5.6 Sol): "building a usable world model is simpler than expected; inferring the right goal is the harder problem"; its unfinished games show "accurate dynamics, unresolved goals" — `sc25`, `sp80`, `tn36`, `ka59`, the games Neo4 also fails | the measurement for an agent with no language model, by level and life |
+| Goal guesses as measures, tested one at a time; a guess met without a level end is dropped, one met at a level end confirmed (Phase 61) | **Twin**: a candidate goal predicate is planned to; "reached exactly with no level boundary" it is permanently excluded; a level boundary confirms it. **EMPA** (Tsividis et al., arXiv 2107.12544, 2021): Bayesian inference over game theories including win conditions | guesses as integer distances (a gradient to steer by), not yes/no predicates; the hidden-score effect (0.36 → 0.46) |
+| Guesses generated from what an action changed (Phase 69) | **Twin**: candidates ranked by progress signals `color_gone`, `color_new`, `local_burst`, `big_change`, `frontier`, found by search inside its model. **LIVE** (Shen & Simon, IJCAI 1989): rules created and refined from surprises, where predictions fail | generated from observed events, not from search in a model; measured cost of testing them early (crowds out cheap exploration) |
+| Which guess to test, and when | **Tycho** (arXiv 2607.28287) states it as the open question: when to build, repair, use or bypass a model | the measurements of Phase 69 (15.19 → 15.52 by when they are tested; 14.85 when the cheap ones go early) |
+| Graph exploration of the level's states (Phase 1) | **Graph-based exploration** (arXiv 2512.24156) | none (it is the base) |
+| A model's guess at the goal from the first frame (Phases 58, 68) | the Milestone 1 runners-up (Gemma-4-31B policies); the harness papers | the measurement that a 181 GB model's first-frame goals read like a 12B model's |
+
+Ideas from this prior art that fit Neo4 without a language model:
+
+* **Eliminate on the record** (Twin): a guess whose goal was met at any logged frame of the level
+  without the level ending is false, without spending a test on it.
+* **Score guesses by evidence, test by expected cost** (EMPA; Bayesian experimental design): rank
+  tests by how likely a guess is given every frame seen, over the actions it would cost.
+* **Tell surprises from noise** (Collins & Shen, 2017): a distinguishing experiment before a change
+  is taken as evidence — the problem of patrols and animations in Phase 69.
+* **Candidates from search in the agent's own model** (Twin): propose as goals the reachable states
+  with salient changes (a colour gone, a big change), not only what has already happened.
+* AERA (arXiv 2605.25931) argues the 25 public games are a weak test (most fall to trivial
+  strategies) and the 55-game private set is the real one — a caution for any holdout proxy.
+
+Sources: https://arxiv.org/abs/2608.14490 · https://arxiv.org/abs/2107.12544 ·
+https://mlanthology.org/ijcai/1989/shen1989ijcai-rule · https://robots.isi.edu/SBL/ ·
+https://arxiv.org/abs/2605.25931 · https://arxiv.org/abs/2510.19788 (WorldTest / AutumnBench)

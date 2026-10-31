@@ -265,3 +265,46 @@ def test_the_agent_generates_guesses_from_what_moved_and_tests_them():
     new = agent._generate(extract(after))
     assert any(h.kind == "bring" and h.params[1] == ("colour", 6) for h in new)
     assert agent.stats["event_hyps"] == len(new) and agent.event_hyps == len(new)
+
+
+def test_the_record_turns_a_goal_met_too_early_into_a_goal_with_a_condition():
+    agent = ModelAgent(seed=0)
+    agent.learn_conditions = True
+    door = hy.Hypothesis("reach", ((9, 2, 2, "door"),), first=10)
+    key = hy.Hypothesis("clear", ((4, 1, 1, "key"),), first=1)
+    other = hy.Hypothesis("reach", ((5, 1, 1, "lamp"),), first=6)
+    agent.hyps = [door, key, other]
+    agent.hyp_values = {door.key: 4, key.key: 1, other.key: 6}
+    agent._record({door.key: 0, key.key: 1, other.key: 6}, 1)  # the door touched, the key still there
+    agent.hyp_values = {door.key: 0, key.key: 1, other.key: 6}
+    agent._record({door.key: 3, key.key: 0, other.key: 6}, 2)  # the key taken
+    agent.hyp_values = {door.key: 1, key.key: 0, other.key: 6}  # beside the door when the level ends
+    types = agent._against_record([door], 3)
+    assert types == [("given", agent._hyp_type(door), agent._hyp_type(key))]
+
+    # the next level: steered to the key first, then to the door
+    agent.confirmed = types
+    agent.confirm_count[types[0]] += 1
+    agent.life_met = set()
+    door2 = hy.Hypothesis("reach", ((9, 2, 2, "door"),), first=8)
+    key2 = hy.Hypothesis("clear", ((4, 1, 1, "key"),), first=1)
+    agent.hyps = [door2, key2]
+    agent.hyp_values = {door2.key: 8, key2.key: 1}
+    assert agent._steering() == [key2]
+    agent.life_met = {key2.key}
+    assert agent._steering() == [door2]
+
+
+def test_the_record_names_the_last_action_or_refutes_the_guess():
+    agent = ModelAgent(seed=0)
+    agent.learn_conditions = True
+    exit_ = hy.Hypothesis("reach", ((9, 2, 2, "exit"),), first=10)
+    agent.hyps = [exit_]
+    agent.hyp_values = {exit_.key: 2}
+    agent._record({exit_.key: 0}, 1)  # reached the exit, the level went on
+    agent.hyp_values = {exit_.key: 0}
+    agent._record({exit_.key: 0}, 4)  # a move tried while standing on it
+    agent.hyp_values = {exit_.key: 0}
+    assert agent._against_record([exit_], 5) == [("then", agent._hyp_type(exit_), 5)]  # the key that ended it
+    assert agent._against_record([exit_], 4) == []  # tried before without effect: refuted
+    assert agent.stats["cond_refuted"] == 1

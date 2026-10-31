@@ -3253,6 +3253,25 @@ level is scored only when it is played well in one or two lives, which needs the
 out in a model before it is walked, as Twin and Tycho do with a simulator written by a language
 model.
 
+**What the lost lives do.** In the same six levels, each action of a lost life was compared with the
+(state, action) pairs taken in the level's earlier lives (`.scratch_p70/rewalk.py`, hash seed 0):
+
+| game, level (seed) | lost lives | their actions | repeats of an earlier life | new |
+|---|---:|---:|---:|---:|
+| `r11l` 2 (3) | 20 | 891 | 3% | 95% |
+| `lp85` 2 (0) | 5 | 309 | 0% | 99% |
+| `su15` 1 (2) | 5 | 167 | 2% | 97% |
+| `ar25` 2 (0) | 11 | 1,051 | 4% | 91% |
+| `dc22` 2 (1) | 20 | 1,773 | 23% | 72% |
+| `tu93` 3 (3) | 14 | 322 | 48% | 47% |
+
+The lives do not re-walk what is known: in the click games almost every action is one never taken
+before, from the first or second action of the life. But the states are new because the pieces
+stand in another arrangement, and the graph learns per screen: what a click did in one arrangement
+is not known in the next. Fewer lives need a model over objects, in which an effect seen once holds
+in every arrangement — what Phase 60's model of clicks is, and what its imagined plans could not use
+then, when no goal reached a second level.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

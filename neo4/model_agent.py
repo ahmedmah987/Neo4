@@ -91,7 +91,7 @@ class ModelAgent(GraphAgent):
     events_last = True  # ...tested once the guesses read from the first frame are spent
     events_after = 150  # ...and only once a level has taken this many actions (when stuck),
     cheap_test = 0  # ...or sooner when the actions seen so far would meet one in this many (off: 14.85)
-    learn_conditions = False  # a guess met before its level ended is kept only with what it lacked then (Phase 70)
+    learn_conditions = True  # a guess met before its level ended is kept only with what it lacked then (Phase 70)
 
     def __init__(
         self,

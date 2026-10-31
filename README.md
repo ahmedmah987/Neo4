@@ -3232,6 +3232,16 @@ levels gained still take a thousand actions where a person takes tens, and a lev
 (human actions / agent actions)² of its share. The record makes what is carried to the next level
 right more often; it does not yet make the next level cheap.
 
+**Where a later level's actions go.** With the goal carried right more often, the cost of a level is
+elsewhere. Of the levels completed in this run, the life that completed each one took 1.5 times a
+person's actions on first levels and 1.0 times on later ones; 89% and 95% of the actions went to the
+lives before it, and those lives end in deaths — 796 in the 43 later levels, about 18 a level
+(`ar25`'s second level: 12 lives of about 90 actions, 11 ended when the move budget ran out;
+`dc22`'s: 21 lives, 20 deaths; `r11l`'s: 21 and 20; `tu93`'s third: 15 and 14). The agent plays a
+level as well as a person once it has learned the way, and pays for learning it by dying. Walking to
+the goal it carries by plan (Phase 64's `plan_trials`) measures 15.59 against 15.50 (119 levels
+against 122) — within the noise, as in Phase 64; off.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

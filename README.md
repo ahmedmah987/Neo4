@@ -3242,6 +3242,17 @@ level as well as a person once it has learned the way, and pays for learning it 
 the goal it carries by plan (Phase 64's `plan_trials`) measures 15.59 against 15.50 (119 levels
 against 122) — within the noise, as in Phase 64; off.
 
+**Why those lives end.** In six later levels traced one death at a time, most lives end when a
+per-life move budget runs out: `r11l`'s second level kills at the 60th action of a life (nine of
+twenty deaths at exactly 60; its winning life took 46), `lp85`'s at 60 (four of five; winning life
+51), `su15`'s first at 32–37 (winning life 20), `tu93`'s third at 35 (five of fourteen; winning life
+23), `ar25`'s second at about 90 (winning life 95). The agent already resets before walking into a
+known budget (Phase 17). What it lacks is a way to need fewer lives: each life spends its budget
+learning the level's states and paths, and the life that wins replays what the others found. A
+level is scored only when it is played well in one or two lives, which needs the way to be worked
+out in a model before it is walked, as Twin and Tycho do with a simulator written by a language
+model.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

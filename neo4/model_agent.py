@@ -92,6 +92,8 @@ class ModelAgent(GraphAgent):
     events_after = 150  # ...and only once a level has taken this many actions (when stuck),
     cheap_test = 0  # ...or sooner when the actions seen so far would meet one in this many (off: 14.85)
     learn_conditions = True  # a guess met before its level ended is kept only with what it lacked then (Phase 70)
+    relations_here = False  # a goal relation learned at a level-up holds the tests back only where it can be measured (Phase 72)
+    return_first = False  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
 
     def __init__(
         self,
@@ -676,10 +678,35 @@ class ModelAgent(GraphAgent):
             idx = self._refill_plan(node, me)
             if idx is not None:
                 return idx
+        if self.return_first and node.h is not None and not self.plan and self.trial is None \
+                and (self._confirmed_present() or self._relations_apply()):
+            idx = self._return_step(node)
+            if idx is not None:
+                return idx
         if self._frontier_beyond_budget(node):
             self.stats["budget_resets"] += 1
             return None
         return super()._choose(node)
+
+    def _return_step(self, node: Node) -> int | None:
+        """First return, then explore (Go-Explore, Ecoffet et al. 2021): when a known state with
+        actions still untested is closer to the goal than this one, walk there by known edges
+        before trying anything here, if this attempt's move budget leaves actions to explore
+        there. Lives then start where the earlier ones got furthest, not near the start again."""
+        best = self.graph.frontier(self.priority, best_first=True)
+        if not best or node.key in best:
+            return None
+        dist, nxt = self.graph.distances(self.priority, best_first=True)
+        if node.key not in nxt:
+            return None
+        budget = self.dyn.budget()
+        remaining = None if budget is None else budget - (self.dyn.attempt if self.since_reset else 0)
+        if remaining is not None and dist[node.key] + 2 > remaining:
+            return None
+        idx = self.graph.edge_to(node.key, nxt[node.key])
+        if idx is not None:
+            self.stats["return_steps"] = self.stats.get("return_steps", 0) + 1
+        return idx
 
     def _is_undo(self, aid: int) -> bool:
         """The undo key: every time it was tried after another action (at least twice), it gave
@@ -1069,7 +1096,7 @@ class ModelAgent(GraphAgent):
                     self._end_trial("trials_stuck")
         after = self.experiment_after_avatar if self.dyn.avatar() is not None else self.experiment_after
         if self.trial is None and self.hyps and self.level_actions >= after \
-                and not self.relations and not self._confirmed_present():
+                and not self._relations_apply() and not self._confirmed_present():
             order = {"copy": -1, "reach": 0, "bring": 0, "match": 1, "clear": 2, "paint": 2, "unify": 3}
             avatar = self.dyn.avatar()
             pool = [h for h in self.hyps if h.key not in self.tried and self.causes.helped(h.key)
@@ -1097,6 +1124,17 @@ class ModelAgent(GraphAgent):
                     return (self.stalled[h.key], late, -prior if prior is not None else 0.0, share,
                             order.get(h.kind, 9), repr(h.params))
                 self._start_trial(min(pool, key=rank), values)
+
+    def _relations_apply(self) -> bool:
+        """Whether the goal relations learned at level-ups (Phase 22) say what this level is for. With
+        ``relations_here``, only when one of them can be measured on this level's screen: a relation
+        between kinds this level does not show leaves its goal unknown, and the tests to it (Phase 72)."""
+        if not self.relations:
+            return False
+        if not self.relations_here or self.cur_grid is None:
+            return True
+        objs = self.cur_objs()
+        return bool(objs) and any(self._measure(h, objs) is not None for h in self.relations)
 
     def _test_cost(self, h: hy.Hypothesis, v: int) -> float:
         """Actions a test should take: the distance left over the best mean progress an action

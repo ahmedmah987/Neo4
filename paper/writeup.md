@@ -139,8 +139,9 @@ second level (*h* = 33, a 60-action budget, 20–70 lost lives) costs 957–3,34
 
 So carrying more between levels left the score in place. The metric rewards working out the
 way before walking it: in a model, as Twin, Tycho and Kepler do with simulators written by
-frontier models. Planning walks with our partial model (walls and patrols) measured within
-noise (0.624).
+frontier models. Our partial models did not change the score: walks planned with walls and
+patrols (0.624), clicks planned with a per-shape model of their effects (0.620), which lacks
+two-step effects (select, then place).
 
 ## 7. Conclusion
 

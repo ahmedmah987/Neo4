@@ -95,6 +95,7 @@ class ModelAgent(GraphAgent):
     relations_here = False  # a goal relation learned at a level-up holds the tests back only where it can be measured (Phase 72)
     return_first = True  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
     return_patience = 3  # ...for as long as the best state improved in the last this many attempts (0: always)
+    return_in_trials = False  # ...and also while a guess is being tested, first levels included, to that guess's best state
 
     def __init__(
         self,
@@ -686,8 +687,9 @@ class ModelAgent(GraphAgent):
             idx = self._refill_plan(node, me)
             if idx is not None:
                 return idx
-        if self.return_first and node.h is not None and not self.plan and self.trial is None \
-                and (self._confirmed_present() or self._relations_apply()):
+        if self.return_first and node.h is not None and not self.plan \
+                and ((self.trial is None and (self._confirmed_present() or self._relations_apply()))
+                     or (self.return_in_trials and self.trial is not None)):
             idx = self._return_step(node)
             if idx is not None:
                 return idx
@@ -1168,6 +1170,8 @@ class ModelAgent(GraphAgent):
         self.trial_patience = (min(self.experiment_patience, max(8, int(2 * cost) + 4))
                                if h.event and self.level_actions < self.events_after else self.experiment_patience)
         self.trial_log.append([self.level_no, h.kind, repr(h.params)[:50], self.level_actions, None, None])
+        if self.return_in_trials:  # the best state returned to is this guess's, its patience fresh
+            self.return_best, self.return_life = None, self.stats["resets"]
         self.trial_best = values[h.key]
         self.trial_quiet = 0
         self.stats["trials"] = self.stats.get("trials", 0) + 1

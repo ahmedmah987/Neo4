@@ -93,8 +93,8 @@ class ModelAgent(GraphAgent):
     cheap_test = 0  # ...or sooner when the actions seen so far would meet one in this many (off: 14.85)
     learn_conditions = True  # a guess met before its level ended is kept only with what it lacked then (Phase 70)
     relations_here = False  # a goal relation learned at a level-up holds the tests back only where it can be measured (Phase 72)
-    return_first = False  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
-    return_patience = 0  # ...for as long as the best state improved in the last this many attempts (0: always)
+    return_first = True  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
+    return_patience = 3  # ...for as long as the best state improved in the last this many attempts (0: always)
 
     def __init__(
         self,

@@ -10,29 +10,30 @@ induces rules from its transitions, eighteen exact mechanic solvers, and a layer
 goals and tests them. The solvers score 80.01 on the 25 public games; without the solvers built
 for each game, 0.45, close to the hidden score of 0.33. Search on hand-built models is never
 the limit; the goal is. Guesses tested one at a time raise the hidden score to 0.46. Goals
-whose conditions are learned from the level's own record complete more levels, but not
-cheaply: the winning life plays a later level at a person's cost, and 95% of the actions go
-to lives that die learning the way. A level learned in *L* lives is worth about 1/*L*² of its
-share. Letting each life first return to the best state earlier lives reached raises the
-holdout by 13% but not the hidden score.
+whose conditions are learned from the level's own record complete more levels, but 92% of
+the actions go to lives that die learning the way. A level learned in *L* lives is worth
+about 1/*L*² of its share (Spearman 0.83 over 123 levels). Letting each life first return to
+the best state earlier lives reached raises the holdout by 13% but not the hidden score.
 
 ## 1. Introduction
 
 ARC-AGI-3 games are turn-based on a 64×64 grid of 16 colours, with no instructions. A level
-scores min(1.15, *h*/*a*)², with *h* the median human's actions and *a* the agent's, counted
+scores min(1.15, (*h*/*a*)²), with *h* the median human's actions and *a* the agent's, counted
 from the previous level-up with resets and lost lives included. Later levels weigh more.
 Starting from graph-based exploration [1], we asked how far an agent without a language model
-can go, in 72 phases measured on an offline holdout.
+can go, in 72 phases measured on an offline holdout. Three findings: search on the right model
+is never the limit, the goal is; a level's share falls as 1/*L*² in its lives (§6); and only
+first levels move the hidden score.
 
 ## 2. Related work
 
-The leading Kaggle entries run open-weight language models in code-writing harnesses [2, 3]
-(top ten: 47–76). Frontier-model agents write executable world models and plan in them.
-Twin [4] finds that "inferring the right goal is the harder problem", and excludes a goal
-reached without a level boundary. Tycho [5] asks when to build, repair or bypass a model. Kepler [6] validates hypotheses as executable models and reaches 100 on the
-public games. Earlier, EMPA [7] inferred game theories with their win conditions, and LIVE [8]
-refined rules using the situations where they failed. We use a fixed vocabulary of integer goal
-measures, so every step is deterministic and its effect isolable.
+The leading Kaggle entries run open-weight language models in code-writing harnesses [2, 3] (top
+ten: 47–76). Frontier-model agents write executable world models and plan in them. Twin [4] finds
+that "inferring the right goal is the harder problem", and excludes a goal reached without a level
+boundary. Tycho [5] asks when to build, repair or bypass a model. Kepler [6] validates hypotheses as
+executable models and reaches 100 on the public games. Earlier, EMPA [7] inferred game theories with
+their win conditions, and LIVE [8] refined rules using the situations where they failed. We use a
+fixed vocabulary of integer goal measures, so every step is deterministic and its effect isolable.
 
 ## 3. Approach
 
@@ -41,10 +42,10 @@ transition updates rules: what the keys move and what blocks it, which clicks do
 ends the game, move budgets, resource bars, switches. Actions predicted useless or fatal are
 skipped.
 
-**Mechanics library.** Eighteen solvers (maze, keys, mirror, gravity, pour, spells, panel,
-replay, program, translate, and others) each pair a perception step with an exact model and a
-planner, and play only while the frames match their predictions. Before writing one, we played
-every level of the game by search on a hand-built model of its rules.
+**Mechanics library.** Eighteen solvers (maze, keys, mirror, gravity, pour, and others) each pair a
+perception step with an exact model and a planner, and play only while the frames match their
+predictions. Before writing one, we played every level of the game by search on a hand-built model
+of its rules.
 
 **Holdout.** Each public game is played without the solvers built or tuned on it (5 seeds,
 4,000 actions, fixed hash seeds).
@@ -83,31 +84,27 @@ drops, and applies LIVE's refinement to goals.
 | + the record judges goals (without generated guesses) | 0.62 | 0.46 |
 | + first return, then explore (§6) | 0.70 | 0.46 |
 
-On the public games the exploration baseline [1] scores 0.26, the explorer 0.44 and the library
-80.01, sixteen games at or near the cap. In the sixteen diagnosed games, search on the right
+Hidden scores moved only with changes to first levels; later-level changes (§5, §6) left them at
+0.46. On the public games the exploration baseline [1] scores 0.26, the explorer 0.44 and the
+library 80.01, sixteen games at or near the cap. In the sixteen diagnosed games, search on the right
 model won every level within the humans' action count.
 
 ## 5. Analysis
 
-**The goal is the bottleneck.** Over 111 holdout levels, the winning life took 1.3 times the
-humans' actions, all lives 16.6 times: 92% is learning.
-
 **What did not help.** Local language models as advisors lowered the holdout (Gemma 3 4B by 6%,
-Qwen2.5 3B by 42%, Gemma 3 12B by 20%). A 181 GB Qwen3.8-Flash-Next runs offline on the competition's
-GPU, but answers in 61–81 s, with goals like the
-12B model's. Goal statistics shared across games ordered tests no better than
-distance (0.59–0.62).
+Qwen2.5 3B by 42%, Gemma 3 12B by 20%). A 181 GB Qwen3.8-Flash-Next answers in 61–81 s on the
+competition's GPU, with goals like the 12B model's. Goal statistics shared across games ordered
+tests no better than distance (0.59–0.62).
 
 **Generated guesses find goals the list lacks, but late** (`cn04`'s and `ka59`'s first levels):
-a level found at 300 actions where a person needs 60 is worth 4% of its share, and tested
-earlier they crowd out cheap exploration (0.59). Their hidden score fell (0.46 → 0.33); five
-identical submissions of one public notebook ranged ±14% [9], so part of that may be noise.
+found at 300 actions where a person needs 60, a level is worth 4% of its share; tested earlier,
+they crowd out cheap exploration (0.59). Their hidden score fell to 0.33, perhaps partly noise:
+identical submissions of one public notebook ranged ±14% [9].
 
 **The record.** 81% of the guesses confirmed at level-ups had been met earlier in the level.
 With the record, of 237 explanations 49 were kept alone, 60 with a *given* condition, 38 with
 a *then* action, and 90 refuted. Levels completed rose from 114
-to 122 (121 under a second hash seed; `ar25`'s second level in five seeds instead of one), but
-the score stayed at 0.620.
+to 122 (121 under a second hash seed), but the score stayed at 0.620.
 
 ## 6. Where the actions go: lives
 
@@ -116,34 +113,36 @@ the score stayed at 0.620.
 | first levels | 1.5× | 89% |
 | later levels | 1.0× | 95% |
 
-Most lives end at a per-life move budget: 9 of 20 deaths in `r11l`'s second level come at
-exactly 60 actions (winning life 46), 5 of 14 in `tu93`'s third at 35 (23). The agent plays like
-a person once it knows the way, and pays for learning it by dying.
+Most lives end at a per-life move budget (9 of 20 deaths in `r11l`'s second level at exactly
+60 actions; its winning life took 46). The agent plays like a person once it knows the way, and
+pays for learning it by dying.
 
-**A bound.** Let a level take *L* lives. Say the winning life costs about *h*, and each lost
-life costs *bh*. Then *a* ≈ *h*(1 + (*L*−1)*b*), and the level is worth
-(1 + (*L*−1)*b*)⁻² of its share, or 1/*L*² when *b* = 1. Half the share needs
-(*L*−1)*b* ≤ 0.41: less than half a person's count spent in lost lives. For example, `r11l`'s
-second level (*h* = 33, a 60-action budget, 20–70 lost lives) costs 957–3,341 actions: at most
-0.12% of its share, though its winning life is near human.
+**A bound.** Let a level take *L* lives, the winning one costing about *h* and each lost one
+*bh*. Then *a* ≈ *h*(1 + (*L*−1)*b*), and the level is worth (1 + (*L*−1)*b*)⁻² of its share,
+or 1/*L*² when *b* = 1: half the share needs (*L*−1)*b* ≤ 0.41.
 
-**Fewer lives.** Had each completed level cost only its winning life, the holdout would score
-3.54, not 0.62. Traced life by life, progress on the goal measure made in one life is not
-returned to in the next, which starts again near the start state. With a carried goal, a life
-now first walks by known edges to the known state closest to the goal, then explores
-(Go-Explore [10]), while that state keeps improving: holdout 0.62 → **0.70** under both hash
-seeds (`vc33`'s second level: 75 → 41 actions, mean of five seeds); hidden, 0.46 again: first
-levels play as before. It returns the place, not the way. Winning the first life needs the way worked out first, in a model, as
-Twin, Tycho and Kepler do with simulators written by frontier models; planning in our partial
+**The bound holds.** Over the holdout's 123 completed levels (median 6 lives), a lost life cost
+1.6*h* (median; quartiles 0.9–2.5). Lives alone rank the levels' shares with Spearman
+ρ = 0.83; with their measured cost, 0.96. The 63 levels of six lives or more earned 3% of the
+score, the 33 of one life 72%. It overrates mainly these: their one life, spent learning, took
+2.1 times a person's count.
+
+**Fewer lives.** Had each completed level cost only its winning life, the holdout would score 3.54,
+not 0.62. Progress made on the goal measure in one life is lost to the next, which restarts near the
+start state. With a carried goal, a life now first walks by known edges to the known state closest
+to the goal, then explores (Go-Explore [10]), while that state keeps improving: holdout 0.62 →
+**0.70** under both hash seeds (`vc33`'s second level: 75 → 41 actions, mean of five seeds). It
+returns the place, not the way. Winning the first life needs the way worked out first, in a model,
+as Twin, Tycho and Kepler do with simulators written by frontier models; planning in our partial
 models (walls and patrols; clicks without select-then-place effects) changed nothing.
 
 ## 7. Conclusion
 
-A frames-only agent with hand-built solvers plays the public games near human efficiency and
-the hidden ones barely, as the holdout predicts. Each bottleneck removed revealed the next:
-search (never the limit), the goal (tested guesses: 0.33 → 0.46), what the goal requires (the
-record: eight more levels), and the lives spent learning the way, punished as 1/*L*². Returning
-each life to the best state found cuts them (+13%); the next step without a language model is a
+A frames-only agent with hand-built solvers plays the public games near human efficiency and the
+hidden ones barely, as the holdout predicts. Each bottleneck removed revealed the next: search
+(never the limit), the goal (tested guesses: 0.33 → 0.46), what the goal requires (the record: eight
+more levels), and the lives spent learning the way, punished as 1/*L*². Returning each life to the
+best state found cuts them (+13%, holdout only); the next step without a language model is a
 simulator built from the rules the agent already induces, in which to spend lives instead.
 
 **References.** [1] Graph-based exploration for ARC-AGI-3, arXiv 2512.24156. [2] Tufa Labs,

@@ -3342,6 +3342,9 @@ Actions of later levels, per seed (Phase 70 → Phase 72):
 * `dc22`'s second level dearer in all five seeds (about 1,850 → 2,130; 2,800 without the patience): its
   measure has a dead end the returns keep going back to.
 
+**On the hidden games.** Submitted as v10 (v9 with this phase; bundle of commit `130f619`, notebook
+version 10) on 1 November; score pending.
+
 The gain is where the carried goal is right and the way to it is a chain of improvements (`vc33`,
 `tu93`). It does not make the first life win: what returns is the place, not the way to finish from it.
 

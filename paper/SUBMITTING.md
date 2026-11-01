@@ -22,3 +22,17 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   papers scoring above 4.5 of 5. Winners' papers are licensed CC-BY 4.0.
 * **Rubric** (0–5 each, averaged): Accuracy, Universality, Progress, Theory, Completeness,
   Novelty.
+
+## What to choose (decided 1 November 2026)
+
+* **The writeup's submission: v10** — ref 57865735, notebook `ahmedabdalatef/neo4-arc-agi-3`
+  version 10, bundle of commit `130f619`. It is the code the paper describes, through Phase 72
+  (first return, then explore). Put the notebook in the Project Links field.
+* **The two final submissions for ARC-AGI-3: v10 (57865735) and v7 (57717349).** v7, v9 and v10
+  tie at 0.46 on the public leaderboard; the final ranking is on the private score, which is not
+  shown. v10 is the best on the holdout (0.70 against 0.62). v7 is the most different from it
+  (without the record that judges goals, Phase 70, or the return to the best state, Phase 72),
+  so it covers the case where those two do worse on the private games. v9 lies between the two
+  and would add little. The API cannot select final submissions: on the competition's
+  "Submissions" page, tick "Use for Final Score" for these two. Left unticked, Kaggle chooses by
+  public score, and the three tie.

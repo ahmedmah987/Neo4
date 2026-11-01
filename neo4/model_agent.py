@@ -94,6 +94,7 @@ class ModelAgent(GraphAgent):
     learn_conditions = True  # a guess met before its level ended is kept only with what it lacked then (Phase 70)
     relations_here = False  # a goal relation learned at a level-up holds the tests back only where it can be measured (Phase 72)
     return_first = False  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
+    return_patience = 0  # ...for as long as the best state improved in the last this many attempts (0: always)
 
     def __init__(
         self,
@@ -260,6 +261,8 @@ class ModelAgent(GraphAgent):
 
     def _start_level(self, grid: np.ndarray) -> None:
         super()._start_level(grid)
+        self.return_best: float | None = None  # the best goal distance returned to in this level
+        self.return_life = self.stats["resets"]  # ...and the attempt in which it was last improved
         self._drop_plan()
         self.plans_this_level = 0
         self.explore_plans_this_level = 0
@@ -696,6 +699,17 @@ class ModelAgent(GraphAgent):
         best = self.graph.frontier(self.priority, best_first=True)
         if not best or node.key in best:
             return None
+        if self.return_patience:
+            # a state returned to for attempts on end without getting closer is a dead end of the
+            # measure: explore as before until a closer one turns up
+            hs = [self.graph.nodes[k].h for k in best if self.graph.nodes[k].h is not None]
+            if not hs:
+                return None
+            h = min(hs)
+            if getattr(self, "return_best", None) is None or h < self.return_best:
+                self.return_best, self.return_life = h, self.stats["resets"]
+            elif self.stats["resets"] - self.return_life > self.return_patience:
+                return None
         dist, nxt = self.graph.distances(self.priority, best_first=True)
         if node.key not in nxt:
             return None

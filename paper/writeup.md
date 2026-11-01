@@ -113,8 +113,7 @@ to 122 (121 under a second hash seed), but the score stayed at 0.620.
 | later levels | 1.0× | 95% |
 
 Many lives end at a per-life move budget (9 of 20 deaths in `r11l`'s second level at exactly 60
-actions; its winning life took 46). The agent plays like a person once it knows the way, and pays
-for learning it by dying.
+actions). The agent plays like a person once it knows the way, and pays for learning it by dying.
 
 **A bound.** Let a level take *L* lives, the winning one costing about *h* and each lost one
 *bh*. Then *a* ≈ *h*(1 + (*L*−1)*b*), and the level is worth (1 + (*L*−1)*b*)⁻² of its share,
@@ -130,10 +129,10 @@ took 2.1 times a person's count.
 not 0.62. Progress made in one life is lost to the next, which restarts near the start. With a
 carried goal, a life now first walks by known edges to the known state closest to the goal, then
 explores (Go-Explore [10]), while that state keeps improving: holdout 0.62 → **0.70** under both
-hash seeds (`vc33`'s second level: 75 → 41 actions, mean of five seeds). It returns the place, not
-the way. Winning the first life needs the way worked out first, in a model, as Twin, Tycho and
-Kepler do with simulators that frontier models write; planning in our partial models changed
-nothing.
+hash seeds (`vc33`'s second level: 75 → 41 actions). It returns the place, not the way. Returning
+within first-level tests lowered the holdout (0.62–0.66): there the best state is a guess's, usually
+wrong. Winning the first life needs the way worked out first, in a model, as Twin, Tycho and Kepler
+do with simulators that frontier models write; planning in our partial models changed nothing.
 
 ## 7. Conclusion
 

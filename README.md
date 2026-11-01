@@ -97,6 +97,7 @@ The project has two strands that share one codebase:
 | 70 | **Goals that learn their conditions from the record**: every frame a level goes on is evidence; a guess that explains a level's end but was met earlier in it is kept only with what it lacked at every earlier meeting (another guess met in the winning life, or the winning action), else refuted; later levels are steered to the condition first | done — of 237 explanations, 49 kept alone, 98 with a condition, 90 refuted; holdout 15.50 → 15.50 with 114 → 122 levels (121 under hash seed 1): `ar25`'s second level in all five seeds (one before) and two to three times cheaper, `r11l`'s and `sc25`'s second levels for the first time; default on. **Hidden score (v9, without Phase 69): 0.46**, as v7 |
 | 71 | **Clicks planned in imagination with goals that reach later levels**: Phase 60's search over predicted frames, on top of Phase 70 | done — holdout 15.50 → 15.50 (122 levels); plans in 3 of 12 games that searched, none in the levels whose lives die (`r11l`, `su15`, `dc22`): their clicks select, then place; the per-shape model of clicks does not hold two-step effects; off |
 | 72 | **First return, then explore**: with a goal carried from an earlier level, a life walks by known edges to the known state closest to it before exploring, while that best state keeps improving (3 attempts) | done — holdout 15.50 → **17.61** under both hash seeds (123 and 125 levels against 122 and 121): `vc33` 2.41 → 3.11, `tu93` 4.14 → 5.41, `dc22` 0.06 → 0.05; default on. **Hidden score (v10): 0.46**, as v7 and v9 |
+| 73 | **First levels: returns within tests, and tests not taken again**: Phase 72's return to the best state also while a guess is tested (first levels included), at every step or only at the start of a later life; a test given up not taken again | done — holdout 17.61 → 15.54 (returns at every step), 16.50 (only at a life's start), 17.31 (no retests); first levels 9.60 → 8.10, 9.25, 9.55; off |
 | 10 | (optional) a local language model that proposes hypotheses | — |
 
 **Where this stands.** The default `model` agent beats the exploration baseline at every
@@ -3402,6 +3403,31 @@ first levels (goals read from the screen 0.33 → 0.36, tests one at a time 0.36
 guesses 0.46 → 0.33); the two changes confined to later levels (Phases 70 and 72: eight more levels,
 then one to four more and +13% on the holdout) left it at 0.46. This suggests the hidden score
 comes from first levels completed in one life, as most of the holdout's does.
+
+### Phase 73 — first levels: returns within tests, and tests not taken again (off)
+
+The hidden score moves only with first levels (above), and on the holdout a first level costs
+most where it takes many lives: had each cost only its winning life, the holdout would score 1.80
+instead of 0.70 (mean over the 25 games); halving its lost lives, 0.82. Traced in `dc22`'s first
+level (14 lives, the winning one 32 actions against the humans' 59), the lives are spent testing
+guesses, each new life walking from the start again, and three guesses tested two or three times
+after they were given up. Three changes, each a flag, measured on the holdout (hash seed 0; mean
+over the 25 games, first and later levels apart):
+
+| | total | first levels | later levels | levels |
+|---|---:|---:|---:|---:|
+| Phase 72 (v10) | 0.705 | 0.384 | 0.320 | 123 |
+| `return_in_trials`: Phase 72's return also while a guess is tested, at every step | 0.622 | 0.324 | 0.298 | 112 |
+| `return_in_trials` + `return_at_start`: only at the start of a later life, until its first other action | 0.660 | 0.370 | 0.291 | 118 |
+| `experiment_retries = 1`: a test given up is not taken again | 0.693 | 0.382 | 0.311 | 118 |
+
+None helps. Returns help some first levels (`ft09` 0.07 → 0.13–0.14, `dc22` 0.05 → 0.07–0.08,
+`m0r0`, `s5i5`, `su15`) and cost others more (`sp80`'s first level 24 → 77 actions; `sc25`'s first
+level lost in most seeds; `lf52`, `ls20`). On a first level the best state is the best state of a
+*guess*, and the guess is usually wrong: returning to it spends the life where nothing is to be
+found, as Phase 72's returns to a goal carried from a level that ended help only because that goal
+was right. Retests are worth keeping: without them `sc25` loses its first level in three seeds. The
+flags stay off; v10 is unchanged.
 
 ### Where the library stands
 

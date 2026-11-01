@@ -81,7 +81,7 @@ drops, and applies LIVE's refinement to goals.
 | + goals read from the screen | 0.53 | 0.36 |
 | + tested one at a time | 0.62 | **0.46** |
 | + generated guesses | 0.62 | 0.33 |
-| + the record judges goals (without generated guesses) | 0.62 | *v9: pending* |
+| + the record judges goals (without generated guesses) | 0.62 | 0.46 |
 
 On the public games the exploration baseline [1] scores 0.26, the explorer 0.44 and the library
 80.01, sixteen games at or near the cap. In the sixteen diagnosed games, search on the right

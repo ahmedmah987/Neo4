@@ -35,4 +35,4 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   so it covers the case where those two do worse on the private games. v9 lies between the two
   and would add little. The API cannot select final submissions: on the competition's
   "Submissions" page, tick "Use for Final Score" for these two. Left unticked, Kaggle chooses by
-  public score, and the three tie.
+  public score, and the three tie. **Done: v7 and v10 ticked on 1 November.**

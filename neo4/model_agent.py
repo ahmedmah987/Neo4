@@ -211,8 +211,9 @@ class ModelAgent(GraphAgent):
         self.copy_evidence: hy.CopyEvidence | None = None
         self.copy_hyps = 0
         # Where a level's actions went (Phase 63): per completed level, [actions, deaths, actions
-        # in the life that completed it].
+        # in the life that completed it, lives it took].
         self.level_deaths = 0
+        self.level_lives = 1
         self.life_start = 0
         self.level_log: list[list[int]] = []
         self.trial_plans = 0
@@ -301,6 +302,7 @@ class ModelAgent(GraphAgent):
         self.copy_evidence = None
         self.copy_hyps = 0
         self.level_deaths = 0
+        self.level_lives = 1
         self.life_start = 0
         self.trial_plans = 0
         self.met_at = {}
@@ -541,7 +543,8 @@ class ModelAgent(GraphAgent):
             if self.track_hypotheses:
                 self._track_hypotheses(action, data, outcome, after, grid)
             if outcome == LEVEL_UP:
-                self.level_log.append([self.level_actions, self.level_deaths, self.level_actions - self.life_start])
+                self.level_log.append([self.level_actions, self.level_deaths, self.level_actions - self.life_start,
+                                       self.level_lives])
                 self.stats["level_log"] = self.level_log
                 self._learn_relations(self.level_start_objs, self.last_objs)
             elif outcome == OK and self.relations and data is not None and after is not None:
@@ -580,6 +583,8 @@ class ModelAgent(GraphAgent):
         if obs.state == GameState.GAME_OVER:
             self.level_deaths += 1
         if action is GameAction.RESET:
+            if self.level_actions > 1:  # not the reset that starts the game
+                self.level_lives += 1
             self.life_start = self.level_actions
             self.met_at = {}
             self.life_met = set()

@@ -1,7 +1,7 @@
 # Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
 
 *Code (MIT-0): https://github.com/ahmedmah987/neo4.
-Kaggle submission: ARC Prize 2026 – ARC-AGI-3, notebook `ahmedabdalatef/neo4-arc-agi-3`.*
+Kaggle submission: ARC Prize 2026 – ARC-AGI-3, notebook `ahmedabdalatef/neo4-arc-agi-3`, version 10.*
 
 ## Abstract
 
@@ -29,18 +29,17 @@ first levels move the hidden score.
 
 The leading Kaggle entries run open-weight language models in code-writing harnesses [2, 3] (top
 ten: 47–76). Frontier-model agents write executable world models and plan in them. Twin [4] finds
-that "inferring the right goal is the harder problem", and excludes a goal reached without a level
+that "the harder problem is inferring the right goal", and excludes a goal reached without a level
 boundary. Tycho [5] asks when to build, repair or bypass a model. Kepler [6] validates hypotheses as
 executable models and reaches 100 on the public games. Earlier, EMPA [7] inferred game theories with
-their win conditions, and LIVE [8] refined rules using the situations where they failed. We use a
-fixed vocabulary of integer goal measures, so every step is deterministic and its effect isolable.
+their win conditions, and LIVE [8] refined rules where they failed. We use a fixed vocabulary of
+integer goal measures, so every step is deterministic and its effect isolable.
 
 ## 3. Approach
 
 **Explorer.** Frames are parsed into single-colour components matched between frames. Each
-transition updates rules: what the keys move and what blocks it, which clicks do nothing, what
-ends the game, move budgets, resource bars, switches. Actions predicted useless or fatal are
-skipped.
+transition updates rules: what keys move and what blocks them, which clicks do nothing, what ends
+the game, move budgets. Actions predicted useless or fatal are skipped.
 
 **Mechanics library.** Eighteen solvers (maze, keys, mirror, gravity, pour, and others) each pair a
 perception step with an exact model and a planner, and play only while the frames match their
@@ -113,28 +112,28 @@ to 122 (121 under a second hash seed), but the score stayed at 0.620.
 | first levels | 1.5× | 89% |
 | later levels | 1.0× | 95% |
 
-Most lives end at a per-life move budget (9 of 20 deaths in `r11l`'s second level at exactly
-60 actions; its winning life took 46). The agent plays like a person once it knows the way, and
-pays for learning it by dying.
+Many lives end at a per-life move budget (9 of 20 deaths in `r11l`'s second level at exactly 60
+actions; its winning life took 46). The agent plays like a person once it knows the way, and pays
+for learning it by dying.
 
 **A bound.** Let a level take *L* lives, the winning one costing about *h* and each lost one
 *bh*. Then *a* ≈ *h*(1 + (*L*−1)*b*), and the level is worth (1 + (*L*−1)*b*)⁻² of its share,
 or 1/*L*² when *b* = 1: half the share needs (*L*−1)*b* ≤ 0.41.
 
 **The bound holds.** Over the holdout's 123 completed levels (median 6 lives), a lost life cost
-1.6*h* (median; quartiles 0.9–2.5). Lives alone rank the levels' shares with Spearman
-ρ = 0.83–0.84 under both hash seeds; with their measured cost, 0.96. The 63 levels of six lives or more earned 3% of the
-score, the 33 of one life 72%. It overrates mainly these: their one life, spent learning, took
-2.1 times a person's count.
+1.6*h* (median; quartiles 0.9–2.5). Lives alone rank the levels' shares with Spearman ρ = 0.83–0.84
+under both hash seeds; with their measured cost, 0.96. The 63 levels of six lives or more earned 3%
+of the score, the 33 of one life 72%. It overrates mainly these: their one life, spent learning,
+took 2.1 times a person's count.
 
 **Fewer lives.** Had each completed level cost only its winning life, the holdout would score 3.54,
-not 0.62. Progress made on the goal measure in one life is lost to the next, which restarts near the
-start state. With a carried goal, a life now first walks by known edges to the known state closest
-to the goal, then explores (Go-Explore [10]), while that state keeps improving: holdout 0.62 →
-**0.70** under both hash seeds (`vc33`'s second level: 75 → 41 actions, mean of five seeds). It
-returns the place, not the way. Winning the first life needs the way worked out first, in a model,
-as Twin, Tycho and Kepler do with simulators written by frontier models; planning in our partial
-models (walls and patrols; clicks without select-then-place effects) changed nothing.
+not 0.62. Progress made in one life is lost to the next, which restarts near the start. With a
+carried goal, a life now first walks by known edges to the known state closest to the goal, then
+explores (Go-Explore [10]), while that state keeps improving: holdout 0.62 → **0.70** under both
+hash seeds (`vc33`'s second level: 75 → 41 actions, mean of five seeds). It returns the place, not
+the way. Winning the first life needs the way worked out first, in a model, as Twin, Tycho and
+Kepler do with simulators that frontier models write; planning in our partial models changed
+nothing.
 
 ## 7. Conclusion
 

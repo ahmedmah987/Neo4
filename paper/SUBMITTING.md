@@ -36,3 +36,17 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   and would add little. The API cannot select final submissions: on the competition's
   "Submissions" page, tick "Use for Final Score" for these two. Left unticked, Kaggle chooses by
   public score, and the three tie. **Done: v7 and v10 ticked on 1 November.**
+
+## Before pressing Submit (checked 1 November 2026)
+
+* **Make the repository public.** The paper links its code at https://github.com/ahmedmah987/neo4,
+  which is private: a reader gets a 404. GitHub: Settings → General → Danger Zone → Change
+  visibility → Public. No secrets, tokens or credentials files are tracked (99 files checked by
+  name), and nothing from other private projects.
+* **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
+* **Subtitle:** A language-model-free agent, and why a level learned in L lives is worth 1/L² of
+  its score
+* **Text:** `paper/writeup.md` from "## Abstract" on: 1,481 words counting only words with a
+  letter or digit, 1,500 counting every token of the rendered text, symbols included.
+* **References:** the five arXiv numbers resolve to the papers named (checked against arXiv);
+  Twin's sentence is quoted as its abstract has it.

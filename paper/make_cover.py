@@ -10,9 +10,9 @@ from matplotlib.patches import FancyBboxPatch
 SURFACE, INK, INK2, MUTED, SERIES = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#2a78d6"
 ROWS = [  # label, official-style score
     ("The 25 public games, each with the solver built for it", 80.01),
-    ("The same games, each without its own solver (holdout)", 0.45),
+    ("The same games, each without its own solver (holdout)", 0.70),
     ("The model-guided explorer alone", 0.44),
-    ("The hidden games (Kaggle leaderboard)", 0.33),
+    ("The hidden games (Kaggle leaderboard, final submissions v7 and v10)", 0.46),
 ]
 
 fig = plt.figure(figsize=(16, 8), dpi=100, facecolor=SURFACE)
@@ -32,6 +32,8 @@ ax.set_xlim(0, 118)
 ax.set_ylim(-0.5, n - 0.1)
 ax.axis("off")
 ax.plot([0, 0], [-0.4, n - 0.35], color=MUTED, linewidth=1)
+fig.text(0.05, 0.115, "Why: a level learned in L lives is worth about 1/L² of its share (Spearman 0.83 over 123 "
+         "holdout levels); 92% of the actions go to lives that die learning the way.", fontsize=13, color=INK)
 fig.text(0.05, 0.08, "Official-style score: per level min(115, (human actions / agent actions)² × 100), levels weighted "
          "by their index, averaged over games.", fontsize=13, color=INK2)
 fig.text(0.05, 0.045, "Neo4 · a frames-only agent, no language model · MIT-0 · github.com/ahmedmah987/neo4",

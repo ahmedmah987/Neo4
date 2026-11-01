@@ -96,6 +96,7 @@ class ModelAgent(GraphAgent):
     return_first = True  # with a goal carried from an earlier level, first return to the known state closest to it, then explore (Phase 72; Go-Explore)
     return_patience = 3  # ...for as long as the best state improved in the last this many attempts (0: always)
     return_in_trials = False  # ...and also while a guess is being tested, first levels included, to that guess's best state
+    return_at_start = False  # ...only at the start of a life after the level's first, until the first action that is not a return
 
     def __init__(
         self,
@@ -586,6 +587,7 @@ class ModelAgent(GraphAgent):
         if action is GameAction.RESET:
             if self.level_actions > 1:  # not the reset that starts the game
                 self.level_lives += 1
+            self.life_returning = True
             self.life_start = self.level_actions
             self.met_at = {}
             self.life_met = set()
@@ -605,6 +607,8 @@ class ModelAgent(GraphAgent):
         return action, data
 
     def _choose(self, node: Node) -> int | None:
+        # a life returns (with ``return_at_start``) only until it first does anything else
+        returning, self.life_returning = getattr(self, "life_returning", False), False
         if self.advisor is not None and self.cur_grid is not None and self._advice_due():
             self._ask_advisor(node)
         if self.cur_grid is None or not self.dyn.observations:
@@ -689,9 +693,11 @@ class ModelAgent(GraphAgent):
                 return idx
         if self.return_first and node.h is not None and not self.plan \
                 and ((self.trial is None and (self._confirmed_present() or self._relations_apply()))
-                     or (self.return_in_trials and self.trial is not None)):
+                     or (self.return_in_trials and self.trial is not None)) \
+                and (not self.return_at_start or (returning and self.level_lives > 1)):
             idx = self._return_step(node)
             if idx is not None:
+                self.life_returning = returning
                 return idx
         if self._frontier_beyond_budget(node):
             self.stats["budget_resets"] += 1

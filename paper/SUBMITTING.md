@@ -46,7 +46,8 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
 * **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
 * **Subtitle:** A language-model-free agent, and why a level learned in L lives is worth 1/L² of
   its score
-* **Text:** `paper/writeup.md` from "## Abstract" on: 1,481 words counting only words with a
-  letter or digit, 1,500 counting every token of the rendered text, symbols included.
+* **Text:** `paper/writeup.md` without its title line (the title goes in its own field): 1,467
+  words counting only words with a letter or digit, 1,486 counting every token of the rendered
+  text, symbols included.
 * **References:** the five arXiv numbers resolve to the papers named (checked against arXiv);
   Twin's sentence is quoted as its abstract has it.

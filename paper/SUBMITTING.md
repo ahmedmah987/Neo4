@@ -16,7 +16,7 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   5. the Track: "Main Track"; then "Submit" at the top right.
 * **Accuracy** is scored from the leaderboard: the writeup is matched to the ARC-AGI-3
   submission by its ID. Submissions so far: 57659417 (v1, 0.33), 57687937 (v5, 0.36),
-  57717349 (v7, 0.46), 57752153 (v8, 0.33), 57851197 (v9, 0.46), 57865735 (v10, scoring).
+  57717349 (v7, 0.46), 57752153 (v8, 0.33), 57851197 (v9, 0.46), 57865735 (v10, 0.46).
 * **The team** must be the one that submitted to ARC-AGI-3 (the account `ahmedabdalatef`).
 * **Prizes:** 1st $50,000, 2nd $20,000, 3rd $5,000; up to $375,000 more, shared equally, for
   papers scoring above 4.5 of 5. Winners' papers are licensed CC-BY 4.0.

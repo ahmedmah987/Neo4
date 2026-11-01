@@ -123,7 +123,7 @@ or 1/*L*² when *b* = 1: half the share needs (*L*−1)*b* ≤ 0.41.
 
 **The bound holds.** Over the holdout's 123 completed levels (median 6 lives), a lost life cost
 1.6*h* (median; quartiles 0.9–2.5). Lives alone rank the levels' shares with Spearman
-ρ = 0.83; with their measured cost, 0.96. The 63 levels of six lives or more earned 3% of the
+ρ = 0.83–0.84 under both hash seeds; with their measured cost, 0.96. The 63 levels of six lives or more earned 3% of the
 score, the 33 of one life 72%. It overrates mainly these: their one life, spent learning, took
 2.1 times a person's count.
 

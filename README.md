@@ -3351,6 +3351,58 @@ which on the hidden games is not common enough to move the second decimal.
 The gain is where the carried goal is right and the way to it is a chain of improvements (`vc33`,
 `tu93`). It does not make the first life win: what returns is the place, not the way to finish from it.
 
+### The bound of the paper's §6, tested: what a level is worth after *L* lives
+
+The paper argues that a level the agent completes in *L* lives, the winning one costing about a
+person's count *h* and each lost one *bh*, takes *a* ≈ *h*(1 + (*L*−1)*b*) actions and so is worth
+(1 + (*L*−1)*b*)⁻² of its share, 1/*L*² when *b* = 1. To test it, the level log now also records
+the lives each completed level took (commit `213c00a`, logging only: the Phase 72 holdout replayed
+identically, 17.61 and 123 levels under hash seed 0, 125 under hash seed 1, every run the same).
+`scripts/lives_bound.py` compares each level's actual share, min(1.15, (*h*/*a*)²), with 1/*L*²
+(lives only) and with (1 + (*L*−1)*b*)⁻² (lives and the measured cost of each lost life, the
+winning life taken as *h*).
+
+| | hash seed 0 | hash seed 1 |
+|---|---:|---:|
+| completed levels | 123 | 125 |
+| lives per level, median | 6 | 6 |
+| levels of one life / of ten or more | 33 / 53 | 33 / 55 |
+| a lost life's cost ÷ *h*, median (quartiles) | 1.61 (0.88–2.48) | 1.61 (0.90–2.55) |
+| actions spent in lost lives | 92% | 93% |
+| Spearman, actual share vs 1/*L*² | 0.83 | 0.84 |
+| Spearman, actual share vs (1 + (*L*−1)*b*)⁻² | 0.96 | 0.96 |
+| share of the holdout score from levels of one life | 72% | 72% |
+| share of the holdout score from levels of six lives or more | 2.6% | 2.4% |
+
+By lives (hash seed 0; mean share per level):
+
+| lives | levels | actual | 1/*L*² | (1 + (*L*−1)*b*)⁻² | *b*, median | winning life ÷ *h*, median |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 33 | 0.431 | 1.000 | 1.000 | — | 2.14 |
+| 2 | 13 | 0.347 | 0.250 | 0.201 | 1.71 | 0.62 |
+| 3–5 | 14 | 0.061 | 0.073 | 0.040 | 2.04 | 1.94 |
+| 6–20 | 41 | 0.006 | 0.010 | 0.006 | 1.58 | 1.00 |
+| 21 or more | 22 | 0.003 | 0.001 | 0.003 | 0.90 | 0.56 |
+
+The count of lives alone orders the levels nearly as the score does; with the measured cost of a
+lost life the order is almost exact. A lost life costs 1.6 times a person's count, not once: many
+lives run to a per-life move budget longer than the humans' count (`r11l`'s second level: 60
+against 33), so 1/*L*² is optimistic. Summed,
+the bound overrates the holdout (1.16 against 0.70) almost entirely through the 33 single-life
+levels, where the one life is also where the learning happens: it took 2.1 times a person's count.
+Half the completed levels took six lives or more and earned under 3% of the score.
+
+**The per-level formula.** The paper's introduction had the cap outside the square,
+min(1.15, *h*/*a*)²; the official scorecard (`arc_agi/scorecard.py`) caps the squared ratio,
+min(115, (*h*/*a*)² × 100), which is what `neo4.run.official_score` has always computed. The paper
+now states it as min(1.15, (*h*/*a*)²); no number changes.
+
+**On the hidden games.** Across the six submissions, the hidden score moved only with changes to
+first levels (goals read from the screen 0.33 → 0.36, tests one at a time 0.36 → 0.46, generated
+guesses 0.46 → 0.33); the two changes confined to later levels (Phases 70 and 72: eight more levels,
+then one to four more and +13% on the holdout) left it at 0.46. This suggests the hidden score
+comes from first levels completed in one life, as most of the holdout's does.
+
 ### Where the library stands
 
 | | levels (4,000 steps, 5 seeds) | official-style score |

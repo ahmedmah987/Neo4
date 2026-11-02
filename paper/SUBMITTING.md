@@ -9,7 +9,9 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   writeups but not create them. It needs:
   1. a title, a subtitle, and the text: at most 1,500 words, or it may be penalised
      (`paper/writeup.md`);
-  2. a **cover image** in the Media Gallery, required (`paper/cover.png`);
+  2. a **cover image** in the Media Gallery, required (`paper/cover.png`), and a "Card and
+     Thumbnail Image" of 560 × 280 (`paper/thumbnail.png`, from `paper/make_thumbnail.py`: the
+     cover's small text does not read at that size);
   3. the **public notebook** in the Project Links field: `ahmedabdalatef/neo4-arc-agi-3` (a
      private notebook is made public after the deadline anyway);
   4. optionally a public link to a PDF version;

@@ -63,11 +63,12 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   AHMED ABDALATEF, licence CC BY 4.0. A visitor not signed in gets a 404 until Kaggle opens the
   writeups. Read back through the API (`GetHackathonWriteUp`, and `ListHackathonWriteUps` with
   `published` set; without it the call is refused).
-* **Still to fix in it, as read back:**
-  * the title was cut at 80 characters: replace it with the 73-character title above;
-  * the text starts with the title line (`# Search is not…`): delete it and the blank line after;
-  * Project Links holds only the GitHub repository: add the notebook
-    `ahmedabdalatef/neo4-arc-agi-3`, which ties the writeup to the ARC-AGI-3 submission.
+* **Fixed, and read back through the API at 00:57 UTC:** the title (cut at 80 characters
+  first) is the 73-character one above; the text is `paper/writeup.md` without its title line,
+  identical to it, 1,475 words; Project Links hold the notebook
+  `https://www.kaggle.com/code/ahmedabdalatef/neo4-arc-agi-3` (version 10, still private) and the
+  GitHub repository; the gallery holds one image, the cover. A paste from rendered text drops the
+  Markdown (headings, tables, bold, lists): paste the raw file, e.g. from raw.githubusercontent.com.
 * **Not checkable from outside:** the gallery cover, the card and the thumbnail are served only
   to a signed-in viewer; check in the browser that the gallery shows the 16:9 `cover.png` and the
   thumbnail the blue square.

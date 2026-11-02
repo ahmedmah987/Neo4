@@ -45,7 +45,9 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   which is private: a reader gets a 404. GitHub: Settings → General → Danger Zone → Change
   visibility → Public. No secrets, tokens or credentials files are tracked (99 files checked by
   name), and nothing from other private projects.
-* **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
+* **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for (73
+  characters: Kaggle cuts titles at 80, and cut the first one, which ended ", and why", to
+  "…pays for, and w")
 * **Subtitle:** A language-model-free agent, and why a level learned in L lives is worth 1/L² of
   its score
 * **Text:** `paper/writeup.md` without its title line (the title goes in its own field): 1,475
@@ -53,3 +55,19 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   text, symbols included.
 * **References:** the five arXiv numbers resolve to the papers named (checked against arXiv);
   Twin's sentence is quoted as its abstract has it.
+
+## Submitted (2 November 2026)
+
+* **The writeup:** https://www.kaggle.com/competitions/arc-prize-2026-paper-track/writeups/search-is-not-the-bottleneck-what-a-frames-only-a
+  (hackathon writeup 91362, writeup 123019), published 2 November 00:44 UTC, Main Track, team
+  AHMED ABDALATEF, licence CC BY 4.0. A visitor not signed in gets a 404 until Kaggle opens the
+  writeups. Read back through the API (`GetHackathonWriteUp`, and `ListHackathonWriteUps` with
+  `published` set; without it the call is refused).
+* **Still to fix in it, as read back:**
+  * the title was cut at 80 characters: replace it with the 73-character title above;
+  * the text starts with the title line (`# Search is not…`): delete it and the blank line after;
+  * Project Links holds only the GitHub repository: add the notebook
+    `ahmedabdalatef/neo4-arc-agi-3`, which ties the writeup to the ARC-AGI-3 submission.
+* **Not checkable from outside:** the gallery cover, the card and the thumbnail are served only
+  to a signed-in viewer; check in the browser that the gallery shows the 16:9 `cover.png` and the
+  thumbnail the blue square.

@@ -51,3 +51,11 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   text, symbols included.
 * **References:** the five arXiv numbers resolve to the papers named (checked against arXiv);
   Twin's sentence is quoted as its abstract has it.
+
+## Status
+
+* **Writeup submitted** to the Paper Track on 2 November 2026 (by the account owner, in the
+  browser), linked to v10. Submitted writeups are not listed publicly before the deadline
+  (checked 4 November: the Writeups tab shows none).
+* **ARC-AGI-3** closed on 2 November with v7 and v10 selected; the private scores are posted
+  once the organisers verify the final leaderboard.

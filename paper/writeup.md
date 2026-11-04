@@ -1,4 +1,4 @@
-# Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
+# Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for
 
 *Code (MIT-0): https://github.com/ahmedmah987/neo4.
 Kaggle submission: ARC Prize 2026 – ARC-AGI-3, notebook `ahmedabdalatef/neo4-arc-agi-3`, version 10.*

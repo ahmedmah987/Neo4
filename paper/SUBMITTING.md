@@ -9,7 +9,9 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   writeups but not create them. It needs:
   1. a title, a subtitle, and the text: at most 1,500 words, or it may be penalised
      (`paper/writeup.md`);
-  2. a **cover image** in the Media Gallery, required (`paper/cover.png`);
+  2. a **cover image** in the Media Gallery, required (`paper/cover.png`), and a "Card and
+     Thumbnail Image" of 560 × 280 (`paper/thumbnail.png`, from `paper/make_thumbnail.py`: the
+     cover's small text does not read at that size);
   3. the **public notebook** in the Project Links field: `ahmedabdalatef/neo4-arc-agi-3` (a
      private notebook is made public after the deadline anyway);
   4. optionally a public link to a PDF version;
@@ -43,7 +45,9 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
   which is private: a reader gets a 404. GitHub: Settings → General → Danger Zone → Change
   visibility → Public. No secrets, tokens or credentials files are tracked (99 files checked by
   name), and nothing from other private projects.
-* **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for, and why
+* **Title:** Search is not the bottleneck: what a frames-only ARC-AGI-3 agent pays for (73
+  characters: Kaggle cuts titles at 80, and cut the first one, which ended ", and why", to
+  "…pays for, and w")
 * **Subtitle:** A language-model-free agent, and why a level learned in L lives is worth 1/L² of
   its score
 * **Text:** `paper/writeup.md` without its title line (the title goes in its own field): 1,475
@@ -52,10 +56,22 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
 * **References:** the five arXiv numbers resolve to the papers named (checked against arXiv);
   Twin's sentence is quoted as its abstract has it.
 
-## Status
+## Submitted (2 November 2026)
 
-* **Writeup submitted** to the Paper Track on 2 November 2026 (by the account owner, in the
-  browser), linked to v10. Submitted writeups are not listed publicly before the deadline
-  (checked 4 November: the Writeups tab shows none).
-* **ARC-AGI-3** closed on 2 November with v7 and v10 selected; the private scores are posted
-  once the organisers verify the final leaderboard.
+* **The writeup:** https://www.kaggle.com/competitions/arc-prize-2026-paper-track/writeups/search-is-not-the-bottleneck-what-a-frames-only-a
+  (hackathon writeup 91362, writeup 123019), published 2 November 00:44 UTC, Main Track, team
+  AHMED ABDALATEF, licence CC BY 4.0. A visitor not signed in gets a 404 until Kaggle opens the
+  writeups. Read back through the API (`GetHackathonWriteUp`, and `ListHackathonWriteUps` with
+  `published` set; without it the call is refused).
+* **Fixed, and read back through the API at 00:57 UTC:** the title (cut at 80 characters
+  first) is the 73-character one above; the text is `paper/writeup.md` without its title line,
+  identical to it, 1,475 words; Project Links hold the notebook
+  `https://www.kaggle.com/code/ahmedabdalatef/neo4-arc-agi-3` (version 10, still private) and the
+  GitHub repository; the gallery holds one image, the cover. A paste from rendered text drops the
+  Markdown (headings, tables, bold, lists): paste the raw file, e.g. from raw.githubusercontent.com.
+* **Not checkable from outside:** the gallery cover, the card and the thumbnail are served only
+  to a signed-in viewer; check in the browser that the gallery shows the 16:9 `cover.png` and the
+  thumbnail the blue square.
+* **ARC-AGI-3** closed on 2 November 23:59 UTC with v7 and v10 selected; the private scores are
+  posted once the organisers verify the final leaderboard. On 4 November the Paper Track's
+  Writeups tab, seen signed out, still listed no writeup, as expected before the deadline.

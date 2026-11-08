@@ -75,3 +75,8 @@ Read from the competition's own pages (Kaggle API, `get_hackathon_overview`, 26 
 * **ARC-AGI-3** closed on 2 November 23:59 UTC with v7 and v10 selected; the private scores are
   posted once the organisers verify the final leaderboard. On 4 November the Paper Track's
   Writeups tab, seen signed out, still listed no writeup, as expected before the deadline.
+* **8 November:** no private score yet (the API's `hasPrivateScore` is false for all six
+  submissions; the leaderboard page: "The private leaderboard will become available after the
+  results are verified"; winners are announced on 4 December). On the public leaderboard
+  (downloaded 8 November 01:42 UTC) the team ranks 2,966th of 4,926 with 0.46: 2,232 teams
+  score above 20 and 973 above 30, only 28 above 40 and 3 above 60 (top 75.56).
